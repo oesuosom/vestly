@@ -1,0 +1,19 @@
+import type { SVGProps } from 'react'
+
+type Props = SVGProps<SVGSVGElement> & { size?: number }
+
+export function FTNTUS({ size = 24, ...props }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" shapeRendering="geometricPrecision" {...props}>
+      <g id="FTNT.US" clipPath="url(#clip0_0_7)">
+      <rect id="Vector" width="24" height="24" fill="var(--fill-0, #F4F5F6)"/>
+      <path id="Vector_2" d="M17.863 17.2009C18.6941 16.9185 19.341 15.9614 19.4964 14.758V14.4102H15.2352V17.2012H17.8624L17.863 17.2009ZM19.497 9.29281V8.97812C19.3336 7.72234 18.6387 6.73278 17.7528 6.5003H15.2358V9.29251L19.497 9.29281ZM4.5 14.4105V14.7553C4.65431 15.9598 5.30104 16.9187 6.13461 17.2012H8.74854V14.4102L4.5 14.4105ZM6.24363 6.50241C5.35886 6.73501 4.66202 7.72506 4.5 8.98263V9.2951H8.74854V6.50289L6.24363 6.50241ZM19.5 10.457H15.2388V13.2492H19.5V10.457ZM9.91156 17.2027H14.08V14.4117H9.91156V17.2027ZM14.08 6.5H9.91156V9.29221H14.08V6.5ZM4.50361 13.2456H8.75216V10.4534H4.50361V13.2456Z" fill="var(--fill-0, #EE2E24)"/>
+      </g>
+      <defs>
+      <clipPath id="clip0_0_7">
+      <rect width="24" height="24" fill="white"/>
+      </clipPath>
+      </defs>
+    </svg>
+  )
+}

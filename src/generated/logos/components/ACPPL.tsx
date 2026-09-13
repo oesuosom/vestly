@@ -1,0 +1,19 @@
+import type { SVGProps } from 'react'
+
+type Props = SVGProps<SVGSVGElement> & { size?: number }
+
+export function ACPPL({ size = 24, ...props }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" shapeRendering="geometricPrecision" {...props}>
+      <g clipPath="url(#clip0_1163_5215)">
+      <path d="M24 0H0V24H24V0Z" fill="#F4F5F6"/>
+      <path d="M16.2033 7H7.79655C6.10839 7 5 8.12545 5 9.79656V13.7185C5 15.4067 6.12544 16.5151 7.79655 16.5151H14.5151C15.0778 16.5151 15.6405 15.9524 15.6405 15.3897V13.4287C15.6405 12.9512 15.2824 12.5931 14.822 12.5931C14.2934 12.5931 13.9694 12.9171 13.9694 13.4287V14.8269H7.79655C7.23383 14.8269 6.67111 14.2642 6.67111 13.7015V9.7795C6.67111 9.21678 7.23383 8.65406 7.79655 8.65406H16.2033C16.766 8.65406 17.3287 9.21678 17.3287 9.7795V15.6625C17.3287 16.1058 17.6697 16.498 18.1643 16.498C18.6417 16.498 18.9998 16.2252 18.9998 15.6625V9.7795C19.0169 8.12544 17.8914 7 16.2033 7Z" fill="black"/>
+      </g>
+      <defs>
+      <clipPath id="clip0_1163_5215">
+      <rect width="24" height="24" fill="white"/>
+      </clipPath>
+      </defs>
+    </svg>
+  )
+}

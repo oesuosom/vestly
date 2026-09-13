@@ -1,0 +1,306 @@
+@import url('https://fonts.googleapis.com/css2?family=TASA+Orbiter:wght@400..800&display=swap');
+
+@import "tailwindcss";
+@import "gradient-border-plugin";
+@config "../../tailwind.config.js";
+
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  /* Base */
+  --color-background:       #FAFAFA;
+  --color-surface:          #FFFFFF;
+  --color-foreground:       #09090B;
+  --color-muted:            #F4F4F5;
+  --color-foreground-muted: #52525B;
+  --color-accent:           #A1A1AA;
+  --color-border:           #E4E4E7;
+  --color-border-light:     #F4F4F5;
+  --color-input:            #D4D4D8;
+
+  /* Semantic */
+  --color-positive:            #37983A;
+  --color-positive-foreground: #E9F6E9;
+  --color-negative:            #E11D48;
+  --color-negative-foreground: #FFE4E6;
+  --color-warning:             #D87907;
+  --color-warning-foreground:  #FEF4C7;
+
+  /* Custom */
+  --color-blue:              #2067F0;
+  --color-blue-foreground:   #DAEBFF;
+  --color-green:             #37983A;
+  --color-green-foreground:  #E9F6E9;
+  --color-purple:            #5D42C7;
+  --color-purple-foreground: #E1E4FE;
+  --color-fuchsia:           #C800DE;
+  --color-fuchsia-foreground:#FAE8FF;
+  --color-lime:              #5EA500;
+  --color-lime-foreground:   #ECFCCA;
+  --color-teal:              #009689;
+  --color-teal-foreground:   #CBFBF1;
+  --color-neutral:           #525252;
+  --color-neutral-foreground:#F5F5F5;
+  --color-orange:            #F54900;
+  --color-orange-foreground: #FFEDD4;
+  --color-rose:              #E11D48;
+  --color-rose-foreground:   #FFE4E6;
+}
+
+.dark {
+  /* Base */
+  --color-background:       #09090B;
+  --color-surface:          #18181B;
+  --color-foreground:       #FAFAFA;
+  --color-muted:            #18181B;
+  --color-foreground-muted: #71717A;
+  --color-accent:           #3F3F46;
+  --color-border:           #3F3F46;
+  --color-border-light:     #27272A;
+  --color-input:            #52525B;
+
+  /* Semantic */
+  --color-positive:            #41A644;
+  --color-positive-foreground: #0D260F;
+  --color-negative:            #F43F5E;
+  --color-negative-foreground: #4C0519;
+  --color-warning:             #F39F0B;
+  --color-warning-foreground:  #451B03;
+
+  /* Custom */
+  --color-blue:              #3485FB;
+  --color-blue-foreground:   #152656;
+  --color-green:             #41A644;
+  --color-green-foreground:  #0D260F;
+  --color-purple:            #7567ED;
+  --color-purple-foreground: #251D49;
+  --color-fuchsia:           #E12AFB;
+  --color-fuchsia-foreground:#420046;
+  --color-lime:              #7CCF00;
+  --color-lime-foreground:   #192E03;
+  --color-teal:              #00BBA7;
+  --color-teal-foreground:   #022F2E;
+  --color-neutral:           #A1A1A1;
+  --color-neutral-foreground:#262626;
+  --color-orange:            #FF8904;
+  --color-orange-foreground: #441306;
+  --color-rose:              #F43F5E;
+  --color-rose-foreground:   #4C0519;
+}
+
+body {
+  margin: 0;
+  font-family: 'TASA Orbiter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+svg {
+  shape-rendering: geometricPrecision;
+}
+
+/* Fix Recharts tooltip animating from top-left corner */
+.recharts-wrapper {
+  position: relative !important;
+}
+
+/* Remove the focus outline (blue border) and text/element selection on charts */
+.recharts-responsive-container,
+.recharts-responsive-container *,
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.recharts-responsive-container:focus,
+.recharts-responsive-container *:focus,
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus,
+.recharts-responsive-container:focus-visible,
+.recharts-responsive-container *:focus-visible,
+.recharts-wrapper:focus-visible,
+.recharts-wrapper *:focus-visible,
+.recharts-surface:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* ── Slide-in panel animation (HoldingSlidePanel) ───────────────────────────── */
+:root {
+  --panel-open-dur:    400ms;
+  --panel-close-dur:   350ms;
+  --panel-translate-x: 40px;
+  --panel-blur:        2px;
+  --panel-ease:        cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.t-panel-slide {
+  transform:      translateX(var(--panel-translate-x));
+  opacity:        0;
+  filter:         blur(var(--panel-blur));
+  pointer-events: none;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity   var(--panel-close-dur) var(--panel-ease),
+    filter    var(--panel-close-dur) var(--panel-ease);
+  will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+  transform:      translateX(0);
+  opacity:        1;
+  filter:         blur(0);
+  pointer-events: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity   var(--panel-open-dur) var(--panel-ease),
+    filter    var(--panel-open-dur) var(--panel-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-panel-slide { transition: none !important; }
+}
+
+/* ── Slide-up dialog animation (Modal, SettingsDialog) ──────────────────────── */
+:root {
+  --dialog-translate-y: 12px;
+}
+
+.t-dialog-slide {
+  transform:      translateY(var(--dialog-translate-y));
+  opacity:        0;
+  filter:         blur(var(--panel-blur));
+  pointer-events: none;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity   var(--panel-close-dur) var(--panel-ease),
+    filter    var(--panel-close-dur) var(--panel-ease);
+  will-change: transform, opacity, filter;
+}
+.t-dialog-slide[data-open="true"] {
+  transform:      translateY(0);
+  opacity:        1;
+  filter:         blur(0);
+  pointer-events: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity   var(--panel-open-dur) var(--panel-ease),
+    filter    var(--panel-open-dur) var(--panel-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-dialog-slide { transition: none !important; }
+}
+
+/* ── Icon swap animation ────────────────────────────────────────────────────── */
+:root {
+  --icon-swap-dur:         200ms;
+  --icon-swap-blur:        2px;
+  --icon-swap-start-scale: 0.25;
+  --icon-swap-ease:        ease-in-out;
+}
+
+.t-icon-swap {
+  position: relative;
+  display: inline-grid;
+}
+.t-icon-swap .t-icon {
+  grid-area: 1 / 1;
+  transition:
+    opacity   var(--icon-swap-dur) var(--icon-swap-ease),
+    filter    var(--icon-swap-dur) var(--icon-swap-ease),
+    transform var(--icon-swap-dur) var(--icon-swap-ease);
+  will-change: opacity, filter, transform;
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="a"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="b"] {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+}
+.t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
+.t-icon-swap[data-state="b"] .t-icon[data-icon="a"] {
+  opacity: 0;
+  filter: blur(var(--icon-swap-blur));
+  transform: scale(var(--icon-swap-start-scale));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-icon-swap .t-icon { transition: none !important; }
+}
+
+/* ── Account preview: gradient + icon swap ──────────────────────────────────── */
+/* Registered so the gradient colour can interpolate when the account type changes. */
+@property --modal-accent {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: transparent;
+}
+
+.t-modal-accent {
+  transition: --modal-accent var(--panel-open-dur, 350ms) var(--panel-ease, ease);
+}
+
+@keyframes account-icon-swap-in {
+  from { opacity: 0; filter: blur(var(--icon-swap-blur)); transform: scale(0.8); }
+  to   { opacity: 1; filter: blur(0);                     transform: scale(1); }
+}
+.account-icon-swap-in {
+  animation: account-icon-swap-in var(--icon-swap-dur) var(--icon-swap-ease);
+}
+
+/* Badge: smooth colour tween (type change) + transform pulse (name keystroke). */
+.account-icon-badge {
+  transition:
+    background-color 300ms ease-out,
+    color            300ms ease-out,
+    transform        200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-modal-accent { transition: none !important; }
+  .account-icon-swap-in { animation: none !important; }
+  .account-icon-badge { transition: none !important; }
+}
+
+/* ── Spinner (Geist load-more style: radial fading bars) ─────────────────────── */
+@keyframes t-spinner-fade {
+  0%   { opacity: 1; }
+  100% { opacity: 0.15; }
+}
+.t-spinner-bar {
+  animation: t-spinner-fade 1.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-spinner-bar { animation-duration: 2.4s; }
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+

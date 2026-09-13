@@ -1,0 +1,38 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment variables
+.env
+.env.*
+
+# AI tooling — local session config (machine paths, permission lists)
+.claude/
+
+# Personal broker exports — never commit real financial data
+# (covers all supported import formats: XTB/PKO/eMakler CSVs, Revolut PDFs, XLSX)
+*.csv
+*.xlsx
+*.xls
+*.pdf
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

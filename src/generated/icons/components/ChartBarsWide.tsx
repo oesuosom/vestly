@@ -1,0 +1,11 @@
+import type { SVGProps } from 'react'
+
+type Props = SVGProps<SVGSVGElement> & { size?: number }
+
+export function ChartBarsWide({ size = 20, ...props }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" {...props}>
+      <path d="M9.25 20.25V13.75H5.25C4.42157 13.75 3.75 14.4216 3.75 15.25V18.75C3.75 19.5784 4.42157 20.25 5.25 20.25H9.25ZM9.25 20.25H14.75M9.25 20.25V5.25C9.25 4.42157 9.92157 3.75 10.75 3.75H13.25C14.0784 3.75 14.75 4.42157 14.75 5.25V20.25M14.75 20.25H18.75C19.5784 20.25 20.25 19.5784 20.25 18.75V10.25C20.25 9.42157 19.5784 8.75 18.75 8.75H14.75V20.25Z" stroke="currentColor" strokeWidth="1.75" strokeLinecap="square" strokeLinejoin="round"/>
+    </svg>
+  )
+}
