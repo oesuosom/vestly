@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, type ButtonVariant } from '@/components/ui/Button'
 import { Cross } from '@/generated/icons'
+import { useEnterExit } from '@/hooks/useEnterExit'
 
 type ToastProps = {
   isOpen: boolean
@@ -21,7 +22,17 @@ export function Toast({
   action,
   duration = 5000,
 }: ToastProps) {
-  const [visible, setVisible] = useState(false)
+  // The toast unmounts as soon as `isOpen` turns off, so its slide-out plays
+  // *before* that: dismissing sets `leaving`, and onClose fires 200ms later.
+  const { open: entered } = useEnterExit(isOpen)
+  const [leaving, setLeaving] = useState(false)
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen)
+    if (isOpen) setLeaving(false) // re-opened: a fresh toast slides in again
+  }
+  const visible = entered && !leaving
+
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hoveredRef = useRef(false)
 
@@ -29,7 +40,7 @@ export function Toast({
     if (timerRef.current) clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       if (!hoveredRef.current) {
-        setVisible(false)
+        setLeaving(true)
         setTimeout(onClose, 200) // wait for slide-out
       }
     }, duration)
@@ -42,16 +53,10 @@ export function Toast({
     }
   }, [])
 
-  // Open animation
+  // Auto-dismiss timer
   useEffect(() => {
-    if (isOpen) {
-      // Small delay to trigger CSS transition
-      requestAnimationFrame(() => setVisible(true))
-      startTimer()
-    } else {
-      setVisible(false)
-      clearTimer()
-    }
+    if (isOpen) startTimer()
+    else clearTimer()
     return clearTimer
   }, [isOpen, startTimer, clearTimer])
 
@@ -68,20 +73,20 @@ export function Toast({
   function handleUndo() {
     clearTimer()
     onUndo?.()
-    setVisible(false)
+    setLeaving(true)
     setTimeout(onClose, 200)
   }
 
   function handleAction() {
     clearTimer()
     action?.onClick()
-    setVisible(false)
+    setLeaving(true)
     setTimeout(onClose, 200)
   }
 
   function handleClose() {
     clearTimer()
-    setVisible(false)
+    setLeaving(true)
     setTimeout(onClose, 200)
   }
 

@@ -8,6 +8,7 @@ import { PortfolioSettingsPage } from '@/features/settings/PortfolioSettingsPage
 import { AiProvidersSettingsPage } from '@/features/settings/AiProvidersSettingsPage'
 import { DataManagementSettingsPage } from '@/features/settings/DataManagementSettingsPage'
 import { MarketDataSettingsPage } from '@/features/settings/MarketDataSettingsPage'
+import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
 
 type SettingsDialogProps = {
@@ -16,18 +17,11 @@ type SettingsDialogProps = {
 }
 
 function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const [open, setOpen] = useState(false)
+  // Always rendered (the backdrop fades on `isOpen`), so only `open` is used.
+  const { open } = useEnterExit(isOpen)
   const [activePage, setActivePage] = useState<SettingsPage>('account')
 
   useScrollLock(isOpen)
-
-  useEffect(() => {
-    if (isOpen) {
-      const id = requestAnimationFrame(() => setOpen(true))
-      return () => cancelAnimationFrame(id)
-    }
-    setOpen(false)
-  }, [isOpen])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
