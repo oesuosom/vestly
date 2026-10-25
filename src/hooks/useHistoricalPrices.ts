@@ -3,16 +3,17 @@ import { differenceInDays, parseISO } from 'date-fns'
 import type { Account, HistoricalPricesCache } from '@/types'
 import { buildHistoricalPricesCache } from '@/services/market-data/yahooHistorical'
 import {
+  HISTORICAL_PRICES_STORAGE_KEY,
   HISTORICAL_PRICES_UPDATED_EVENT,
   isHistoricalCacheFresh,
   loadHistoricalPricesCache,
   saveHistoricalPricesCache,
 } from '@/storage/historicalPriceStorage'
 
+// No loading/error state: no consumer shows either (a failed rebuild keeps the
+// previous cache and logs), and setting them when a fetch starts only cost a render.
 type UseHistoricalPricesResult = {
   historicalPrices: HistoricalPricesCache | null
-  isLoading: boolean
-  error: string | null
 }
 
 // A fetched series may legitimately lag a few days behind today (weekends, holidays — the
@@ -55,8 +56,6 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
   const [historicalPrices, setHistoricalPrices] = useState<HistoricalPricesCache | null>(() =>
     loadHistoricalPricesCache()
   )
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   // Guard: prevent concurrent fetches (e.g. rapid accounts updates mid-fetch)
   const isFetchingRef = useRef(false)
@@ -91,14 +90,11 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
 
     const shouldRebuild = cacheIsStale || !cacheCoversAll || cacheIsFromPreviousDay || cacheIsBehind
 
-    if (!shouldRebuild) {
-      if (cache && !historicalPrices) setHistoricalPrices(cache)
-      return
-    }
+    // No rebuild: state already matches the cache — it's initialised from it,
+    // and every later write is picked up by the listeners below.
+    if (!shouldRebuild) return
 
     isFetchingRef.current = true
-    setIsLoading(true)
-    setError(null)
 
     // Pass the existing cache unless it's fully stale (7+ days) — buildHistoricalPricesCache
     // will extend stocks/ETFs with today's price point and re-interpolate bonds cheaply,
@@ -113,25 +109,31 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
       .catch((err) => {
         const msg = err instanceof Error ? err.message : 'Failed to fetch historical prices'
         console.error('[HistoricalPrices]', msg)
-        setError('Historical price data unavailable.')
         if (cache) setHistoricalPrices(cache)
       })
       .finally(() => {
         isFetchingRef.current = false
-        setIsLoading(false)
       })
   }, [holdingIds, coinGeckoApiKey, eodhdApiKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pick up cache writes made elsewhere in the tree (e.g. the "Rebuild" button in the
-  // settings overlay, which stays mounted alongside this hook) without a page reload.
+  // settings overlay, which stays mounted alongside this hook) without a page reload,
+  // and writes from other tabs, which only announce themselves via the `storage` event.
   useEffect(() => {
     const onUpdate = () => {
       const fresh = loadHistoricalPricesCache()
       if (fresh) setHistoricalPrices(fresh)
     }
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === HISTORICAL_PRICES_STORAGE_KEY) onUpdate()
+    }
     window.addEventListener(HISTORICAL_PRICES_UPDATED_EVENT, onUpdate)
-    return () => window.removeEventListener(HISTORICAL_PRICES_UPDATED_EVENT, onUpdate)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener(HISTORICAL_PRICES_UPDATED_EVENT, onUpdate)
+      window.removeEventListener('storage', onStorage)
+    }
   }, [])
 
-  return { historicalPrices, isLoading, error }
+  return { historicalPrices }
 }

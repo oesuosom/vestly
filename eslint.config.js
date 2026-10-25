@@ -57,27 +57,6 @@ export default defineConfig([
   },
 
   {
-    // (b) Prop-derived state resets — a different problem that trips the same
-    // rule, kept separate so (a)'s rationale isn't stretched to cover it.
-    // Activity/Portfolio reset their filter-panel position and view when the
-    // panel opens; Calendar derives a preset from `selected`; XTBReconcileSteps
-    // clears six fields when `rows` changes. The real fixes differ per file
-    // (derive during render, or remount via `key`), so they're deferred rather
-    // than papered over with one shared excuse.
-    files: [
-      'src/components/ui/Calendar.tsx',
-      'src/features/import/EMaklerImportFlow.tsx',
-      'src/features/import/XTBReconcileSteps.tsx',
-      'src/hooks/useHistoricalPrices.ts',
-      'src/pages/Activity.tsx',
-      'src/pages/Portfolio.tsx',
-    ],
-    rules: {
-      'react-hooks/set-state-in-effect': 'off',
-    },
-  },
-
-  {
     // Context modules intentionally export their provider component alongside
     // the `useX()` consumer hook — splitting them would scatter one concept
     // across two files for a Fast Refresh nicety that only costs a reload of

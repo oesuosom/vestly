@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { DayPicker, useDayPicker } from 'react-day-picker'
 import type {
   DateRange,
@@ -204,10 +204,13 @@ export function Calendar(props: CalendarProps) {
 
   const [activePreset, setActivePreset] = useState<Preset>('allTime')
 
-  // When selection clears externally, revert panel to "All time"
-  useEffect(() => {
+  // When selection clears externally, revert panel to "All time". Only on a
+  // *change* to empty — "Custom" deliberately sits with nothing selected.
+  const [prevSelected, setPrevSelected] = useState(selected)
+  if (selected !== prevSelected) {
+    setPrevSelected(selected)
     if (!selected) setActivePreset('allTime')
-  }, [selected])
+  }
 
   function handlePresetClick(preset: Preset) {
     setActivePreset(preset)
