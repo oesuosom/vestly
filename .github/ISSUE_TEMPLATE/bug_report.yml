@@ -1,0 +1,88 @@
+name: Bug report
+description: Something in Vestly isn't working as expected
+title: "fix: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **This repository is public.** Don't paste real portfolio values or account
+        > numbers, and don't attach broker export files (CSV / XLSX / PDF).
+        > Redact screenshots or use made-up numbers.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem. A redacted screenshot helps.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to Portfolio
+        2. Click …
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where in the app?
+      options:
+        - Overview
+        - Portfolio
+        - Activity
+        - Account detail
+        - Import
+        - Settings
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: import-format
+    attributes:
+      label: Import format (if it's an import problem)
+      options:
+        - Not import-related
+        - PKO IKE (Treasury Bonds)
+        - XTB Portfolio
+        - XTB Cash Operations
+        - XTB Daily Confirmation
+        - eMakler Portfolio
+        - eMakler Order History
+        - Revolut Crypto
+        - Revolut BTC Transfer
+        - CSV / Spreadsheet
+      default: 0
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options: [Chrome, Safari, Firefox, Edge, Other]
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: From package.json or `git log -1 --oneline`, if you know it.
+      placeholder: "0.0.1"
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: Browser DevTools → Console. Paste any red errors (check them for personal data first).
+      render: shell
