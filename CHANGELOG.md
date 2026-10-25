@@ -5,6 +5,14 @@ All notable changes to Vestly are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Market Data settings** — "Update" and "Rebuild" no longer fail silently. When prices or
+  quote history can't be fetched (offline, bad API key, provider down), a toast says so, with
+  a Retry button; partial failures report how many holdings were affected.
+
 ## [0.0.1] — 2026-09-13
 
 First tagged release. Everything runs client-side; no backend, no sign-up, no telemetry.

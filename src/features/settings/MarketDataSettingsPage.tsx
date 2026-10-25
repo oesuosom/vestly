@@ -5,6 +5,7 @@ import nbpIcon from '@/assets/providers/narodowy-bank-polski.png'
 import coinGeckoIcon from '@/assets/providers/coin-gecko.png'
 import { Synchronize, ChevronTopSmall, Eye, Loader, Nut } from '@/generated/icons'
 import { Button } from '@/components/ui/Button'
+import { Toast } from '@/components/ui/Toast'
 
 /** Spinning variant of the Synchronize icon, for Button's `icon` prop while a refresh runs. */
 function SynchronizeSpinning({ size, className }: { size?: number; className?: string }) {
@@ -111,6 +112,10 @@ function ApiKeyRow({ savedKey, onSave, isLast }: ApiKeyRowProps) {
   )
 }
 
+// Empty histories are re-fetched on every portfolio load, so a failed rebuild
+// does heal itself — but say so rather than stopping the spinner as if it worked.
+const REBUILD_FAILED = "Couldn't rebuild quote history. It will retry on the next portfolio load."
+
 export function MarketDataSettingsPage() {
   const settings = useSettings()
   const {
@@ -131,6 +136,11 @@ export function MarketDataSettingsPage() {
   const [expandedProviders, setExpandedProviders] = useState<Set<'eodhd' | 'coingecko'>>(new Set())
   const [isUpdating, setIsUpdating] = useState(false)
   const [isRebuilding, setIsRebuilding] = useState(false)
+  // Failure feedback. `retry` is absent when retrying can't help (e.g. no
+  // eligible holdings). The Toast portals above the dialog (z-toast > z-dialog),
+  // and React events from the portal still bubble through the dialog's
+  // stopPropagation, so clicking it doesn't close Settings.
+  const [failure, setFailure] = useState<{ message: string; retry?: () => void } | null>(null)
 
   function toggleExpand(provider: 'eodhd' | 'coingecko') {
     setExpandedProviders((prev) => {
@@ -143,13 +153,36 @@ export function MarketDataSettingsPage() {
 
   async function handleUpdate() {
     setIsUpdating(true)
+    setFailure(null)
     try {
       const result = await fetchAllPrices(accounts, settings, { forceRefresh: true })
       if (result.updatedAccounts) {
         replaceAccounts(result.updatedAccounts)
+        // Network and provider errors don't throw — they come back per ticker
+        // as `results[].error`, with that holding's price left unchanged.
+        const failed = result.results.filter((r) => r.error).length
+        const total = result.results.length
+        if (failed === total) {
+          setFailure({
+            message: "Couldn't update prices. Check your connection and API key.",
+            retry: handleUpdate,
+          })
+        } else if (failed > 0) {
+          setFailure({
+            message: `Updated ${total - failed} of ${total} prices. ${failed} couldn't be fetched.`,
+            retry: handleUpdate,
+          })
+        }
+      } else if (result.warnings.length > 0) {
+        // fetchAllPrices returns early with a warning instead of throwing when
+        // there's nothing it can fetch (unknown provider, no eligible holdings).
+        setFailure({ message: result.warnings[0] })
       }
     } catch {
-      // no error UI defined for this screen
+      setFailure({
+        message: "Couldn't update prices. Check your connection and API key.",
+        retry: handleUpdate,
+      })
     } finally {
       setIsUpdating(false)
     }
@@ -157,6 +190,7 @@ export function MarketDataSettingsPage() {
 
   async function handleRebuild() {
     setIsRebuilding(true)
+    setFailure(null)
     try {
       clearHistoricalPricesCache()
       const newCache = await buildHistoricalPricesCache(
@@ -166,8 +200,27 @@ export function MarketDataSettingsPage() {
         priceProvider.apiKey,
       )
       saveHistoricalPricesCache(newCache)
+
+      // Fetch errors don't throw either — a holding whose history couldn't be
+      // fetched comes back with an empty series. Only holdings with a ticker
+      // (or crypto) are fetched; the rest are interpolated and can't fail.
+      const fetched = accounts
+        .flatMap((a) => a.holdings)
+        .filter((h) => (h.ticker && h.exchange) || h.category === 'crypto')
+      const filled = new Set(
+        newCache.histories.filter((h) => h.prices.length > 0).map((h) => h.holdingId),
+      )
+      const missing = fetched.filter((h) => !filled.has(h.id)).length
+      if (missing > 0 && missing === fetched.length) {
+        setFailure({ message: REBUILD_FAILED, retry: handleRebuild })
+      } else if (missing > 0) {
+        setFailure({
+          message: `Rebuilt history for ${fetched.length - missing} of ${fetched.length} holdings. ${missing} couldn't be fetched.`,
+          retry: handleRebuild,
+        })
+      }
     } catch {
-      // silently fail — rebuild will retry on next portfolio load
+      setFailure({ message: REBUILD_FAILED, retry: handleRebuild })
     } finally {
       setIsRebuilding(false)
     }
@@ -294,6 +347,15 @@ export function MarketDataSettingsPage() {
           </div>
         </div>
       </div>
+
+      <Toast
+        isOpen={failure !== null}
+        // Toast calls onClose 200ms after Retry; if the retry has already failed
+        // again by then, keep the newer failure instead of clearing it.
+        onClose={() => setFailure((f) => (f === failure ? null : f))}
+        message={failure?.message ?? ''}
+        action={failure?.retry && { label: 'Retry', onClick: failure.retry, variant: 'ghost' }}
+      />
     </div>
   )
 }

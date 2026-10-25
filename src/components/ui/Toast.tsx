@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Button } from '@/components/ui/Button'
+import { Button, type ButtonVariant } from '@/components/ui/Button'
 import { Cross } from '@/generated/icons'
 
 type ToastProps = {
@@ -8,8 +8,8 @@ type ToastProps = {
   onClose: () => void
   message: string
   onUndo?: () => void
-  /** Optional secondary action button rendered alongside Undo. */
-  action?: { label: string; onClick: () => void }
+  /** Optional secondary action button rendered alongside Undo. Defaults to the destructive variant. */
+  action?: { label: string; onClick: () => void; variant?: ButtonVariant }
   duration?: number
 }
 
@@ -108,7 +108,7 @@ export function Toast({
           <Button variant="ghost" onClick={handleUndo}>Undo</Button>
         )}
         {action && (
-          <Button variant="destructive" onClick={handleAction}>{action.label}</Button>
+          <Button variant={action.variant ?? 'destructive'} onClick={handleAction}>{action.label}</Button>
         )}
         <Button variant="ghost" icon={Cross} iconPosition="only" onClick={handleClose} />
       </div>
