@@ -72,6 +72,22 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Stable third-party code in its own chunks, so an app-only change
+        // doesn't make returning visitors re-download it. The object form pulls
+        // each entry's dependencies in with it (recharts → d3, redux toolkit…),
+        // except those already claimed by an earlier chunk (react).
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-dom/client', 'react-router-dom'],
+          charts: ['recharts'],
+          motion: ['framer-motion'],
+          'web3icons-meta': ['@web3icons/common'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'node',
     alias: {

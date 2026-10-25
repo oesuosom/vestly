@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster repeat visits after an update** — React, Recharts, framer-motion and the web3icons
+  metadata now ship as separate vendor chunks, so an app update no longer re-downloads them.
+  Main bundle 1.90 MB → 761 KB (589 → 238 KB gzip).
+
 ### Fixed
 
 - **Market Data settings** — "Update" and "Rebuild" no longer fail silently. When prices or
