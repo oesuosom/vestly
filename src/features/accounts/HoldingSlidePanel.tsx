@@ -19,6 +19,7 @@ import { readCloseDuration } from '@/components/ui/panelTiming'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { HoldingForm } from './HoldingForm'
 import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
+import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
 
 // ─────────────────────────────────────────
@@ -121,26 +122,16 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
   const [editOpen, setEditOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [priceStatus, setPriceStatus] = useState<'idle' | 'fetching' | 'ok' | 'no-provider' | 'error'>('idle')
-  const [open, setOpen] = useState(false)
-  // Track the scroll lock separately from `isOpen`: it must be held through the
-  // close animation. Releasing it on `isOpen=false` lets the page scrollbar
-  // reappear immediately, which shifts this `fixed right-0` panel left by the
-  // scrollbar width (fixed overlays ignore the body's padding compensation),
-  // producing a visible "jump left" before the panel slides out.
-  const [locked, setLocked] = useState(false)
+  // The panel is always rendered; `mounted` is used only as the scroll lock,
+  // which must be held through the close animation. Releasing it on
+  // `isOpen=false` lets the page scrollbar reappear immediately, which shifts
+  // this `fixed right-0` panel left by the scrollbar width (fixed overlays
+  // ignore the body's padding compensation), producing a visible "jump left"
+  // before the panel slides out.
+  const [closeMs] = useState(readCloseDuration)
+  const { mounted: locked, open } = useEnterExit(isOpen, closeMs)
 
   useScrollLock(locked)
-
-  useEffect(() => {
-    if (isOpen) {
-      setLocked(true)
-      const id = requestAnimationFrame(() => setOpen(true))
-      return () => cancelAnimationFrame(id)
-    }
-    setOpen(false)
-    const id = setTimeout(() => setLocked(false), readCloseDuration())
-    return () => clearTimeout(id)
-  }, [isOpen])
 
   // Close on Escape
   useEffect(() => {
@@ -151,18 +142,23 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
     return () => document.removeEventListener('keydown', onKey)
   }, [isOpen, onClose])
 
-  // Reset sub-modals and price status when panel closes or holding changes
-  useEffect(() => {
+  // Reset sub-modals and price status when the panel closes or the holding
+  // changes — adjusted during render, same "store previous value" pattern as
+  // `holding` below, rather than in an effect that renders stale state first.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen)
     if (!isOpen) {
       setEditOpen(false)
       setDeleteConfirmOpen(false)
       setPriceStatus('idle')
     }
-  }, [isOpen])
-
-  useEffect(() => {
+  }
+  const [prevHoldingId, setPrevHoldingId] = useState(holdingProp?.id)
+  if (holdingProp?.id !== prevHoldingId) {
+    setPrevHoldingId(holdingProp?.id)
     setPriceStatus('idle')
-  }, [holdingProp?.id])
+  }
 
   // Keep the last non-null holding so panel content stays rendered during the
   // CSS close transition (holdingProp clears at the same time isOpen → false).
