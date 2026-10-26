@@ -225,21 +225,27 @@ function PortfolioFilterPanel({
   accountFilter, onAccountChange, accountOptions,
 }: PortfolioFilterPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const [view, setView] = useState<FilterView>('root')
   const [search, setSearch] = useState('')
 
-  useEffect(() => {
-    if (open && anchorEl) {
-      const r = anchorEl.getBoundingClientRect()
-      setPos({ top: r.bottom + 8, left: r.right - 176 })
-      setView(initialView ?? 'root')
-    }
+  // Reset the view when the panel opens (or is re-aimed while open), and the
+  // search when it closes — adjusted during render, so a reopened panel never
+  // paints a frame of its previous view.
+  const [prevInputs, setPrevInputs] = useState({ open, anchorEl, initialView })
+  if (open !== prevInputs.open || anchorEl !== prevInputs.anchorEl || initialView !== prevInputs.initialView) {
+    setPrevInputs({ open, anchorEl, initialView })
+    if (open && anchorEl) setView(initialView ?? 'root')
     if (!open) {
       setView('root')
       setSearch('')
     }
-  }, [open, anchorEl, initialView])
+  }
+
+  // Anchored under the trigger button. Measured while rendering the open panel
+  // (the anchor is already on screen) rather than stored from an effect, which
+  // painted one frame at the previous open's position first.
+  const anchorRect = open ? anchorEl?.getBoundingClientRect() : undefined
+  const pos = anchorRect ? { top: anchorRect.bottom + 8, left: anchorRect.right - 176 } : null
 
   useEffect(() => {
     if (!open) return

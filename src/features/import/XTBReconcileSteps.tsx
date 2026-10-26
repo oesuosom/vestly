@@ -14,7 +14,7 @@
  * drive the hook identically, so the reconciliation stays consistent no matter
  * which document the transactions came from.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
@@ -92,14 +92,18 @@ export function UnmatchedStep({
     () => new Map(),
   )
 
-  useEffect(() => {
+  // New rows → start the selections over, adjusted during render so the stale
+  // selections are never rendered against the new rows.
+  const [prevInputs, setPrevInputs] = useState({ rows, unresolvedRows })
+  if (rows !== prevInputs.rows || unresolvedRows !== prevInputs.unresolvedRows) {
+    setPrevInputs({ rows, unresolvedRows })
     setCheckedTickers(new Set(rows.map((r) => r.ticker)))
     setCheckedInstruments(new Set(unresolvedRows.map((r) => r.instrument)))
     setTickerOverrides(new Map())
     setExchangeOverrides(new Map())
     setMatchedCategories(new Map(rows.filter((r) => r.suggestedCategory).map((r) => [r.ticker, r.suggestedCategory!])))
     setUnresolvedCategories(new Map())
-  }, [rows, unresolvedRows])
+  }
 
   function toggleTicker(ticker: string) {
     setCheckedTickers((prev) => {

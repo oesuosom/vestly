@@ -4,7 +4,7 @@
  * The upload step, file detection, and Modal wrapper are handled by
  * UnifiedImportModal.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import {
@@ -25,7 +25,7 @@ import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
-import type { Holding, Transaction } from '@/types'
+import type { Holding, Settings, Transaction } from '@/types'
 import { CircleInfo } from '@/generated/icons'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { buildSyncSummary } from './doneSummary'
@@ -90,6 +90,52 @@ const PREVIEW_COLUMNS: { label: string; width: number; align?: 'right' }[] = [
 ]
 const PREVIEW_TABLE_WIDTH = PREVIEW_COLUMNS.reduce((sum, c) => sum + c.width, 0)
 
+type ProcessOutcome =
+  | { error: string }
+  | { result: EMaklerImportResult; orderRows: EMaklerOrderRow[]; ordersOnlyMode: boolean }
+
+/** Parses the selected files and builds the import. Never rejects — failures come back as `{ error }`. */
+async function processEMaklerFiles(
+  files: EMaklerImportFlowProps['files'],
+  settings: Settings,
+  forceFresh: boolean,
+): Promise<ProcessOutcome> {
+  try {
+    const portfolioFile = files.find((f) => f.type === 'portfolio')?.file
+    const orderFile = files.find((f) => f.type === 'order_history')?.file
+
+    let portfolioRows: EMaklerPortfolioRow[] = []
+    let orderRows: EMaklerOrderRow[] = []
+
+    if (portfolioFile) {
+      portfolioRows = await parseEMaklerPortfolio(portfolioFile)
+    }
+    if (orderFile) {
+      orderRows = await parseEMaklerOrderHistory(orderFile)
+    }
+
+    if (portfolioRows.length === 0 && orderRows.length === 0) {
+      return { error: 'No data could be parsed from the selected files. Please check the files and try again.' }
+    }
+
+    const existingKeys = forceFresh ? new Set<string>() : loadEMaklerOrderKeys()
+    const result = await buildEMaklerImport(portfolioRows, orderRows, existingKeys, settings)
+    return { result, orderRows, ordersOnlyMode: portfolioRows.length === 0 && orderRows.length > 0 }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'An unexpected error occurred during processing.' }
+  }
+}
+
+/** Pre-populate ticker inputs from the static instrument lookup, keyed by holding index. */
+function initialTickerInputs(result: EMaklerImportResult): Record<number, string> {
+  const initial: Record<number, string> = {}
+  result.holdings.forEach((h, i) => {
+    const resolved = staticLookupInstrument(h.name)
+    if (resolved?.ticker) initial[i] = resolved.ticker
+  })
+  return initial
+}
+
 // ─────────────────────────────────────────
 // Component
 // ─────────────────────────────────────────
@@ -118,7 +164,9 @@ export function EMaklerImportFlow({
   // Per-row overrides
   const [categoryOverrides, setCategoryOverrides] = useState<Record<number, 'stock' | 'etf'>>({})
   const [purchasePriceInputs, setPurchasePriceInputs] = useState<Record<number, string>>({})
-  const [tickerInputs, setTickerInputs] = useState<Record<number, string>>({})
+  const [tickerInputs, setTickerInputs] = useState<Record<number, string>>(() =>
+    devSeed?.state?.importResult ? initialTickerInputs(devSeed.state.importResult) : {},
+  )
 
   // Done
   const [doneStats, setDoneStats] = useState(devSeed?.state?.doneStats ?? { updated: 0, added: 0, removed: 0 })
@@ -130,57 +178,31 @@ export function EMaklerImportFlow({
 
   // ─── Processing ────────────────────────
 
-  const handleProcess = useCallback(async (forceFresh = false) => {
+  // Applies a processing outcome. Only ever called from a promise callback, so
+  // the mount effect below never sets state synchronously.
+  function applyProcessed(outcome: ProcessOutcome) {
+    if ('error' in outcome) {
+      setProcessingError(outcome.error)
+      return
+    }
+    setAllOrderRows(outcome.orderRows)
+    setOrdersOnlyMode(outcome.ordersOnlyMode)
+    setImportResult(outcome.result)
+    setTickerInputs(initialTickerInputs(outcome.result))
+    setStep('preview')
+  }
+
+  function handleReimport() {
     setStep('processing')
     setProcessingError(null)
-
-    try {
-      const portfolioFile = files.find((f) => f.type === 'portfolio')?.file
-      const orderFile = files.find((f) => f.type === 'order_history')?.file
-
-      let portfolioRows: EMaklerPortfolioRow[] = []
-      let orderRows: EMaklerOrderRow[] = []
-
-      if (portfolioFile) {
-        portfolioRows = await parseEMaklerPortfolio(portfolioFile)
-      }
-      if (orderFile) {
-        orderRows = await parseEMaklerOrderHistory(orderFile)
-      }
-
-      if (portfolioRows.length === 0 && orderRows.length === 0) {
-        setProcessingError('No data could be parsed from the selected files. Please check the files and try again.')
-        return
-      }
-
-      setAllOrderRows(orderRows)
-      setOrdersOnlyMode(portfolioRows.length === 0 && orderRows.length > 0)
-
-      const existingKeys = forceFresh ? new Set<string>() : loadEMaklerOrderKeys()
-      const result = await buildEMaklerImport(portfolioRows, orderRows, existingKeys, settings)
-      setImportResult(result)
-      setStep('preview')
-    } catch (err) {
-      setProcessingError(err instanceof Error ? err.message : 'An unexpected error occurred during processing.')
-    }
-  }, [files, settings])
+    void processEMaklerFiles(files, settings, true).then(applyProcessed)
+  }
 
   // Auto-process on mount
   useEffect(() => {
     if (devSeed) return // dev showcase: state is pre-seeded, skip parsing
-    void handleProcess()
+    void processEMaklerFiles(files, settings, false).then(applyProcessed)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Pre-populate ticker inputs from static lookup when import result arrives
-  useEffect(() => {
-    if (!importResult) return
-    const initial: Record<number, string> = {}
-    importResult.holdings.forEach((h, i) => {
-      const resolved = staticLookupInstrument(h.name)
-      if (resolved?.ticker) initial[i] = resolved.ticker
-    })
-    setTickerInputs(initial)
-  }, [importResult])
 
   // ─── Preview rows (sync against existing) ─────────
 
@@ -549,7 +571,7 @@ export function EMaklerImportFlow({
         <div className="border-t border-borderLight p-5 flex items-center gap-2">
           <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{footerCounter}</p>
           {importResult.duplicatesSkipped > 0 && (
-            <Button variant="secondary" onClick={() => void handleProcess(true)}>Reimport All</Button>
+            <Button variant="secondary" onClick={handleReimport}>Reimport All</Button>
           )}
           <Button variant="secondary" onClick={onBack} className="w-20">Back</Button>
           <Button variant="primary" onClick={handleConfirm} disabled={previewRows.length === 0}>
