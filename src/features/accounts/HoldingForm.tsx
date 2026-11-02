@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/Input'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Button } from '@/components/ui/Button'
 import { Calendar } from '@/generated/icons'
+import { exchangeOptions } from '@/domain/exchanges'
 import type { AssetCategory } from '@/types'
 
 type HoldingFormValues = {
@@ -31,14 +32,12 @@ const CATEGORY_OPTIONS = [
   { value: 'cash', label: 'Cash' },
 ]
 
-const EXCHANGE_OPTIONS = [
-  { value: '', label: 'None' },
-  { value: 'US', label: 'US (NYSE / NASDAQ)' },
-  { value: 'PL', label: 'PL (Warsaw / GPW)' },
-  { value: 'UK', label: 'UK (London / LSE)' },
-  { value: 'XETRA', label: 'XETRA (Frankfurt)' },
-  { value: 'Other', label: 'Other' },
-]
+const EXCHANGE_OPTIONS = exchangeOptions({
+  US: 'US (NYSE / NASDAQ)',
+  PL: 'PL (Warsaw / GPW)',
+  UK: 'UK (London / LSE)',
+  XETRA: 'XETRA (Frankfurt)',
+}, 'None')
 
 /**
  * HoldingForm — Add/Edit Holding form.

@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
+import { exchangeOptions } from '@/domain/exchanges'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
 import {
   applyMapping,
@@ -99,14 +100,12 @@ const MAPPING_FIELDS: { key: keyof ColumnMapping; label: string; required: boole
   { key: 'purchaseDate', label: 'Purchase Date', required: false },
 ]
 
-const EXCHANGE_OPTIONS: DropdownOption[] = [
-  { value: '', label: '—' },
-  { value: 'US', label: 'US' },
-  { value: 'PL', label: 'PL' },
-  { value: 'UK', label: 'UK (LSE)' },
-  { value: 'XETRA', label: 'XETRA' },
-  { value: 'Other', label: 'Other' },
-]
+const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({
+  US: 'US',
+  PL: 'PL',
+  UK: 'UK (LSE)',
+  XETRA: 'XETRA',
+})
 
 type RowAction = 'update' | 'new' | 'remove'
 type PreviewRow = {

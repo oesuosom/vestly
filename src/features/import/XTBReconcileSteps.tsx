@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { exchangeOptions } from '@/domain/exchanges'
 import { formatPLN, formatQuantity } from '@/utils/formatters'
 import type {
   CostBasisDiffRow,
@@ -40,6 +41,8 @@ export type UnmatchedConfirmPayload = {
   unresolvedCategories: Map<string, AssetCategory>
 }
 const ASSET_CATEGORIES: AssetCategory[] = ['stock', 'etf', 'bond', 'crypto', 'cash']
+// Bare codes: the Exchange column is 96px wide.
+const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({ US: 'US', PL: 'PL', UK: 'UK', XETRA: 'XETRA' })
 
 function formatQty(qty: number): string {
   return formatQuantity(qty)
@@ -49,9 +52,10 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-/** Unmatched-instruments table column widths (px), verbatim from Figma. Sum = 588
- *  (the modal content width), so the table fits without scrolling. */
-const UNMATCHED_COLS = [44, 80, 144, 64, 112, 64, 80]
+/** Unmatched-instruments table column widths (px). Sum = 588 (the modal content
+ *  width), so the table fits without scrolling. From Figma, except Exchange took
+ *  32px from Instrument so "XETRA" fits its cell and dropdown. */
+const UNMATCHED_COLS = [44, 80, 112, 96, 112, 64, 80]
 const UNMATCHED_HEADERS: { label: string; align?: 'right' }[] = [
   { label: '' },
   { label: 'Ticker' },
@@ -144,12 +148,6 @@ export function UnmatchedStep({
     value: c,
     label: capitalize(c),
   }))
-  const exchangeDropdownOptions: DropdownOption[] = [
-    { value: '', label: '—' },
-    { value: 'US', label: 'US' },
-    { value: 'PL', label: 'PL' },
-    { value: 'Other', label: 'Other' },
-  ]
 
   return (
     <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
@@ -269,7 +267,7 @@ export function UnmatchedStep({
                                 return next
                               })
                             }
-                            options={exchangeDropdownOptions}
+                            options={EXCHANGE_OPTIONS}
                           />
                         </div>
                       </td>

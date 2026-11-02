@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Market Data settings** — "Update" and "Rebuild" no longer fail silently. When prices or
   quote history can't be fetched (offline, bad API key, provider down), a toast says so, with
   a Retry button; partial failures report how many holdings were affected.
+- **XTB import: missing exchanges** — when creating holdings for instruments the importer
+  couldn't identify, the Exchange dropdown now offers UK (LSE) and XETRA alongside US and PL,
+  so London- and Frankfurt-listed ETFs get the right price feed.
 
 ## [0.0.1] — 2026-09-13
 

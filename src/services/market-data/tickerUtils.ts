@@ -1,3 +1,5 @@
+import type { ExchangeCode } from '@/domain/exchanges'
+
 // ─────────────────────────────────────────
 // Ticker format helpers for each provider
 // ─────────────────────────────────────────
@@ -9,7 +11,7 @@ const EXCHANGE_TO_YAHOO: Record<string, string> = {
   UK:    '.L',
   XETRA: '.DE',
   CC:    '-USD',   // crypto: ETH → ETH-USD
-}
+} satisfies Record<ExchangeCode | 'CC', string>
 
 /**
  * Convert a ticker + exchange to Yahoo Finance symbol format.
@@ -32,7 +34,7 @@ const EXCHANGE_TO_EODHD: Record<string, string> = {
   UK:    'LSE',   // London Stock Exchange (e.g. EIMI.LSE, CSPX.LSE)
   XETRA: 'XETRA', // Frankfurt / XETRA (e.g. EXS1.XETRA)
   CC:    'CC',    // CryptoCompare (e.g. ETH-USD.CC, BTC-USD.CC)
-}
+} satisfies Record<ExchangeCode | 'CC', string>
 
 /**
  * Returns the native currency that EODHD reports prices in for a given exchange.
