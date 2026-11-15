@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { DatePickerInput } from '@/components/ui/DatePickerInput'
@@ -16,6 +16,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { formatPLNDetail, formatQuantity } from '@/utils/formatters'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useFilterShortcut } from '@/hooks/useFilterShortcut'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { Account, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import {
@@ -127,6 +128,8 @@ type ActivityFilterPanelProps = {
   anchorEl: HTMLElement | null
   open: boolean
   onClose: () => void
+  /** Gets focus back on close, whichever element the panel was anchored to. */
+  returnFocusTo: RefObject<HTMLElement | null>
   initialView?: View
   typeFilter: Set<TransactionType>
   onTypeChange: (v: Set<TransactionType>) => void
@@ -139,7 +142,7 @@ type ActivityFilterPanelProps = {
 }
 
 function ActivityFilterPanel({
-  anchorEl, open, onClose, initialView,
+  anchorEl, open, onClose, returnFocusTo, initialView,
   typeFilter, onTypeChange,
   accountFilter, onAccountChange, accountOptions,
   instrumentFilter, onInstrumentChange, instrumentOptions,
@@ -190,6 +193,10 @@ function ActivityFilterPanel({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose, view])
+
+  // Portaled to the end of <body>, so without a trap Tab leaves the panel for
+  // whatever follows (or precedes) it in the document while it stays open.
+  useFocusTrap(panelRef, open, { returnFocusTo })
 
   function toggleType(type: TransactionType) {
     const next = new Set(typeFilter)
@@ -595,6 +602,7 @@ export function Activity() {
         anchorEl={filterAnchorEl}
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
+        returnFocusTo={filterButtonRef}
         initialView={filterOpenView}
         typeFilter={typeFilter}
         onTypeChange={setTypeFilter}

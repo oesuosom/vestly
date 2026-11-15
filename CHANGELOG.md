@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Keyboard focus stays in the Activity filter panel** — Tab and Shift+Tab now cycle through
+  the panel's items (in every view, and while searching) instead of jumping to the page behind
+  it while it stays open. Closing it with Escape or the F shortcut puts focus back on the
+  Filter button.
 - **Hidden dialogs no longer catch keyboard focus** — after the Settings dialog or a holding's
   side panel closes, Tab no longer moves onto their invisible buttons and inputs, and screen
   readers no longer announce them. Escape also no longer reaches the Settings dialog while it's
