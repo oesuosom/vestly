@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DatePickerInput, type DateRange } from '@/components/ui/DatePickerInput'
 import { Dropdown } from '@/components/ui/Dropdown'
@@ -26,9 +26,15 @@ function HoldingModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** Modal's Escape handling turns on with its enter transition, two frames after mount. */
-async function waitForModalOpen() {
-  await waitFor(() => expect(document.querySelector('[data-open="true"]')).not.toBeNull())
+/**
+ * Modal's Escape handling turns on with its enter transition, two frames after
+ * mount. `data-open` reaches the DOM at commit, but the Escape layer registers
+ * in a passive effect React may run a tick later — and `waitFor` re-checks on
+ * DOM mutation, so it can resolve in between. The empty `act` flushes it.
+ */
+async function waitForModalOpen(count = 1) {
+  await waitFor(() => expect(document.querySelectorAll('[data-open="true"]')).toHaveLength(count))
+  await act(async () => {})
 }
 
 function pressEscape() {
@@ -100,7 +106,7 @@ describe('Modal — Escape with nested overlays', () => {
         <Modal isOpen onClose={closeInner} title="Inner"><p>Inner</p></Modal>
       </>,
     )
-    await waitFor(() => expect(document.querySelectorAll('[data-open="true"]')).toHaveLength(2))
+    await waitForModalOpen(2)
 
     pressEscape()
     expect(closeInner).toHaveBeenCalledTimes(1)
