@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Keyboard focus stays in the other pop-ups and the Settings dialog too** — the Portfolio
+  filter panel, the date range picker, drop-down selects (e.g. Category when adding a holding)
+  and the Settings dialog now keep Tab and Shift+Tab inside while open, instead of moving
+  through the page or form behind them. Opening Settings moves focus into it. Closing any of
+  them with Escape or a selection puts focus back on the button that opened it; clicking
+  elsewhere still closes them and leaves focus where you clicked.
 - **Keyboard focus stays in the Activity filter panel** — Tab and Shift+Tab now cycle through
   the panel's items (in every view, and while searching) instead of jumping to the page behind
   it while it stays open. Closing it with Escape or the F shortcut puts focus back on the

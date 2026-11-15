@@ -40,7 +40,8 @@ function getTabbables(container: HTMLElement): HTMLElement[] {
  * - Focusables are re-queried on every keypress, so views that swap their
  *   content (or a search that filters it) are always current.
  * - If focus is outside the container (e.g. it fell to <body> when the focused
- *   item unmounted), Tab / Shift+Tab bring it back to the first / last item.
+ *   item unmounted, or is still on the trigger) or on the container itself,
+ *   Tab / Shift+Tab bring it to the first / last item.
  * - On deactivation, focus returns to `returnFocusTo` — unless the trap was
  *   closed by a pointer press outside it, so a click elsewhere keeps its focus.
  *
@@ -73,7 +74,9 @@ export function useFocusTrap(
       const last = tabbables[tabbables.length - 1]
       const current = document.activeElement
 
-      if (!current || !root.contains(current)) {
+      // The container itself counts as outside: a dialog that focuses its own
+      // (tabindex=-1) panel on open would otherwise let Shift+Tab leave it.
+      if (!current || current === root || !root.contains(current)) {
         e.preventDefault()
         ;(e.shiftKey ? last : first).focus()
       } else if (e.shiftKey && current === first) {

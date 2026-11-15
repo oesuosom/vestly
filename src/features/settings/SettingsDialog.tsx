@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SettingsSidebar, type SettingsPage } from './SettingsSidebar'
 import { AccountSettingsPage } from '@/features/settings/AccountSettingsPage'
@@ -10,6 +10,7 @@ import { DataManagementSettingsPage } from '@/features/settings/DataManagementSe
 import { MarketDataSettingsPage } from '@/features/settings/MarketDataSettingsPage'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 type SettingsDialogProps = {
   isOpen: boolean
@@ -31,6 +32,23 @@ function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
 
+  // On open, remember what had focus (the sidebar button, or <body> after the
+  // S shortcut) so closing can hand it back, then move focus into the dialog.
+  // The panel itself takes focus, not its first control, so opening doesn't
+  // light up a focus ring on the sidebar. Declared before the trap so the
+  // trap reads the opener when it activates.
+  const panelRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    if (!isOpen) return
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    panelRef.current?.focus()
+  }, [isOpen])
+
+  // Portalled to the end of <body>, so without a trap Tab walks the page
+  // behind the open dialog.
+  useFocusTrap(panelRef, isOpen, { returnFocusTo: openerRef })
+
   // `inert` while closed: the dialog stays mounted for its exit animation, but
   // `pointer-events-none` only blocks the mouse, so without it the hidden
   // controls would stay in the tab order and the accessibility tree.
@@ -41,7 +59,12 @@ function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
       onClick={onClose}
     >
       <div
-        className="flex flex-row bg-background rounded-xl border border-border shadow-md overflow-hidden t-dialog-slide"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        tabIndex={-1}
+        className="flex flex-row bg-background rounded-xl border border-border shadow-md overflow-hidden t-dialog-slide outline-none"
         style={{ width: 800, height: 576 }}
         data-open={open}
         onClick={(e) => e.stopPropagation()}

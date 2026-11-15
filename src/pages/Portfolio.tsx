@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { FilterItem } from '@/components/ui/FilterItem'
@@ -13,6 +13,7 @@ import {
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import { useFilterShortcut } from '@/hooks/useFilterShortcut'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { getCategoryAllocation, getGroupDrift, getHoldingValue, getTotalReturn, getTotalValue, needsRebalancing } from '@/domain/calculations'
 import { colors } from '@/utils/tokens'
 import { formatPLN, formatPercent, formatQuantity } from '@/utils/formatters'
@@ -199,6 +200,8 @@ type PortfolioFilterPanelProps = {
   anchorEl: HTMLElement | null
   open: boolean
   onClose: () => void
+  /** Gets focus back on close, whichever element the panel was anchored to. */
+  returnFocusTo: RefObject<HTMLElement | null>
   initialView?: FilterView
   categoryFilter: Set<AssetCategory>
   onCategoryChange: (v: Set<AssetCategory>) => void
@@ -219,7 +222,7 @@ const CATEGORY_OPTIONS: { value: AssetCategory; label: string }[] = [
 ]
 
 function PortfolioFilterPanel({
-  anchorEl, open, onClose, initialView,
+  anchorEl, open, onClose, returnFocusTo, initialView,
   categoryFilter, onCategoryChange,
   instrumentFilter, onInstrumentChange, instrumentOptions,
   accountFilter, onAccountChange, accountOptions,
@@ -270,6 +273,10 @@ function PortfolioFilterPanel({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose, view])
+
+  // Portaled to the end of <body>, so without a trap Tab leaves the panel for
+  // whatever follows (or precedes) it in the document while it stays open.
+  useFocusTrap(panelRef, open, { returnFocusTo })
 
   if (!open || !pos) return null
 
@@ -596,6 +603,7 @@ export function Portfolio() {
         anchorEl={filterAnchorEl}
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
+        returnFocusTo={filterButtonRef}
         initialView={filterOpenView}
         categoryFilter={categoryFilter}
         onCategoryChange={setCategoryFilter}
