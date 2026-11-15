@@ -27,13 +27,17 @@ function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') onClose()
     }
-    document.addEventListener('keydown', handleKeyDown)
+    if (isOpen) document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [isOpen, onClose])
 
+  // `inert` while closed: the dialog stays mounted for its exit animation, but
+  // `pointer-events-none` only blocks the mouse, so without it the hidden
+  // controls would stay in the tab order and the accessibility tree.
   return (
     <div
       className={`fixed inset-0 bg-black/5 z-dialog flex items-center justify-center transition-opacity duration-200 ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+      inert={!isOpen}
       onClick={onClose}
     >
       <div
