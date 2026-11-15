@@ -22,6 +22,7 @@ import {
 import { buildBondBuyTransaction, resolveDividendLinks, upsertBondBuyTransaction } from '@/domain/transactions'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 
 // ─────────────────────────────────────────
 // Import action types (used by importHoldings)
@@ -41,7 +42,17 @@ type PortfolioState = {
   snapshots: Snapshot[]
   transactions: Transaction[]
   isLoading: boolean
-  error: string | null
+  /**
+   * Stored portfolio data could not be read. Fatal: the provider renders the
+   * recovery screen in place of its children, so nothing can show an empty
+   * portfolio or accept edits that would never be saved.
+   */
+  loadError: string | null
+  /**
+   * The latest failed save (today only a full quota). Cleared once every key
+   * that failed has been written successfully again.
+   */
+  saveError: string | null
   lastImportUndo: ImportUndoData | null
 }
 
@@ -88,12 +99,33 @@ type PortfolioContextValue = PortfolioState & PortfolioActions
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null)
 
+/**
+ * Strictly read one of the portfolio arrays. Unlike the store's forgiving
+ * `readKey`, which falls back to a default, this throws on anything that isn't
+ * a JSON array — an unreadable value must stop the load, not read as empty.
+ */
+function readStoredArray<T>(key: string): T[] {
+  const raw = localStorage.getItem(key)
+  if (raw === null) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`Stored "${key}" could not be read: it is not valid JSON.`, { cause: err })
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Stored "${key}" could not be read: expected a list.`)
+  }
+  return parsed as T[]
+}
+
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [transactions, setTransactionsState] = useState<Transaction[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [lastImportUndo, setLastImportUndo] = useState<ImportUndoData | null>(null)
 
   // Track whether a batch import is in progress to avoid clearing undo
@@ -113,16 +145,46 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   // recoverable parse error into permanent data loss.
   const initFailedRef = useRef(false)
 
+  // Keys whose last write failed, mapped to the failure message. `saveError`
+  // clears only when this is empty: a successful snapshot write must not hide
+  // an accounts write that is still failing.
+  const failedSavesRef = useRef(new Map<string, string>())
+
+  // A full quota is the one write failure `writeKey` rethrows. Surfacing it as
+  // `saveError` keeps the app mounted and tells the user what to do; letting it
+  // escape a persist effect would unmount the whole tree into the
+  // ErrorBoundary, which is the opposite of what a failed background save
+  // deserves.
+  const persist = useCallback((key: string, write: () => void) => {
+    const failed = failedSavesRef.current
+    try {
+      write()
+    } catch (err) {
+      if (!(err instanceof StorageQuotaError)) throw err
+      failed.set(key, err.message)
+      setSaveError(err.message)
+      return
+    }
+    if (failed.delete(key)) {
+      setSaveError(failed.size > 0 ? [...failed.values()].at(-1)! : null)
+    }
+  }, [])
+
   // Initialize on mount
   useEffect(() => {
     try {
+      // Validate before `initializeStore`: its migrations re-save keys read
+      // through the store's forgiving `getStore()`, which would replace an
+      // unreadable value with `[]` before the recovery screen could offer it
+      // in a backup.
+      readStoredArray(KEYS.ACCOUNTS)
+      readStoredArray(KEYS.SNAPSHOTS)
+      readStoredArray(KEYS.TRANSACTIONS)
+
       initializeStore()
-      const rawAccounts = localStorage.getItem(KEYS.ACCOUNTS)
-      const rawSnapshots = localStorage.getItem(KEYS.SNAPSHOTS)
-      const rawTransactions = localStorage.getItem(KEYS.TRANSACTIONS)
-      const loadedAccounts: Account[] = rawAccounts ? JSON.parse(rawAccounts) : []
-      const loadedSnapshots: Snapshot[] = rawSnapshots ? JSON.parse(rawSnapshots) : []
-      const loadedTransactions: Transaction[] = rawTransactions ? JSON.parse(rawTransactions) : []
+      const loadedAccounts = readStoredArray<Account>(KEYS.ACCOUNTS)
+      const loadedSnapshots = readStoredArray<Snapshot>(KEYS.SNAPSHOTS)
+      const loadedTransactions = readStoredArray<Transaction>(KEYS.TRANSACTIONS)
 
       // Migrate old "yyyy-MM" snapshot dates to "yyyy-MM-01"
       const migratedSnapshots = loadedSnapshots.map((s) =>
@@ -150,8 +212,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       )
       const allTransactions = bondBuys.length > 0 ? [...relinkedOnInit, ...bondBuys] : relinkedOnInit
 
-      // Persist immediately — the reactive useEffect may not fire before the tab closes
-      saveTransactions(allTransactions)
+      // Persist immediately — the reactive useEffect may not fire before the tab closes.
+      // The data is already read, so a full quota here is a save failure, not a load failure.
+      persist(KEYS.TRANSACTIONS, () => saveTransactions(allTransactions))
 
       // Re-run synthetic cash upsert for every account on startup so the purchaseDate
       // is always derived from transaction history rather than a stale stored value.
@@ -164,51 +227,37 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       // it from raw loadedAccounts would bake stale synthetic-cash values into
       // the persisted snapshot.
       const updatedSnapshots = upsertTodaySnapshot(migratedSnapshots, accountsWithCash)
-      saveSnapshots(updatedSnapshots)
+      persist(KEYS.SNAPSHOTS, () => saveSnapshots(updatedSnapshots))
 
       setAccounts(accountsWithCash)
       setSnapshots(updatedSnapshots)
       setTransactionsState(allTransactions)
     } catch (e) {
       initFailedRef.current = true
-      setError(e instanceof Error ? e.message : 'Failed to load portfolio data')
+      setLoadError(e instanceof Error ? e.message : 'Failed to load portfolio data')
     } finally {
       setIsLoading(false)
     }
-  }, [])
-
-  // A full quota is the one write failure `writeKey` rethrows. Surfacing it as
-  // context error state keeps the app mounted and tells the user what to do;
-  // letting it escape a persist effect would unmount the whole tree into the
-  // ErrorBoundary, which is the opposite of what a failed background save
-  // deserves.
-  const persist = useCallback((write: () => void) => {
-    try {
-      write()
-    } catch (err) {
-      if (err instanceof StorageQuotaError) setError(err.message)
-      else throw err
-    }
-  }, [])
+  }, [persist])
 
   // Persist accounts to localStorage on change
   useEffect(() => {
     if (!isLoading && !initFailedRef.current) {
-      persist(() => saveAccounts(accounts))
+      persist(KEYS.ACCOUNTS, () => saveAccounts(accounts))
     }
   }, [accounts, isLoading, persist])
 
   // Persist snapshots to localStorage on change
   useEffect(() => {
     if (!isLoading && !initFailedRef.current) {
-      persist(() => saveSnapshots(snapshots))
+      persist(KEYS.SNAPSHOTS, () => saveSnapshots(snapshots))
     }
   }, [snapshots, isLoading, persist])
 
   // Persist transactions to localStorage on change
   useEffect(() => {
     if (!isLoading && !initFailedRef.current) {
-      persist(() => saveTransactions(transactions))
+      persist(KEYS.TRANSACTIONS, () => saveTransactions(transactions))
     }
   }, [transactions, isLoading, persist])
 
@@ -709,6 +758,19 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
+  // Unreadable data: show only the recovery screen. Children are also held
+  // back while loading, so nothing in the tree mounts, renders an empty
+  // portfolio or writes to storage before the data is known to be readable.
+  if (loadError) {
+    return (
+      <RecoveryScreen
+        title="Your portfolio data couldn't be read"
+        description="Vestly found data in this browser that it can't read, so it stopped before showing or changing anything. Download a backup before trying anything else."
+        details={loadError}
+      />
+    )
+  }
+
   return (
     <PortfolioContext.Provider
       value={{
@@ -716,7 +778,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         snapshots,
         transactions,
         isLoading,
-        error,
+        loadError,
+        saveError,
         lastImportUndo,
         addAccount,
         updateAccount,
@@ -735,7 +798,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         relinkDividends,
       }}
     >
-      {children}
+      {isLoading ? null : children}
     </PortfolioContext.Provider>
   )
 }

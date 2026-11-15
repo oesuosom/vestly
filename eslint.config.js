@@ -45,6 +45,25 @@ export default defineConfig([
   },
 
   {
+    // The recovery screen is shown when the storage layer itself is broken, so
+    // it must not depend on it. Enforced here so the rule can't quietly rot.
+    files: ['src/components/layout/RecoveryScreen.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@/storage/*', '@/context/*'],
+              message: 'RecoveryScreen must work when storage is broken — use the dependency-free helpers in @/utils.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
     // TanStack Table's `useReactTable()` returns fresh function identities each
     // render, which this rule reports as un-memoizable. (The React Compiler
     // itself is not enabled in vite.config.ts — eslint-plugin-react-hooks v7
