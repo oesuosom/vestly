@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Unreadable portfolio data no longer looks like an empty portfolio** — if stored accounts,
+  snapshots or transactions can't be read, Vestly now shows the recovery screen (download a raw
+  backup, reload, or reset) instead of "No portfolio data yet", and nothing is written until you
+  choose to reset. Previously, edits made from that empty screen were silently lost.
+- **Failed saves are no longer silent** — when browser storage is full, a banner explains that
+  changes aren't being saved and what to do. It disappears after the next successful save.
 - **Market Data settings** — "Update" and "Rebuild" no longer fail silently. When prices or
   quote history can't be fetched (offline, bad API key, provider down), a toast says so, with
   a Retry button; partial failures report how many holdings were affected.
