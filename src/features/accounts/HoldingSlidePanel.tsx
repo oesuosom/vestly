@@ -306,6 +306,9 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
     return v > 0 ? 'text-positive' : v < 0 ? 'text-negative' : 'text-accent'
   }
 
+  // Both roots stay mounted after close (exit animation, scroll-lock timing),
+  // so they're `inert` while closed: CSS `pointer-events: none` only blocks the
+  // mouse, and the hidden controls would otherwise stay keyboard-focusable.
   return createPortal(
     <>
       {/* Backdrop — sits above account panel (z-panel) */}
@@ -313,6 +316,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
         className={`fixed inset-0 bg-black/10 z-panel-nested-backdrop transition-opacity duration-200 ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
+        inert={!isOpen}
         onClick={onClose}
       />
 
@@ -320,6 +324,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
       <div
         className="fixed right-0 top-0 h-full w-[480px] z-panel-nested p-3 t-panel-slide"
         data-open={open}
+        inert={!isOpen}
       >
         <div className="h-full flex flex-col rounded-xl border border-borderLight shadow-md bg-surface overflow-hidden">
         {/* ── Header ── */}

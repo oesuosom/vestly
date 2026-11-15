@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hidden dialogs no longer catch keyboard focus** — after the Settings dialog or a holding's
+  side panel closes, Tab no longer moves onto their invisible buttons and inputs, and screen
+  readers no longer announce them. Escape also no longer reaches the Settings dialog while it's
+  closed.
 - **Unreadable portfolio data no longer looks like an empty portfolio** — if stored accounts,
   snapshots or transactions can't be read, Vestly now shows the recovery screen (download a raw
   backup, reload, or reset) instead of "No portfolio data yet", and nothing is written until you
