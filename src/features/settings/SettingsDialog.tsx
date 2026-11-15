@@ -10,6 +10,7 @@ import { DataManagementSettingsPage } from '@/features/settings/DataManagementSe
 import { MarketDataSettingsPage } from '@/features/settings/MarketDataSettingsPage'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 type SettingsDialogProps = {
@@ -24,13 +25,7 @@ function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
 
   useScrollLock(isOpen)
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    if (isOpen) document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  useEscapeKey(isOpen, onClose)
 
   // On open, remember what had focus (the sidebar button, or <body> after the
   // S shortcut) so closing can hand it back, then move focus into the dialog.

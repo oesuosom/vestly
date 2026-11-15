@@ -13,6 +13,7 @@ import {
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import { useFilterShortcut } from '@/hooks/useFilterShortcut'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import { getCategoryAllocation, getGroupDrift, getHoldingValue, getTotalReturn, getTotalValue, needsRebalancing } from '@/domain/calculations'
 import { colors } from '@/utils/tokens'
@@ -262,17 +263,11 @@ function PortfolioFilterPanel({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open, anchorEl, onClose])
 
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (view !== 'root') { setView('root'); setSearch('') }
-        else onClose()
-      }
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose, view])
+  // Escape steps back to the root view first, then closes the panel
+  useEscapeKey(open, () => {
+    if (view !== 'root') { setView('root'); setSearch('') }
+    else onClose()
+  })
 
   // Portaled to the end of <body>, so without a trap Tab leaves the panel for
   // whatever follows (or precedes) it in the document while it stays open.

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { AssetCategory, Holding, Transaction } from '@/types'
 import {
@@ -21,6 +21,7 @@ import { HoldingForm } from './HoldingForm'
 import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 
 // ─────────────────────────────────────────
 // Types
@@ -133,14 +134,8 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
 
   useScrollLock(locked)
 
-  // Close on Escape
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    if (isOpen) document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [isOpen, onClose])
+  // Close on Escape — only while topmost, so a sub-modal closes first
+  useEscapeKey(isOpen, onClose)
 
   // Reset sub-modals and price status when the panel closes or the holding
   // changes — adjusted during render, same "store previous value" pattern as
