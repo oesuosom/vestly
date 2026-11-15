@@ -6,6 +6,7 @@ import type { DateRange } from './Calendar'
 import { Button } from './Button'
 import { Calendar as CalendarIcon } from '@/generated/icons'
 import { z } from '@/utils/tokens'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 export type { DateRange }
 
@@ -41,6 +42,9 @@ export function DatePickerInput({
 
   const triggerRef = useRef<HTMLElement>(null)
   const panelRef   = useRef<HTMLDivElement>(null)
+  // The focusable trigger. Same element as `triggerRef` for the input variant;
+  // for the button variant `triggerRef` is the wrapper (it anchors the panel).
+  const triggerButtonRef = useRef<HTMLButtonElement>(null)
 
   // Close on outside click
   useEffect(() => {
@@ -65,6 +69,10 @@ export function DatePickerInput({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
+
+  // Portalled to the end of <body>, so without a trap Tab from the trigger
+  // walks the page behind the open panel before reaching it.
+  useFocusTrap(panelRef, open, { returnFocusTo: triggerButtonRef })
 
   // Keep panel anchored to the trigger while scrolling
   useEffect(() => {
@@ -126,6 +134,7 @@ export function DatePickerInput({
     return (
       <div ref={triggerRef as React.RefObject<HTMLDivElement>} className="relative inline-flex">
         <Button
+          ref={triggerButtonRef}
           variant="secondary"
           icon={CalendarIcon}
           iconPosition="left"
@@ -144,7 +153,7 @@ export function DatePickerInput({
   return (
     <div className="relative">
       <button
-        ref={triggerRef as React.RefObject<HTMLButtonElement>}
+        ref={(el) => { triggerRef.current = el; triggerButtonRef.current = el }}
         type="button"
         onClick={handleToggle}
         disabled={disabled}

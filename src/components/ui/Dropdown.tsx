@@ -4,6 +4,7 @@ import { TriangleRightBold, Check, ChevronDownSmall, MagnifyingGlass } from '@/g
 import { Checkbox } from './Checkbox'
 import { RadioButton } from './RadioButton'
 import { z } from '@/utils/tokens'
+import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ─────────────────────────────────────────
 // DropdownItem
@@ -236,6 +237,11 @@ export function Dropdown({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
+
+  // A portalled panel sits at the end of <body>, so without a trap Tab would
+  // walk the rest of the form (or page) behind it while it stays open. From
+  // the trigger, Tab / Shift+Tab step into the first / last option.
+  useFocusTrap(panelRef, open, { returnFocusTo: buttonRef })
 
   function handleToggle() {
     if (!open && portal && buttonRef.current) {

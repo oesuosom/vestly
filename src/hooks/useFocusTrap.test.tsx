@@ -107,6 +107,19 @@ describe('useFocusTrap', () => {
     expect(document.activeElement).toBe(el('Last'))
   })
 
+  it('treats focus on the container itself as outside', () => {
+    render(<Harness open />)
+    const trap = screen.getByTestId('trap')
+    trap.tabIndex = -1
+    trap.focus()
+    expect(tab(true)).toBe(true)
+    expect(document.activeElement).toBe(el('Last'))
+
+    trap.focus()
+    expect(tab()).toBe(true)
+    expect(document.activeElement).toBe(el('Search'))
+  })
+
   it('does nothing while inactive', () => {
     render(<Harness open={false} />)
     el('Outside').focus()
