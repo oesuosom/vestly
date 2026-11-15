@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Escape closes only the top pop-up** — with a drop-down or date picker open inside a
+  dialog (e.g. Category in Add Holding), Escape now closes just that list and puts focus back
+  on its button; the dialog stays open and keeps what you typed. Press Escape again to close
+  the dialog. The same goes for a dialog opened from a holding's side panel or from Settings:
+  Escape closes the dialog and leaves the panel or Settings open.
 - **Keyboard focus stays in the other pop-ups and the Settings dialog too** — the Portfolio
   filter panel, the date range picker, drop-down selects (e.g. Category when adding a holding)
   and the Settings dialog now keep Tab and Shift+Tab inside while open, instead of moving

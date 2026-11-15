@@ -6,6 +6,7 @@ import type { DateRange } from './Calendar'
 import { Button } from './Button'
 import { Calendar as CalendarIcon } from '@/generated/icons'
 import { z } from '@/utils/tokens'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 export type { DateRange }
@@ -62,13 +63,8 @@ export function DatePickerInput({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  // Close on Escape — only while topmost, so one inside a modal leaves the modal open
+  useEscapeKey(open, () => setOpen(false))
 
   // Portalled to the end of <body>, so without a trap Tab from the trigger
   // walks the page behind the open panel before reaching it.

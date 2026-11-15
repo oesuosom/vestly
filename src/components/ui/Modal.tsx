@@ -1,8 +1,9 @@
-import { useEffect, type CSSProperties, type DragEventHandler, type ReactNode } from 'react'
+import { type CSSProperties, type DragEventHandler, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/Button'
 import { Cross } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useScrollLock } from '@/hooks/useScrollLock'
 
 type ModalSize = 'sm' | 'md' | 'lg'
@@ -45,13 +46,7 @@ const cardWidthClasses: Record<ModalSize, string> = {
 function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default', accentColor, preview, hideHeader, onDragOver, onDragLeave, onDrop, dragActive, children }: ModalProps) {
   const { mounted, open } = useEnterExit(isOpen, 350)
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    if (open) document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
+  useEscapeKey(open, onClose)
 
   useScrollLock(mounted)
 

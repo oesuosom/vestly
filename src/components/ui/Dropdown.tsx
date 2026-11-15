@@ -4,6 +4,7 @@ import { TriangleRightBold, Check, ChevronDownSmall, MagnifyingGlass } from '@/g
 import { Checkbox } from './Checkbox'
 import { RadioButton } from './RadioButton'
 import { z } from '@/utils/tokens'
+import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 // ─────────────────────────────────────────
@@ -230,13 +231,8 @@ export function Dropdown({
     return () => document.removeEventListener('pointerdown', onPointerDown)
   }, [open])
 
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  // Close on Escape — only while topmost, so one inside a modal leaves the modal open
+  useEscapeKey(open, () => setOpen(false))
 
   // A portalled panel sits at the end of <body>, so without a trap Tab would
   // walk the rest of the form (or page) behind it while it stays open. From
