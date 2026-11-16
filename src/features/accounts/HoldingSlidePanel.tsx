@@ -16,8 +16,8 @@ import { HoldingIcon } from '@/components/ui/HoldingIcon'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { readCloseDuration } from '@/components/ui/panelTiming'
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { HoldingForm } from './HoldingForm'
+import { DeleteHoldingDialog } from './DeleteHoldingDialog'
 import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
@@ -118,7 +118,7 @@ function StatCell({ label, children }: { label: string; children: React.ReactNod
 // ─────────────────────────────────────────
 
 export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: HoldingSlidePanelProps) {
-  const { accounts, transactions, updateHolding, deleteHolding, replaceAccounts } = usePortfolio()
+  const { accounts, transactions, updateHolding, replaceAccounts } = usePortfolio()
   const settings = useSettings()
   const [editOpen, setEditOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -255,12 +255,6 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
         setPriceStatus('error')
       }
     }
-  }
-
-  function handleDelete() {
-    deleteHolding(holding!.id)
-    setDeleteConfirmOpen(false)
-    onClose()
   }
 
   async function handleRefreshPrice() {
@@ -601,18 +595,11 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
       </Modal>
 
       {/* Delete confirmation modal */}
-      <ConfirmDialog
+      <DeleteHoldingDialog
+        holding={holding}
         isOpen={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
-        onConfirm={handleDelete}
-        title="Delete Holding"
-        message={
-          <>
-            Are you sure you want to delete{' '}
-            <span className="font-medium text-foreground">{holding.name}</span>? This cannot be undone.
-          </>
-        }
-        confirmLabel="Delete"
+        onDeleted={onClose}
       />
     </>,
     document.body

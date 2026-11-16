@@ -14,6 +14,7 @@ import { useHistoricalPrices } from '@/hooks/useHistoricalPrices'
 import { useAccountInsight } from '@/hooks/useAccountInsight'
 import { parseAccountInsightMarkup } from '@/services/claude'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
+import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
 import { fetchAllPrices } from '@/services/market-data/priceFetcher'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -32,6 +33,7 @@ import { PortfolioAreaChart } from '@/components/charts/PortfolioAreaChart'
 import { AccountFormModal } from '@/features/accounts/AccountFormModal'
 import { HoldingForm } from '@/features/accounts/HoldingForm'
 import { HoldingSlidePanel } from '@/features/accounts/HoldingSlidePanel'
+import { DeleteHoldingDialog } from '@/features/accounts/DeleteHoldingDialog'
 import { UnifiedImportModal } from '@/features/import/UnifiedImportModal'
 import type { AssetCategory, Holding, AccountType, Snapshot } from '@/types'
 import {
@@ -166,7 +168,6 @@ export function AccountDetail() {
     deleteAccount,
     addHolding,
     updateHolding,
-    deleteHolding,
   } = usePortfolio()
   const contributions = getStore().contributions
   const settings = useSettings()
@@ -183,12 +184,19 @@ export function AccountDetail() {
   const [addHoldingOpen, setAddHoldingOpen] = useState(false)
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null)
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
+  const [deletingHolding, setDeletingHolding] = useState<Holding | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   // ── Derived data ───────────────────────
   const accountTransactions = useMemo(
     () => transactions.filter((t) => t.accountId === accountId),
+    [transactions, accountId]
+  )
+
+  // Same function deleteAccount removes them with, so the dialog's count holds.
+  const deleteAccountSummary = useMemo(
+    () => (accountId ? describeTransactions(findAccountTransactions(accountId, transactions)) : null),
     [transactions, accountId]
   )
 
@@ -374,13 +382,13 @@ export function AccountDetail() {
           return (
             <HoldingMenuCell
               onEdit={() => setEditingHolding(h)}
-              onDelete={() => deleteHolding(h.id)}
+              onDelete={() => setDeletingHolding(h)}
             />
           )
         },
       }),
     ],
-    [currentValuePLN, deleteHolding]
+    [currentValuePLN]
   )
 
   const table = useReactTable({
@@ -720,11 +728,24 @@ export function AccountDetail() {
         title="Delete Account"
         message={
           <>
-            Are you sure you want to delete <span className="font-medium text-foreground">{account.name}</span>? This
-            will permanently remove the account and all its holdings.
+            Are you sure you want to delete <span className="font-medium text-foreground">{account.name}</span>?{' '}
+            {deleteAccountSummary ? (
+              <>
+                This will permanently remove the account, all its holdings and{' '}
+                <span className="font-medium text-foreground">{deleteAccountSummary}</span>.
+              </>
+            ) : (
+              <>This will permanently remove the account and all its holdings.</>
+            )}
           </>
         }
         confirmLabel="Delete Account"
+      />
+
+      <DeleteHoldingDialog
+        holding={deletingHolding}
+        isOpen={deletingHolding !== null}
+        onClose={() => setDeletingHolding(null)}
       />
 
       <UnifiedImportModal

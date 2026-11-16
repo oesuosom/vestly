@@ -1066,7 +1066,7 @@ export function DevShowcase() {
         onClose={() => setDevConfirm(null)}
         onConfirm={() => setDevConfirm(null)}
         title="Delete Holding"
-        message={<>Are you sure you want to delete <span className="font-medium text-foreground">NVIDIA</span>? This cannot be undone.</>}
+        message={<>Are you sure you want to delete <span className="font-medium text-foreground">NVIDIA</span>? This also deletes <span className="font-medium text-foreground">3 transactions (2 buys, 1 dividend)</span>. This cannot be undone.</>}
         confirmLabel="Delete"
       />
       <ConfirmDialog
@@ -1082,7 +1082,7 @@ export function DevShowcase() {
         onClose={() => setDevConfirm(null)}
         onConfirm={() => setDevConfirm(null)}
         title="Delete Account"
-        message={<>Are you sure you want to delete <span className="font-medium text-foreground">XTB</span>? This will permanently remove the account and all its holdings.</>}
+        message={<>Are you sure you want to delete <span className="font-medium text-foreground">XTB</span>? This will permanently remove the account, all its holdings and <span className="font-medium text-foreground">42 transactions (30 buys, 4 deposits, 8 dividends)</span>.</>}
         confirmLabel="Delete Account"
       />
       <ConfirmDialog
