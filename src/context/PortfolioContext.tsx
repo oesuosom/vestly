@@ -21,7 +21,7 @@ import {
 } from '@/storage/portfolioStore'
 import { buildBondBuyTransaction, resolveDividendLinks, upsertBondBuyTransaction } from '@/domain/transactions'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
-import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { deleteHoldingFromLog, findAccountTransactions } from '@/domain/holdingDeletion'
 import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 
 // ─────────────────────────────────────────
@@ -353,7 +353,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       // filter can't select them, so there's no way to clear them by hand.
       // Mirrors deleteHolding, which already cascades.
       setTransactionsState((prev) => {
-        const next = prev.filter((t) => t.accountId !== id)
+        // Same function the delete dialog counts with, so its number holds.
+        const removed = new Set(findAccountTransactions(id, prev))
+        const next = prev.filter((t) => !removed.has(t))
         // Returning the same reference lets React bail out: deleting an account
         // with no transactions then costs no re-render and no redundant write
         // of the (largest) transaction log.
@@ -449,30 +451,32 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const now = new Date().toISOString()
 
       const holding = accountsRef.current.flatMap(a => a.holdings).find(h => h.id === holdingId)
+
+      // Remove the transactions that belong to the holding (counted by the
+      // confirm dialog with the same matching) and re-link the dividends that
+      // stay. flushSync: see addHolding — it runs the updater now, against the
+      // latest log (including a delete queued earlier in the same handler, as
+      // Activity does), so the cash recalculation below sees exactly what was kept.
+      const nextTransactionsRef = { current: null as Transaction[] | null }
       if (holding && !holding.isSynthetic) {
-        const holdingTicker = holding.ticker?.toUpperCase()
-        const holdingName = holding.name.toLowerCase()
-        setTransactionsState(prev => prev.filter(t => {
-          if (t.relatedHoldingId === holdingId) return false
-          if (t.accountId !== holding.accountId) return true
-          const tTicker = (
-            t.ticker ?? (t.instrument ? staticLookupInstrument(t.instrument)?.ticker : undefined)
-          )?.toUpperCase()
-          const tRelatedTicker = (
-            t.relatedTicker ?? (t.relatedInstrument ? staticLookupInstrument(t.relatedInstrument)?.ticker : undefined)
-          )?.toUpperCase()
-          if (holdingTicker && (tTicker === holdingTicker || tRelatedTicker === holdingTicker)) return false
-          if (t.instrument?.toLowerCase() === holdingName || t.relatedInstrument?.toLowerCase() === holdingName) return false
-          return true
+        flushSync(() => setTransactionsState((prev) => {
+          const next = deleteHoldingFromLog(holding, accountsRef.current, prev)
+          nextTransactionsRef.current = next
+          return next
         }))
       }
+      const nextTransactions = nextTransactionsRef.current
 
       setAccounts((prev) => {
-        const next = prev.map((a) => ({
+        const withoutHolding = prev.map((a) => ({
           ...a,
           holdings: a.holdings.filter((h) => h.id !== holdingId),
           lastUpdated: a.holdings.some((h) => h.id === holdingId) ? now : a.lastUpdated,
         }))
+        // Recalculate Cash now, the way imports do, rather than on next load.
+        const next = holding && nextTransactions
+          ? upsertSyntheticCashHolding(withoutHolding, nextTransactions, holding.accountId)
+          : withoutHolding
         refreshSnapshot(next)
         return next
       })
@@ -695,8 +699,27 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   }, [refreshSnapshot])
 
   const deleteTransaction = useCallback((id: string) => {
-    setTransactionsState((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+    // flushSync: see addHolding — the updater runs now, so the refs below hold
+    // the log as committed and Cash can be recalculated from it straight away.
+    const nextTransactionsRef = { current: null as Transaction[] | null }
+    const accountIdRef = { current: null as string | null }
+    flushSync(() => setTransactionsState((prev) => {
+      const target = prev.find((t) => t.id === id)
+      accountIdRef.current = target?.accountId ?? null
+      const next = target ? prev.filter((t) => t.id !== id) : prev
+      nextTransactionsRef.current = next
+      return next
+    }))
+    const accountId = accountIdRef.current
+    const nextTransactions = nextTransactionsRef.current
+    if (!accountId || !nextTransactions) return
+
+    setAccounts((prev) => {
+      const next = upsertSyntheticCashHolding(prev, nextTransactions, accountId)
+      refreshSnapshot(next)
+      return next
+    })
+  }, [refreshSnapshot])
 
   const setTransactions = useCallback((next: Transaction[]) => {
     setTransactionsState(next)

@@ -20,6 +20,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { Account, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import {
   Trash,
   Filter, ReceiptBill, BanknoteStack, ChartBarsWide, Elements,
@@ -333,7 +334,7 @@ export function Activity() {
   }
 
   // ── Delete with undo ─────────────────
-  // deleteHolding cascades to all transactions matching the holding's ticker/name
+  // deleteHolding cascades to the transactions that belong to the holding
   // (dividends, taxes, …), so undo restores pre-delete snapshots of both stores
   // rather than re-adding just the one deleted row.
   const [undoTransaction, setUndoTransaction] = useState<Transaction | null>(null)
@@ -390,11 +391,15 @@ export function Activity() {
   }
 
   function handleUndoDelete() {
-    if (!undoSnapshot) return
+    if (!undoSnapshot || !undoTransaction) return
     setTransactions(undoSnapshot.transactions)
-    if (undoSnapshot.accounts) {
-      replaceAccounts(undoSnapshot.accounts)
-    }
+    // Recalculate Cash from the restored log, as deleting did, so it doesn't
+    // wait for the next load to catch up.
+    replaceAccounts(upsertSyntheticCashHolding(
+      undoSnapshot.accounts ?? accounts,
+      undoSnapshot.transactions,
+      undoTransaction.accountId,
+    ))
     setUndoTransaction(null)
     setUndoSnapshot(null)
   }
