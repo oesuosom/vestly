@@ -120,9 +120,10 @@ export function RecoveryScreen({ title, description, details }: RecoveryScreenPr
           </Button>
         </div>
 
-        <p className="text-xs text-accent mt-4">
-          Restore it later in Settings → Data Management. It leaves out API
-          keys, and any settings that can&rsquo;t be read, since those could hold one.
+        <p className="text-xs text-accent mt-4 text-balance">
+          If the file is readable, you can restore it later in
+          Settings&nbsp;→&nbsp;Data&nbsp;Management. It leaves out API keys, and any
+          settings that can&rsquo;t be read, since those could hold one.
         </p>
         <p className="text-xs text-accent mt-2">
           Resetting erases every account, holding and transaction stored in

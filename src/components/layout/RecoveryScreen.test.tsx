@@ -39,6 +39,11 @@ describe('RecoveryScreen', () => {
     expect(screen.getByText('Stored "ft_accounts" is unreadable')).toBeTruthy()
   })
 
+  it('offers the restore only on condition, since a file with unreadable data is refused', () => {
+    renderScreen()
+    expect(screen.getByText(/^If the file is readable, you can restore it later in Settings → Data Management\./)).toBeTruthy()
+  })
+
   it('downloads every app key, keeping unreadable values as raw strings', () => {
     renderScreen()
     fireEvent.click(screen.getByRole('button', { name: 'Download backup' }))
