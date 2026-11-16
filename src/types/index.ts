@@ -241,7 +241,7 @@ export type TransactionType =
   | 'withholding_tax'   // always paired with a dividend, always negative
   | 'interest'
   | 'interest_tax'      // always paired with interest, always negative
-  | 'fee'
+  | 'fee'               // Revolut trade fees are separate rows, paired to their trade by externalId (domain/tradeFees.ts)
   | 'send'              // outbound crypto transfer — amountPLN: 0 (no fiat proceeds)
   | 'receive'           // inbound crypto transfer — amountPLN: +(cost basis PLN) or 0 if unknown
 

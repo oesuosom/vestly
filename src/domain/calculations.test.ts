@@ -15,6 +15,8 @@ import {
   getDividendIncomeForHolding,
   getTotalReturn,
   getIncomeSummary,
+  getPositions,
+  getRealizedPnL,
 } from './calculations'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -352,13 +354,30 @@ describe('calculateAverageCostBasis', () => {
 
   it('returns zeroes when nothing is held', () => {
     const empty = { averageCostPLN: 0, quantity: 0, costPLN: 0 }
-    expect(calculateAverageCostBasis([], 'acc1', 'ETFW')).toEqual(empty)
+    expect(calculateAverageCostBasis([], 'acc1', 'ETFW')).toMatchObject(empty)
 
     const soldOut = [
       makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
       makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
     ]
-    expect(calculateAverageCostBasis(soldOut, 'acc1', 'ETFW')).toEqual(empty)
+    expect(calculateAverageCostBasis(soldOut, 'acc1', 'ETFW')).toMatchObject(empty)
+  })
+
+  it('includes Revolut fees, which are stored as separate rows with no ticker', () => {
+    // 0.4 ETH for 2,400 + 24 fee, then 0.28 ETH for 1,850 + 18.50 fee:
+    // cost 2,424 + 1,868.50 = 4,292.50 for 0.68 ETH → 6,312.50 per ETH.
+    const eth = { accountId: 'revolut', source: 'revolut_crypto' as const, instrument: 'Ethereum', ticker: 'ETH' }
+    const fee = { accountId: 'revolut', source: 'revolut_crypto' as const, type: 'fee' as const }
+    const transactions = [
+      makeTx({ ...eth, id: 't1', externalId: 'revolut-eth-2024-09-10-0.4-2400-24',      date: '2024-09-10T00:00:00.000Z', quantity: 0.4,  amountPLN: -2400 }),
+      makeTx({ ...fee, id: 't2', externalId: 'revolut-eth-fee-2024-09-10-0.4-24',       date: '2024-09-10T00:00:00.000Z', amountPLN: -24 }),
+      makeTx({ ...eth, id: 't3', externalId: 'revolut-eth-2024-12-01-0.28-1850-18.5',   date: '2024-12-01T00:00:00.000Z', quantity: 0.28, amountPLN: -1850 }),
+      makeTx({ ...fee, id: 't4', externalId: 'revolut-eth-fee-2024-12-01-0.28-18.5',    date: '2024-12-01T00:00:00.000Z', amountPLN: -18.5 }),
+    ]
+    const result = calculateAverageCostBasis(transactions, 'revolut', 'ETH')
+    expect(result.quantity).toBeCloseTo(0.68, 10)
+    expect(result.costPLN).toBeCloseTo(4292.5, 6)
+    expect(result.averageCostPLN).toBeCloseTo(6312.5, 6)
   })
 })
 
@@ -533,5 +552,139 @@ describe('getIncomeSummary', () => {
   it('returns all zeroes for a year with no transactions', () => {
     const summary = getIncomeSummary([], 2025)
     expect(summary.totalNet).toBe(0)
+  })
+})
+
+// ─── getRealizedPnL ───────────────────────────────────────────────────────────
+
+/** A Revolut-style row: midnight timestamp, generated externalId. */
+function revolutTx(overrides: Partial<Transaction> & { externalId: string }): Transaction {
+  return makeTx({
+    id: overrides.externalId,
+    accountId: 'revolut',
+    source: 'revolut_crypto',
+    ...(overrides.type === 'fee' ? {} : { instrument: 'Bitcoin', ticker: 'BTC' }),
+    ...overrides,
+  })
+}
+
+describe('getRealizedPnL', () => {
+  it('is zero when nothing was sold', () => {
+    expect(getRealizedPnL([])).toBe(0)
+    expect(getRealizedPnL([makeTx({ ticker: 'ETFW', quantity: 10, amountPLN: -1000 })])).toBe(0)
+  })
+
+  it('takes a sale\'s cost from the selling account only', () => {
+    // acc1 buys 10 for 1,000 and sells them for 1,500: 1,500 − 1,000 = +500.
+    // acc2's 10 for 3,000 are a different position. Pooled by ticker, the
+    // average would be 4,000 / 20 = 200 and the sale would show 1,500 − 2,000 = −500.
+    const transactions = [
+      makeTx({ id: 't1', accountId: 'acc1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', accountId: 'acc2', type: 'buy',  date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: -3000 }),
+      makeTx({ id: 't3', accountId: 'acc1', type: 'sell', date: '2025-03-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(500)
+  })
+
+  it('adds up every account and ticker', () => {
+    // acc1 / ETFW: 10 for 1,000, 5 sold for 600   →   600 −   500 = +100
+    // acc2 / ETFW: 10 for 3,000, all sold for 2,500 → 2,500 − 3,000 = −500
+    // acc1 / KGH :  4 for   800, all sold for 1,000 → 1,000 −   800 = +200
+    // Total: 100 − 500 + 200 = −200
+    const transactions = [
+      makeTx({ id: 't1', accountId: 'acc1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', accountId: 'acc1', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 5,  amountPLN: 600 }),
+      makeTx({ id: 't3', accountId: 'acc2', type: 'buy',  date: '2025-01-11', ticker: 'ETFW', quantity: 10, amountPLN: -3000 }),
+      makeTx({ id: 't4', accountId: 'acc2', type: 'sell', date: '2025-02-11', ticker: 'ETFW', quantity: 10, amountPLN: 2500 }),
+      makeTx({ id: 't5', accountId: 'acc1', type: 'buy',  date: '2025-01-12', ticker: 'KGH',  quantity: 4,  amountPLN: -800 }),
+      makeTx({ id: 't6', accountId: 'acc1', type: 'sell', date: '2025-02-12', ticker: 'KGH',  quantity: 4,  amountPLN: 1000 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(-200)
+  })
+
+  it('counts no profit on units that were sold but never recorded as bought', () => {
+    // 1 bought for 100, 10 sold for 1,000. The log explains 1 of the 10, so it
+    // earns 1/10 of the proceeds: 100 − 100 = 0. Not 1,000 − 100 = +900.
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 1,  amountPLN: -100 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1000 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(0)
+  })
+
+  it('uses only the rebuy\'s cost after everything was sent away', () => {
+    // Buy 1 for 100,000 and send it away: nothing realized, nothing left.
+    // Buy 1 for 200,000 and sell it for 250,000: 250,000 − 200,000 = +50,000.
+    // If the send were ignored the average would be 300,000 / 2 = 150,000 and
+    // the sale would show +100,000.
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'BTC', quantity: 1, amountPLN: -100000 }),
+      makeTx({ id: 't2', type: 'send', date: '2025-02-10', ticker: 'BTC', quantity: 1, amountPLN: 0 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-03-10', ticker: 'BTC', quantity: 1, amountPLN: -200000 }),
+      makeTx({ id: 't4', type: 'sell', date: '2025-04-10', ticker: 'BTC', quantity: 1, amountPLN: 250000 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(50000)
+  })
+
+  it('takes Revolut fees off the profit: the buy\'s fee as cost, the sale\'s fee off the proceeds', () => {
+    // Buy 0.5 BTC for 100,000 + 1,000 fee → cost 101,000.
+    // Sell 0.5 BTC for 150,000 − 1,500 fee → proceeds 148,500.
+    // 148,500 − 101,000 = +47,500 (it was +50,000 with the fees left out).
+    const transactions = [
+      revolutTx({ externalId: 'revolut-btc-2025-01-10-0.5-100000',      type: 'buy',  date: '2025-01-10T00:00:00.000Z', quantity: 0.5, amountPLN: -100000 }),
+      revolutTx({ externalId: 'revolut-btc-fee-2025-01-10-0.5',         type: 'fee',  date: '2025-01-10T00:00:00.000Z', amountPLN: -1000 }),
+      revolutTx({ externalId: 'revolut-btc-sell-2025-03-10-0.5-150000', type: 'sell', date: '2025-03-10T00:00:00.000Z', quantity: 0.5, amountPLN: 150000 }),
+      revolutTx({ externalId: 'revolut-btc-sell-fee-2025-03-10-0.5',    type: 'fee',  date: '2025-03-10T00:00:00.000Z', amountPLN: -1500 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(47500)
+  })
+
+  it('matches rows that carry only an instrument name, and leaves out rows with no ticker at all', () => {
+    // "KGH" resolves to the ticker KGH: 2,500 − 2,000 = +500.
+    // "Some Unknown Fund" resolves to nothing, so its sale is not counted.
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', instrument: 'KGH', quantity: 10, amountPLN: -2000 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'KGH',     quantity: 10, amountPLN: 2500 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-01-10', instrument: 'Some Unknown Fund', quantity: 1, amountPLN: -100 }),
+      makeTx({ id: 't4', type: 'sell', date: '2025-02-10', instrument: 'Some Unknown Fund', quantity: 1, amountPLN: 900 }),
+    ]
+    expect(getRealizedPnL(transactions)).toBe(500)
+  })
+})
+
+// ─── getPositions ─────────────────────────────────────────────────────────────
+
+describe('getPositions', () => {
+  it('returns one position per account and ticker', () => {
+    const transactions = [
+      makeTx({ id: 't1', accountId: 'acc1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', accountId: 'acc2', type: 'buy',  date: '2025-02-10', ticker: 'etfw', quantity: 10, amountPLN: -3000 }),
+      makeTx({ id: 't3', accountId: 'acc1', type: 'sell', date: '2025-03-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
+      makeTx({ id: 't4', accountId: 'acc1', type: 'deposit', date: '2025-01-01', amountPLN: 5000 }), // no ticker: no position
+    ]
+    const positions = getPositions(transactions)
+    expect(positions).toHaveLength(2)
+    // acc1: 1,500 − 1,000 = +500, nothing left. acc2: still holds 10 at 300.
+    expect(positions.find((p) => p.accountId === 'acc1')).toMatchObject({
+      ticker: 'ETFW',
+      position: { quantity: 0, realizedProfitPLN: 500 },
+    })
+    expect(positions.find((p) => p.accountId === 'acc2')).toMatchObject({
+      ticker: 'ETFW',
+      position: { quantity: 10, averageCostPLN: 300, realizedProfitPLN: 0 },
+    })
+  })
+
+  it('reports how many units a position sold without a recorded buy', () => {
+    // 1 bought, 10 sold: 9 units have no recorded purchase.
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 1,  amountPLN: -100 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1000 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-01-10', ticker: 'KGH',  quantity: 5,  amountPLN: -500 }),
+    ]
+    const incomplete = getPositions(transactions).filter((p) => p.position.unexplainedQuantity > 0)
+    expect(incomplete).toEqual([
+      { accountId: 'acc1', ticker: 'ETFW', position: expect.objectContaining({ unexplainedQuantity: 9 }) },
+    ])
   })
 })

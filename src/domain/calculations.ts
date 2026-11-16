@@ -1,6 +1,7 @@
 import type { Account, AllocationGroup, AllocationTargets, CategoryAllocation, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from './instrumentLookup'
 import { walkPosition, type Position } from './position'
+import { pairTradeFees } from './tradeFees'
 
 /** Calculate the current market value of a single holding. */
 export function getHoldingValue(holding: Holding): number {
@@ -155,7 +156,9 @@ export function resolveTransactionTicker(
  * next buy. Returns an empty position when nothing is held.
  *
  * Transactions belonging to other accounts are never counted, even when the
- * caller passes the whole transaction log.
+ * caller passes the whole transaction log. Pass at least the account's whole
+ * log rather than pre-filtering by ticker: Revolut fees are separate rows with
+ * no ticker, and they are part of the cost (see `pairTradeFees`).
  *
  * Uses `resolveTransactionTicker` so ticker-less transactions (imported before
  * their ticker was known) are matched via their instrument name.
@@ -169,7 +172,8 @@ export function calculateAverageCostBasis(
   return walkPosition(
     transactions.filter(
       (t) => t.accountId === accountId && resolveTransactionTicker(t) === tickerUpper
-    )
+    ),
+    pairTradeFees(transactions)
   )
 }
 
@@ -250,44 +254,54 @@ export function getIncomeSummary(
   return getAllTimeSummary(transactions.filter((t) => t.date.slice(0, 4) === String(year)))
 }
 
+/** One account's position in one ticker. */
+export type AccountPosition = {
+  accountId: string
+  /** Uppercased, as `resolveTransactionTicker` returns it. */
+  ticker: string
+  position: Position
+}
+
 /**
- * Realized P&L from sell transactions using average cost basis method.
- * Processes transactions chronologically per ticker.
- * buy/receive → add to cost pool; sell → proceeds minus avg cost of sold units.
+ * Every position in the transaction log: one per account and ticker that has
+ * at least one transaction, each walked on its own by `walkPosition` (see
+ * `position.ts` for the rules), with Revolut fees paired to their trades.
+ *
+ * Tickers are resolved with `resolveTransactionTicker`, so rows that carry only
+ * an instrument name are matched; rows that resolve to no ticker belong to no
+ * position and are left out.
+ *
+ * A position with `unexplainedQuantity > 0` sold or sent more than the log
+ * recorded coming in — its history is incomplete.
  */
-export function getRealizedPnL(transactions: Transaction[]): number {
-  type TickerState = { totalCost: number; totalQty: number }
-  const state = new Map<string, TickerState>()
-  let realized = 0
-
-  const relevant = transactions
-    .filter(
-      (t) =>
-        (t.type === 'buy' || t.type === 'sell' || t.type === 'receive') &&
-        t.quantity != null &&
-        resolveTransactionTicker(t) != null
-    )
-    .sort((a, b) => a.date.localeCompare(b.date))
-
-  for (const t of relevant) {
-    const ticker = resolveTransactionTicker(t)!
-    if (!state.has(ticker)) state.set(ticker, { totalCost: 0, totalQty: 0 })
-    const s = state.get(ticker)!
-
-    if (t.type === 'buy' || t.type === 'receive') {
-      s.totalCost += Math.abs(t.amountPLN)
-      s.totalQty += t.quantity!
-    } else if (t.type === 'sell' && s.totalQty > 0) {
-      const avgCost = s.totalCost / s.totalQty
-      const qtySold = Math.min(t.quantity!, s.totalQty)
-      const proceeds = t.amountPLN // positive for sells
-      realized += proceeds - avgCost * qtySold
-      s.totalCost = Math.max(0, s.totalCost - avgCost * qtySold)
-      s.totalQty = Math.max(0, s.totalQty - qtySold)
-    }
+export function getPositions(transactions: Transaction[]): AccountPosition[] {
+  const groups = new Map<string, { accountId: string; ticker: string; rows: Transaction[] }>()
+  for (const t of transactions) {
+    const ticker = resolveTransactionTicker(t)
+    if (!ticker) continue
+    const key = `${t.accountId}\n${ticker}`
+    const group = groups.get(key)
+    if (group) group.rows.push(t)
+    else groups.set(key, { accountId: t.accountId, ticker, rows: [t] })
   }
 
-  return realized
+  const tradeFees = pairTradeFees(transactions)
+  return [...groups.values()].map(({ accountId, ticker, rows }) => ({
+    accountId,
+    ticker,
+    position: walkPosition(rows, tradeFees),
+  }))
+}
+
+/**
+ * Realized profit across the whole portfolio, in PLN: the sum of every
+ * position's `realizedProfitPLN` (average-cost method; see `walkPosition`).
+ *
+ * Each account's position in a ticker is worked out on its own, so one
+ * account's purchases never change the profit on another account's sale.
+ */
+export function getRealizedPnL(transactions: Transaction[]): number {
+  return getPositions(transactions).reduce((sum, p) => sum + p.position.realizedProfitPLN, 0)
 }
 
 /** Sum total unrealized P&L across all accounts. */

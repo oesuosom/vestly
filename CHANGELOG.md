@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Realized return counted the wrong costs** — the figure on Overview (also part of Total
+  return, and sent to the AI summary) is now worked out separately for each account. Before,
+  the same ticker held in two accounts shared one average: buy 10 for 1,000 PLN and sell them
+  for 1,500 PLN in one account, hold 10 bought for 3,000 PLN in another, and the sale showed
+  a 500 PLN loss instead of a 500 PLN profit. Three more cases are fixed. Selling more units
+  than your history records no longer counts the extra proceeds as profit: with 1 unit bought
+  for 100 PLN and 10 sold for 1,000 PLN, only that 1 unit is counted. Crypto you sent away no
+  longer stays in the average cost of what you buy afterwards. And Revolut fees now count: a
+  buy's fee is part of what the coins cost, a sale's fee comes off what it brought in.
+  Purchase prices proposed at the end of a Revolut ETH import include the buy fees too.
 - **Deleting a holding asks first and keeps other holdings' transactions** — Delete in the
   holdings table now asks before removing anything, like the holding panel already did, and
   both say how many transactions go with it (e.g. "3 transactions (2 buys, 1 dividend)"). The

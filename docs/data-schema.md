@@ -117,11 +117,20 @@ cashBalance  = Σ amountPLN over all transactions in the account
 ticker = t.ticker ?? staticLookupInstrument(t.instrument)?.ticker
 
 // Position — one ticker in one account, walked in date order (walkPosition)
-buy / receive : qty += quantity;  cost += |amountPLN|
+buy           : qty += quantity;  cost += |amountPLN| + fee
+receive       : qty += quantity;  cost += |amountPLN|                // 0 when the cost is unknown
 sell / send   : cost −= (cost / qty) × quantity;  qty −= quantity   // average unchanged
+sell          : realized += (amountPLN − fee) − (cost / qty) × quantity
 qty reaches 0 : cost = 0          // a later buy starts a new pool at its own price
 avgCost(account, ticker) = cost / qty
 // Same day, time unknown (date-only rows): buys and receives run before sells and sends.
+// fee: only Revolut stores a trade's fee as a separate row; pairTradeFees matches it to
+// its trade through the two externalIds. Other sources have it in amountPLN already, or have none.
+// Selling or sending more than is held (a buy is missing from the log): only the held units
+// count, with the same share of the proceeds; the rest add to position.unexplainedQuantity.
+
+// Realized profit, whole portfolio (getRealizedPnL)
+realizedPnL = Σ position.realizedProfitPLN over every account and ticker (getPositions)
 
 // Crypto quantity
 netQty(ticker)  = Σ(buy + receive qty) − Σ(sell + send qty)
@@ -149,7 +158,8 @@ Details worth knowing that aren't obvious from reading the type alone:
 - **`Transaction.externalId`** — the deduplication key. On import, any row whose `externalId` already exists is skipped. XTB supplies its own ID column; Revolut and eMakler rows get one generated.
 - **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
 - **`send` / `receive`** — crypto transfers. `send` carries `amountPLN: 0` (no fiat proceeds); `receive` carries the cost basis in PLN, or 0 when unknown.
-- **`sell`** — defined in the type union but carries no FIFO logic; no sells have occurred yet.
+- **`sell`** — `amountPLN` is the proceeds, positive. Realized profit uses the average-cost method (see the calculation reference); there is no FIFO logic.
+- **`fee`** — Revolut crypto imports store each trade's fee as its own `fee` row with no ticker. Its `externalId` is the only link to the trade; `pairTradeFees` ([`domain/tradeFees.ts`](../src/domain/tradeFees.ts)) documents the id scheme.
 - **`ImportUndoData`** — in-memory only, never persisted. Backs the single-step undo after an import.
 
 ---
