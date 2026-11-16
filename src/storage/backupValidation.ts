@@ -15,6 +15,7 @@
  * `validateBackup` addresses 1 and 2; `applyBackup` addresses 3 by rolling
  * back every key it touched if any single write fails.
  */
+import type { TransactionType } from '@/types'
 import { KEYS } from './portfolioStore'
 
 /** Keys a backup may carry, mapped to the localStorage key each restores to. */
@@ -37,19 +38,147 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-/** Every member of `arr` must be an object carrying all of `required`. */
-function membersHave(arr: unknown[], required: string[]): boolean {
-  return arr.every((item) => isPlainObject(item) && required.every((k) => k in item))
+function isText(v: unknown): v is string {
+  return typeof v === 'string'
+}
+
+/** JSON has no NaN or Infinity, but `null` and numeric strings do turn up. */
+function isAmount(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v)
+}
+
+/**
+ * Every `TransactionType`. Typed as a record so adding a type to the union
+ * without listing it here is a compile error, not a backup that won't restore.
+ */
+const TRANSACTION_TYPES: Record<TransactionType, true> = {
+  buy: true,
+  sell: true,
+  deposit: true,
+  withdrawal: true,
+  dividend: true,
+  withholding_tax: true,
+  interest: true,
+  interest_tax: true,
+  fee: true,
+  send: true,
+  receive: true,
+}
+
+/**
+ * A field the app reads without a guard, with the plain-language name used in
+ * error messages. Optional fields (`ticker`, `notes`, `isSynthetic`…) are
+ * deliberately not listed: older backups legitimately lack them.
+ */
+type FieldRule = readonly [key: string, label: string, check: (v: unknown) => boolean]
+
+const ACCOUNT_RULES: FieldRule[] = [
+  ['id', 'ID', isText],
+  ['name', 'name', isText],
+]
+
+const HOLDING_RULES: FieldRule[] = [
+  ['id', 'ID', isText],
+  ['name', 'name', isText],
+  ['category', 'category', isText],
+  ['purchaseDate', 'purchase date', isText],
+  ['quantity', 'quantity', isAmount],
+  ['purchasePrice', 'purchase price', isAmount],
+  ['currentPrice', 'current price', isAmount],
+]
+
+// `id` is not required: snapshots are looked up by date, and older stores
+// carry legacy `yyyy-MM` dates and a `realEstate` allocation key that startup
+// migrates, so only the containers and the total are checked.
+const SNAPSHOT_RULES: FieldRule[] = [
+  ['date', 'date', isText],
+  ['totalValue', 'total value', isAmount],
+  ['allocation', 'allocation breakdown', isPlainObject],
+  ['accountValues', 'per-account values', isPlainObject],
+]
+
+const TRANSACTION_RULES: FieldRule[] = [
+  ['id', 'ID', isText],
+  ['accountId', 'account', isText],
+  ['date', 'date', isText],
+  ['amountPLN', 'amount', isAmount],
+]
+
+/** First rule `record` breaks, phrased to follow its name ("… has no quantity."). */
+function findProblem(record: Record<string, unknown>, rules: FieldRule[]): string | null {
+  for (const [key, label, check] of rules) {
+    const value = record[key]
+    if (value === undefined || value === null) return `has no ${label}`
+    if (!check(value)) return `has an invalid ${label}`
+  }
+  return null
+}
+
+/** "“Broker”" when the record has a usable name, otherwise nothing. */
+function quoted(v: unknown): string {
+  return isText(v) && v.trim() !== '' ? ` (“${v}”)` : ''
+}
+
+function dateLabel(v: unknown): string {
+  return isText(v) && v !== '' ? ` (${v.slice(0, 10)})` : ''
+}
+
+function checkAccounts(accounts: unknown[]): string | null {
+  for (const [i, account] of accounts.entries()) {
+    if (!isPlainObject(account)) return `Account ${i + 1} is not a valid account.`
+    const accountLabel = `Account ${i + 1}${quoted(account.name)}`
+
+    const problem = findProblem(account, ACCOUNT_RULES)
+    if (problem) return `${accountLabel} ${problem}.`
+    if (!Array.isArray(account.holdings)) return `${accountLabel} has no list of holdings.`
+
+    for (const [j, holding] of account.holdings.entries()) {
+      if (!isPlainObject(holding)) return `Holding ${j + 1} in “${account.name}” is not a valid holding.`
+      const holdingLabel = `Holding ${j + 1}${quoted(holding.name)} in “${account.name}”`
+      const holdingProblem = findProblem(holding, HOLDING_RULES)
+      if (holdingProblem) return `${holdingLabel} ${holdingProblem}.`
+    }
+  }
+  return null
+}
+
+function checkSnapshots(snapshots: unknown[]): string | null {
+  for (const [i, snapshot] of snapshots.entries()) {
+    if (!isPlainObject(snapshot)) return `Snapshot ${i + 1} is not a valid snapshot.`
+    const problem = findProblem(snapshot, SNAPSHOT_RULES)
+    if (problem) return `Snapshot ${i + 1}${dateLabel(snapshot.date)} ${problem}.`
+  }
+  return null
+}
+
+function checkTransactions(transactions: unknown[]): string | null {
+  for (const [i, transaction] of transactions.entries()) {
+    if (!isPlainObject(transaction)) return `Transaction ${i + 1} is not a valid transaction.`
+    const label = `Transaction ${i + 1}${dateLabel(transaction.date)}`
+
+    const { type } = transaction
+    if (type === undefined || type === null) return `${label} has no type.`
+    if (!isText(type) || !Object.hasOwn(TRANSACTION_TYPES, type)) {
+      return `${label} has an unknown type${isText(type) ? ` “${type}”` : ''}.`
+    }
+
+    const problem = findProblem(transaction, TRANSACTION_RULES)
+    if (problem) return `${label} ${problem}.`
+  }
+  return null
 }
 
 /**
  * Check a parsed backup before any of it is written.
  *
- * Deliberately structural, not exhaustive: it confirms each present field is
- * the right container with plausibly-shaped members, which is what stops a
- * crash or a silent `NaN`. It does not attempt to be a full schema — a backup
- * that passes here can still be semantically odd, and migrations remain
- * responsible for version drift.
+ * Checks each record for the fields the app reads without a guard — the ones
+ * whose absence crashes a page or turns totals into `NaN` — and names the
+ * first bad record in the error, since the message is shown to the user.
+ * Optional fields stay optional, and legacy shapes that startup migrates
+ * (`yyyy-MM` snapshot dates, a `realEstate` allocation key, `allocationTargets`
+ * in settings) are accepted. It is not a full schema: a backup that passes can
+ * still be semantically odd, and migrations remain responsible for version
+ * drift.
  */
 export function validateBackup(parsed: unknown): ValidationResult {
   if (!isPlainObject(parsed)) {
@@ -71,33 +200,26 @@ export function validateBackup(parsed: unknown): ValidationResult {
     const value = parsed[field]
 
     switch (field) {
-      case 'accounts':
+      case 'accounts': {
         if (!Array.isArray(value)) return { ok: false, error: '`accounts` must be a list.' }
-        if (!membersHave(value, ['id', 'name', 'holdings'])) {
-          return { ok: false, error: 'An account is missing `id`, `name` or `holdings`.' }
-        }
-        if (!value.every((a) => Array.isArray((a as Record<string, unknown>).holdings))) {
-          return { ok: false, error: 'An account’s `holdings` is not a list.' }
-        }
+        const error = checkAccounts(value)
+        if (error) return { ok: false, error }
         break
+      }
 
-      case 'transactions':
+      case 'transactions': {
         if (!Array.isArray(value)) return { ok: false, error: '`transactions` must be a list.' }
-        if (!membersHave(value, ['id', 'accountId', 'type', 'date', 'amountPLN'])) {
-          return { ok: false, error: 'A transaction is missing a required field.' }
-        }
-        // A non-numeric amount is the classic silent-NaN source.
-        if (!value.every((t) => typeof (t as Record<string, unknown>).amountPLN === 'number')) {
-          return { ok: false, error: 'A transaction has a non-numeric `amountPLN`.' }
-        }
+        const error = checkTransactions(value)
+        if (error) return { ok: false, error }
         break
+      }
 
-      case 'snapshots':
+      case 'snapshots': {
         if (!Array.isArray(value)) return { ok: false, error: '`snapshots` must be a list.' }
-        if (!membersHave(value, ['date', 'totalValue'])) {
-          return { ok: false, error: 'A snapshot is missing `date` or `totalValue`.' }
-        }
+        const error = checkSnapshots(value)
+        if (error) return { ok: false, error }
         break
+      }
 
       case 'settings':
         if (!isPlainObject(value)) return { ok: false, error: '`settings` must be an object.' }

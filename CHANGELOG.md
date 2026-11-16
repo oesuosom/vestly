@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshots or transactions can't be read, Vestly now shows the recovery screen (download a raw
   backup, reload, or reset) instead of "No portfolio data yet", and nothing is written until you
   choose to reset. Previously, edits made from that empty screen were silently lost.
+- **Restoring a damaged backup no longer breaks the app** — Restore Backup now checks every
+  holding, snapshot and transaction for the details the app needs (a holding's quantity and
+  prices, a snapshot's allocation, a transaction's type and date) and refuses the file before
+  anything is replaced, naming the record at fault, e.g. "Holding 3 in “Broker” has no
+  quantity." Previously such a file restored, then crashed every page or the account page after
+  the reload. Backups from earlier versions still restore, and a stored snapshot missing its
+  allocation no longer stops Vestly from starting.
 - **Failed saves are no longer silent** — when browser storage is full, a banner explains that
   changes aren't being saved and what to do. It disappears after the next successful save.
 - **Market Data settings** — "Update" and "Rebuild" no longer fail silently. When prices or
