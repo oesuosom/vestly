@@ -4,8 +4,9 @@
  * Each PDF is a single-transaction statement ("Exchanged to ETH") with:
  *   - Transaction date
  *   - ETH quantity received (net of fees)
- *   - Fiat amount in PLN (net, excluding fee) — used as cost basis
- *   - Fee in PLN — stored as a separate 'fee' transaction
+ *   - Fiat amount in PLN (net, excluding fee) — the buy's amount
+ *   - Fee in PLN — stored as a separate 'fee' transaction; the position walk
+ *     adds it back to the buy's cost (see domain/tradeFees.ts)
  *
  * Per PDF this produces two Transaction records:
  *   1. type: 'buy'  — amountPLN = -(netFiatPLN)
@@ -114,7 +115,7 @@ function parseRevolutText(text: string): RevolutTransaction | null {
  * Parse multiple Revolut crypto transaction statement PDFs into Transaction objects.
  *
  * Per successfully parsed PDF, produces up to two transactions:
- *   - type: 'buy'  — amountPLN = -(netFiatPLN), cost basis excludes fee
+ *   - type: 'buy'  — amountPLN = -(netFiatPLN), the fee is not included
  *   - type: 'fee'  — amountPLN = -(feePLN)
  *
  * @param files                 Array of PDF File objects (one per Revolut statement)
@@ -161,6 +162,8 @@ export async function parseRevolutCryptoPDFs(
     // Always count ETH quantity for the checksum total, even if already imported
     totalEthFromPDFs += ethQty
 
+    // domain/tradeFees.ts pairs each fee with its trade through these two ids.
+    // Change their format there as well, or the fee drops out of cost and profit.
     const buyExternalId = `revolut-eth-${date.slice(0, 10)}-${ethQty}-${netFiatPLN}-${feePLN}`
     const feeExternalId = `revolut-eth-fee-${date.slice(0, 10)}-${ethQty}-${feePLN}`
 

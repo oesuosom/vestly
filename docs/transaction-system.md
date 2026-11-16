@@ -31,7 +31,7 @@ Holdings remain the source of truth for portfolio *value*. Transactions are an a
 | Original currency | Stored as metadata only | `originalCurrency` / `pricePerUnitOriginal` are preserved but never used in math |
 | XTB cash balance | Synthetic holding, recomputed after import | Flows into Total Wealth and the cash allocation slice automatically |
 | Crypto accounts | No synthetic cash holding | They hold assets, not fiat |
-| Sells | Weighted-average realized P&L; **no FIFO** | Sufficient for reporting; Polish tax filing needs FIFO and is not built |
+| Sells | Weighted-average realized P&L, per account and ticker; **no FIFO** | Sufficient for reporting; Polish tax filing needs FIFO and is not built |
 | Cross-format duplicates | Matched on economic identity, surfaced not dropped | XTB reports the same trade twice under two ID spaces — see below |
 
 ### A caveat on `Transaction.date`

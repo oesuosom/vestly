@@ -279,6 +279,8 @@ export async function parseRevolutBtcPDFs(
       const { date, btcQty, netFiatPLN, feePLN } = parsed
       buyQty += btcQty
 
+      // domain/tradeFees.ts pairs each fee with its trade through these two ids.
+      // Change their format there as well, or the fee drops out of cost and profit.
       const date10 = date.slice(0, 10)
       const buyId  = `revolut-btc-${date10}-${btcQty}-${netFiatPLN}`
       const feeId  = `revolut-btc-fee-${date10}-${btcQty}`
@@ -329,6 +331,8 @@ export async function parseRevolutBtcPDFs(
       const { date, btcQty, grossProceedsPLN, feePLN } = parsed
       sellQty += btcQty
 
+      // domain/tradeFees.ts pairs each fee with its trade through these two ids.
+      // Change their format there as well, or the fee drops out of cost and profit.
       const date10 = date.slice(0, 10)
       const sellId = `revolut-btc-sell-${date10}-${btcQty}-${grossProceedsPLN}`
       const feeId  = `revolut-btc-sell-fee-${date10}-${btcQty}`

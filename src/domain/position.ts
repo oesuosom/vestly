@@ -1,12 +1,13 @@
 import type { Transaction } from '@/types'
+import type { TradeFees } from './tradeFees'
 
 /**
  * The state of one position — one ticker in one account — after walking its
  * transactions in date order.
  *
- * This is the single definition of "position" for cost basis, and the place
- * realized profit will be added, so new facts about a position become new
- * fields here rather than a second walk somewhere else.
+ * This is the single definition of "position": cost basis and realized profit
+ * come out of the same walk, so they cannot disagree. New facts about a
+ * position become new fields here rather than a second walk somewhere else.
  */
 export type Position = {
   /** Units still held. Never negative. */
@@ -15,6 +16,18 @@ export type Position = {
   costPLN: number
   /** `costPLN / quantity`, or 0 when nothing is held. */
   averageCostPLN: number
+  /**
+   * Profit (+) or loss (−) on every sale so far, in PLN: what the sales brought
+   * in, minus the average cost of the units they removed. Counted only on units
+   * the log explains — see `unexplainedQuantity`.
+   */
+  realizedProfitPLN: number
+  /**
+   * Units sold or sent that the log never recorded coming in. Above zero means
+   * the history is incomplete (a buy is missing), so `realizedProfitPLN` leaves
+   * those units out: their cost is unknown.
+   */
+  unexplainedQuantity: number
 }
 
 /**
@@ -68,42 +81,68 @@ function compareForWalk(a: Transaction, b: Transaction): number {
   return ka.side - kb.side
 }
 
+const NO_FEES: TradeFees = new Map()
+
 /**
  * Walk one position's transactions in date order using the average-cost method.
  *
  * `transactions` must already be narrowed to **one account and one ticker** —
  * the walk does no filtering of its own, so mixing accounts or tickers here
- * mixes their costs. `calculateAverageCostBasis` does that narrowing. The input
- * may be in any order and is not modified.
+ * mixes their costs. `calculateAverageCostBasis` and `getPositions` do that
+ * narrowing. The input may be in any order and is not modified.
+ *
+ * `tradeFees` holds fees that are stored apart from their trade (Revolut; see
+ * `pairTradeFees`). Without it every trade's amount is taken as it stands.
  *
  * Rules:
- * - **buy** adds its quantity and its cost (`|amountPLN|`).
+ * - **buy** adds its quantity and its cost: `|amountPLN|` plus its fee. The
+ *   fee is part of what the units cost, so it stays with them until they go.
  * - **receive** (inbound crypto transfer) adds its quantity and its recorded
  *   cost basis. A receive stored with `amountPLN: 0` (cost unknown) adds units
  *   at zero cost, which lowers the average.
  * - **sell** and **send** remove quantity at the current average, so the
  *   per-unit cost of what is left does not change.
+ * - **sell** also realizes profit: its proceeds (`amountPLN` minus its fee)
+ *   minus the cost of the units it removed. A **send** realizes nothing — the
+ *   units left, but nothing was received for them.
  * - When the quantity reaches zero the pool resets: a later buy starts a new
  *   position at its own price.
  * - Selling or sending more than is held (incomplete history) closes the
- *   position; the excess is ignored rather than carried as a negative quantity.
+ *   position. The excess is not carried as a negative quantity; it is added to
+ *   `unexplainedQuantity`. A sale's profit is then counted on the held units
+ *   only, with the same share of its proceeds: selling 10 for 1,000 PLN while
+ *   holding 1 realizes 100 PLN minus that unit's cost, not 1,000.
  * - Rows without a quantity, and every other transaction type (dividends,
  *   fees, …), leave the position unchanged.
  *
  * Same-day ordering is described on {@link sortKey}.
  */
-export function walkPosition(transactions: Transaction[]): Position {
+export function walkPosition(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): Position {
   let quantity = 0
   let costPLN = 0
+  let realizedProfitPLN = 0
+  let unexplainedQuantity = 0
 
   for (const t of [...transactions].sort(compareForWalk)) {
     const delta = quantityDelta(t)
+    const feePLN = tradeFees.get(t.id) ?? 0
     if (delta > 0) {
       quantity += delta
-      costPLN += Math.abs(t.amountPLN)
-    } else if (delta < 0 && quantity > 0) {
-      const removed = Math.min(-delta, quantity)
-      costPLN -= (costPLN / quantity) * removed
+      costPLN += Math.abs(t.amountPLN) + (t.type === 'buy' ? feePLN : 0)
+    } else if (delta < 0) {
+      const leaving = -delta
+      const removed = Math.min(leaving, quantity)
+      const removedCostPLN = quantity > 0 ? (costPLN / quantity) * removed : 0
+      // A shortfall below the epsilon is floating-point residue, not missing history.
+      const unexplained = leaving - removed < QUANTITY_EPSILON ? 0 : leaving - removed
+      unexplainedQuantity += unexplained
+
+      if (t.type === 'sell') {
+        const explainedShare = (leaving - unexplained) / leaving
+        realizedProfitPLN += (t.amountPLN - feePLN) * explainedShare - removedCostPLN
+      }
+
+      costPLN -= removedCostPLN
       quantity -= removed
       if (quantity < QUANTITY_EPSILON) {
         quantity = 0
@@ -112,6 +151,11 @@ export function walkPosition(transactions: Transaction[]): Position {
     }
   }
 
-  if (quantity === 0) return { quantity: 0, costPLN: 0, averageCostPLN: 0 }
-  return { quantity, costPLN, averageCostPLN: costPLN / quantity }
+  return {
+    quantity,
+    costPLN,
+    averageCostPLN: quantity === 0 ? 0 : costPLN / quantity,
+    realizedProfitPLN,
+    unexplainedQuantity,
+  }
 }
