@@ -21,7 +21,7 @@ import {
 } from '@/storage/portfolioStore'
 import { buildBondBuyTransaction, resolveDividendLinks, upsertBondBuyTransaction } from '@/domain/transactions'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
-import { findAccountTransactions, findHoldingTransactions } from '@/domain/holdingDeletion'
+import { deleteHoldingFromLog, findAccountTransactions } from '@/domain/holdingDeletion'
 import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 
 // ─────────────────────────────────────────
@@ -452,16 +452,15 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
       const holding = accountsRef.current.flatMap(a => a.holdings).find(h => h.id === holdingId)
 
-      // Remove the transactions that belong to the holding — the same pure
-      // function the confirm dialog counts with. flushSync: see addHolding — it
-      // runs the updater now, against the latest log (including a delete
-      // queued earlier in the same handler, as Activity does), so the cash
-      // recalculation below sees exactly what was kept.
+      // Remove the transactions that belong to the holding (counted by the
+      // confirm dialog with the same matching) and re-link the dividends that
+      // stay. flushSync: see addHolding — it runs the updater now, against the
+      // latest log (including a delete queued earlier in the same handler, as
+      // Activity does), so the cash recalculation below sees exactly what was kept.
       const nextTransactionsRef = { current: null as Transaction[] | null }
       if (holding && !holding.isSynthetic) {
         flushSync(() => setTransactionsState((prev) => {
-          const removed = new Set(findHoldingTransactions(holding, accountsRef.current, prev))
-          const next = removed.size > 0 ? prev.filter((t) => !removed.has(t)) : prev
+          const next = deleteHoldingFromLog(holding, accountsRef.current, prev)
           nextTransactionsRef.current = next
           return next
         }))

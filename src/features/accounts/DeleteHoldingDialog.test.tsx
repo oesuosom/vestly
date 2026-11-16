@@ -61,6 +61,17 @@ describe('DeleteHoldingDialog', () => {
     )
   })
 
+  it('mentions no transactions for the last same-ticker holding, even with dividends linked to it', () => {
+    const apple2 = holding('apple-2')
+    setPortfolio([holding('apple-1'), apple2], [
+      tx('div', { type: 'dividend', amountPLN: 5, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
+      tx('tax', { type: 'withholding_tax', amountPLN: -1, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
+    ])
+    render(<DeleteHoldingDialog holding={apple2} isOpen onClose={() => {}} />)
+
+    expect(message()).toBe('Are you sure you want to delete Apple? This cannot be undone.')
+  })
+
   it('deletes the holding, then closes and reports back', () => {
     const apple = holding('apple')
     setPortfolio([apple], [])

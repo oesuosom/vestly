@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Holding, Transaction } from '@/types'
-import { describeTransactions, findAccountTransactions, findHoldingTransactions } from './holdingDeletion'
+import {
+  deleteHoldingFromLog,
+  describeTransactions,
+  findAccountTransactions,
+  findHoldingTransactions,
+} from './holdingDeletion'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,19 +61,44 @@ describe('findHoldingTransactions', () => {
   const apple2 = makeHolding({ id: 'apple-2', purchaseDate: '2026-03-01' })
   const cash = makeHolding({ id: 'cash_acc1', name: 'Cash', ticker: undefined, category: 'cash', isSynthetic: true })
   const sameTicker = [makeAccount('acc1', [apple1, apple2, cash])]
+  // What a load leaves behind: resolveDividendLinks points every AAPL dividend
+  // and tax at the last AAPL holding, here apple-2.
   const sameTickerTxs = [
     makeTx({ id: 'deposit', type: 'deposit', amountPLN: 2000 }),
     makeTx({ id: 'buy-1', instrument: 'Apple', ticker: 'AAPL', amountPLN: -1200 }),
     makeTx({ id: 'buy-2', instrument: 'Apple', ticker: 'AAPL', amountPLN: -400 }),
-    makeTx({ id: 'div-1', type: 'dividend', amountPLN: 55, relatedTicker: 'AAPL', relatedHoldingId: 'apple-1' }),
+    makeTx({ id: 'div', type: 'dividend', amountPLN: 55, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
+    makeTx({ id: 'tax', type: 'withholding_tax', amountPLN: -8, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
   ]
 
-  it('keeps the other same-ticker holding’s transactions, removing only what is linked', () => {
-    expect(ids(findHoldingTransactions(apple1, sameTicker, sameTickerTxs))).toEqual(['div-1'])
+  it('keeps everything when the first of two same-ticker holdings is deleted', () => {
+    expect(findHoldingTransactions(apple1, sameTicker, sameTickerTxs)).toEqual([])
   })
 
-  it('removes nothing by ticker when the other same-ticker holding is the one deleted', () => {
+  it('keeps ticker-linked dividends when the last same-ticker holding — the one they point at — is deleted', () => {
     expect(findHoldingTransactions(apple2, sameTicker, sameTickerTxs)).toEqual([])
+  })
+
+  it('still removes a row linked by id alone when the ticker is shared', () => {
+    const txs = [makeTx({ id: 'div-by-id', type: 'dividend', amountPLN: 5, relatedInstrument: 'Apple', relatedHoldingId: 'apple-1' })]
+    expect(ids(findHoldingTransactions(apple1, sameTicker, txs))).toEqual(['div-by-id'])
+  })
+
+  it('still removes a bond lot’s own buy when another lot shares the series', () => {
+    const lot1 = makeHolding({ id: 'lot-1', name: 'EDO0136', ticker: 'EDO0136', category: 'bond' })
+    const lot2 = makeHolding({ id: 'lot-2', name: 'EDO0136', ticker: 'EDO0136', category: 'bond' })
+    const accounts = [makeAccount('acc1', [lot1, lot2])]
+    const txs = [
+      makeTx({ id: 'bond-buy-1', ticker: 'EDO0136', source: 'bond_holding', relatedHoldingId: 'lot-1' }),
+      makeTx({ id: 'bond-buy-2', ticker: 'EDO0136', source: 'bond_holding', relatedHoldingId: 'lot-2' }),
+    ]
+    expect(ids(findHoldingTransactions(lot1, accounts, txs))).toEqual(['bond-buy-1'])
+  })
+
+  it('removes a ticker-linked dividend when the ticker is unique', () => {
+    const accounts = [makeAccount('acc1', [apple1])]
+    const txs = [makeTx({ id: 'div', type: 'dividend', amountPLN: 5, relatedTicker: 'AAPL', relatedHoldingId: 'apple-1' })]
+    expect(ids(findHoldingTransactions(apple1, accounts, txs))).toEqual(['div'])
   })
 
   it('treats a shared name as ambiguous too, even with different tickers', () => {
@@ -135,6 +165,39 @@ describe('findHoldingTransactions', () => {
 
   it('gives a synthetic holding no transactions', () => {
     expect(findHoldingTransactions(cash, sameTicker, sameTickerTxs)).toEqual([])
+  })
+})
+
+// ─── deleteHoldingFromLog ─────────────────────────────────────────────────────
+
+describe('deleteHoldingFromLog', () => {
+  const apple1 = makeHolding({ id: 'apple-1' })
+  const apple2 = makeHolding({ id: 'apple-2' })
+  const accounts = [makeAccount('acc1', [apple1, apple2])]
+  const txs = [
+    makeTx({ id: 'buy-1', ticker: 'AAPL' }),
+    makeTx({ id: 'buy-2', ticker: 'AAPL' }),
+    makeTx({ id: 'div', type: 'dividend', amountPLN: 55, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
+    makeTx({ id: 'tax', type: 'withholding_tax', amountPLN: -8, relatedTicker: 'AAPL', relatedHoldingId: 'apple-2' }),
+  ]
+  const links = (log: Transaction[]) => log.map((t) => `${t.id}→${t.relatedHoldingId ?? '-'}`)
+
+  it('re-links the kept dividends to the holding that remains', () => {
+    expect(links(deleteHoldingFromLog(apple2, accounts, txs))).toEqual([
+      'buy-1→-', 'buy-2→-', 'div→apple-1', 'tax→apple-1',
+    ])
+  })
+
+  it('leaves the links alone when the holding they point at stays', () => {
+    expect(links(deleteHoldingFromLog(apple1, accounts, txs))).toEqual([
+      'buy-1→-', 'buy-2→-', 'div→apple-2', 'tax→apple-2',
+    ])
+  })
+
+  it('removes what belongs to a unique holding', () => {
+    const solo = [makeAccount('acc1', [apple1])]
+    const log = [makeTx({ id: 'buy', ticker: 'AAPL' }), makeTx({ id: 'deposit', type: 'deposit', amountPLN: 10 })]
+    expect(ids(deleteHoldingFromLog(apple1, solo, log))).toEqual(['deposit'])
   })
 })
 

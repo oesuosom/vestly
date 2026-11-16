@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deleting a holding asks first and keeps other holdings' transactions** — Delete in the
+  holdings table now asks before removing anything, like the holding panel already did, and
+  both say how many transactions go with it (e.g. "3 transactions (2 buys, 1 dividend)"). The
+  Delete Account dialog now counts the account's transactions too. Only transactions that
+  clearly belong to the holding are removed: with two holdings of the same ticker, deleting
+  either one no longer takes the other's buys or dividends. Cash now updates as soon as a
+  holding or transaction is deleted, or a delete is undone, instead of jumping on the next
+  reload.
 - **Restoring a damaged backup no longer breaks the app** — Restore Backup now checks every
   account, holding, snapshot and transaction for the details the app needs (an account's type, a
   holding's category, quantity and prices, a snapshot's allocation, a transaction's type and
@@ -61,13 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **XTB import: missing exchanges** — when creating holdings for instruments the importer
   couldn't identify, the Exchange dropdown now offers UK (LSE) and XETRA alongside US and PL,
   so London- and Frankfurt-listed ETFs get the right price feed.
-- **Deleting a holding asks first and keeps other holdings' transactions** — Delete in the
-  holdings table now asks before removing anything, like the holding panel already did, and
-  both say how many transactions go with it (e.g. "3 transactions (2 buys, 1 dividend)"). The
-  Delete Account dialog now counts the account's transactions too. Only transactions that
-  clearly belong to the holding are removed: with two holdings of the same ticker, deleting one
-  no longer takes the other's buys and dividends. Cash now updates as soon as a holding or
-  transaction is deleted, or a delete is undone, instead of jumping on the next reload.
 
 ## [0.0.1] — 2026-09-13
 

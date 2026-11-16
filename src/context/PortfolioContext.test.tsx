@@ -163,7 +163,7 @@ describe('PortfolioProvider — deleting holdings and transactions', () => {
   })
 
   /** #17's scenario: one account, two Apple holdings, a buy for each, a linked dividend and a deposit. */
-  function seedTwoApples(type: Account['type'] = 'brokerage') {
+  function seedTwoApples(type: Account['type'] = 'brokerage', income?: Transaction[]) {
     const now = new Date().toISOString()
     localStorage.setItem(KEYS.VERSION, JSON.stringify({ version: '5.0.0', createdAt: now, updatedAt: now }))
     localStorage.setItem(KEYS.ACCOUNTS, JSON.stringify([
@@ -176,7 +176,7 @@ describe('PortfolioProvider — deleting holdings and transactions', () => {
       tx('buy-2', 'acc', { instrument: 'Apple', ticker: 'AAPL', amountPLN: -400 }),
       // Linked by id only: with a relatedTicker, startup's resolveDividendLinks
       // would re-point it at whichever AAPL holding comes last.
-      tx('div-1', 'acc', { type: 'dividend', amountPLN: 55, relatedInstrument: 'Apple', relatedHoldingId: 'apple-1' }),
+      ...(income ?? [tx('div-1', 'acc', { type: 'dividend', amountPLN: 55, relatedInstrument: 'Apple', relatedHoldingId: 'apple-1' })]),
     ]))
   }
 
@@ -206,6 +206,35 @@ describe('PortfolioProvider — deleting holdings and transactions', () => {
     cleanup()
     renderStrict()
     expect(cashOf(ctx.accounts)).toBe(400)
+  })
+
+  // The realistic shape: dividend and tax carry a relatedTicker, so startup's
+  // resolveDividendLinks points both at the last AAPL holding, apple-2.
+  const tickerLinkedIncome = [
+    tx('div', 'acc', { type: 'dividend', amountPLN: 55, relatedTicker: 'AAPL' }),
+    tx('tax', 'acc', { type: 'withholding_tax', amountPLN: -1, relatedTicker: 'AAPL' }),
+  ]
+  const links = () => ctx.transactions.map((t) => `${t.id}→${t.relatedHoldingId ?? '-'}`)
+
+  it.each([
+    ['last', 'apple-2', 'apple-1'],
+    ['first', 'apple-1', 'apple-2'],
+  ])('keeps ticker-linked dividends when the %s of two same-ticker holdings is deleted', (_, deleted, remaining) => {
+    seedTwoApples('brokerage', tickerLinkedIncome)
+    renderStrict()
+    expect(links()).toEqual(['deposit→-', 'buy-1→-', 'buy-2→-', 'div→apple-2', 'tax→apple-2'])
+    expect(cashOf(ctx.accounts)).toBe(454)
+
+    act(() => ctx.deleteHolding(deleted))
+
+    // Nothing leaves the log, and the income now points at the holding that's left.
+    expect(links()).toEqual(['deposit→-', 'buy-1→-', 'buy-2→-', `div→${remaining}`, `tax→${remaining}`])
+    expect(cashOf(ctx.accounts)).toBe(454)
+
+    cleanup()
+    renderStrict()
+    expect(links()).toEqual(['deposit→-', 'buy-1→-', 'buy-2→-', `div→${remaining}`, `tax→${remaining}`])
+    expect(cashOf(ctx.accounts)).toBe(454)
   })
 
   it('updates Cash as soon as a transaction is deleted', () => {
