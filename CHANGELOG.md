@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Restoring a damaged backup no longer breaks the app** — Restore Backup now checks every
+  account, holding, snapshot and transaction for the details the app needs (an account's type, a
+  holding's category, quantity and prices, a snapshot's allocation, a transaction's type and
+  date) and refuses the file before anything is replaced, naming the record at fault, e.g.
+  "Holding 3 (“Apple”) in “Broker” has no quantity." Previously such a file restored, then
+  crashed every page, the account page or Portfolio after the reload, or showed "Invalid Date"
+  in Activity. Backups from earlier versions still restore, and a stored snapshot missing its
+  allocation no longer stops Vestly from starting.
 - **Purchase prices after a sale, and across accounts** — the "update purchase prices" step
   at the end of an XTB import now works out the average cost of the units you still hold.
   Units you sold no longer count: buy 10 for 1,000 PLN, sell them all, buy 10 again for

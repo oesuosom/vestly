@@ -231,10 +231,12 @@ export function migrateSnapshots(): void {
 
   let changed = false
 
-  // Pass 1 — strip realEstate from allocation objects
+  // Pass 1 — strip realEstate from allocation objects. A snapshot with no
+  // allocation object is left as it is: throwing here blocks startup for the
+  // whole store over one malformed record.
   const cleaned = snapshots.map((s) => {
-    const alloc = s.allocation as Record<string, number>
-    if ('realEstate' in alloc) {
+    const alloc = s.allocation as Record<string, number> | undefined
+    if (typeof alloc === 'object' && alloc !== null && 'realEstate' in alloc) {
       changed = true
       const { realEstate: _removed, ...rest } = alloc
       return { ...s, allocation: rest as Snapshot['allocation'] }
@@ -245,7 +247,7 @@ export function migrateSnapshots(): void {
   // Pass 2 — remove empty snapshots (totalValue === 0 AND no account values)
   const filtered = cleaned.filter((s) => {
     const isEmpty =
-      s.totalValue === 0 && Object.keys(s.accountValues).length === 0
+      s.totalValue === 0 && Object.keys(s.accountValues ?? {}).length === 0
     if (isEmpty) changed = true
     return !isEmpty
   })
