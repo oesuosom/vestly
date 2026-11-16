@@ -9,7 +9,10 @@ import { clearAppKeys } from '@/utils/appStorage'
 import { downloadJson } from '@/utils/download'
 import type { Settings } from '@/types'
 
-/** Blank out API keys so backups can be shared without leaking credentials. */
+/**
+ * Blank out API keys so backups can be shared without leaking credentials.
+ * `RecoveryScreen` keeps its own copy of this field list; a test checks they match.
+ */
 function stripApiKeys(settings: Settings): Settings {
   return {
     ...settings,
@@ -113,7 +116,7 @@ export function DataManagementSettingsPage() {
     if (!importData) return
 
     try {
-      const parsed = JSON.parse(importData) as Record<string, unknown>
+      const parsed: unknown = JSON.parse(importData)
 
       // Re-checked here rather than trusted from handleFileSelect, so the
       // validation can never be bypassed by a change to how the dialog opens.
@@ -124,8 +127,9 @@ export function DataManagementSettingsPage() {
       }
 
       // Backups are exported with API keys stripped; keep the current session's.
+      // A recovery file's keys are blanked the same way, so it keeps them too.
       const currentSettings = getStore().settings
-      applyBackup(parsed, result.fields as BackupField[], {
+      applyBackup(result.backup, result.fields as BackupField[], {
         settings: (value) => mergeApiKeys(value as Settings, currentSettings),
       })
 
@@ -192,6 +196,7 @@ export function DataManagementSettingsPage() {
               Backups are plain JSON files — human-readable and portable.<br />
               Backup includes accounts, transactions, snapshots and settings.<br />
               API keys are never included — they stay on this device.<br />
+              Recovery files saved from the error screen restore here too.<br />
               Import will replace ALL current data with the backup.<br />
               After import, the app reloads automatically.
             </p>

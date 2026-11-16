@@ -16,6 +16,7 @@
  * back every key it touched if any single write fails.
  */
 import type { AccountType, AssetCategory, TransactionType } from '@/types'
+import { APP_KEY_PREFIX } from '@/utils/appStorage'
 import { KEYS } from './portfolioStore'
 
 /** Keys a backup may carry, mapped to the localStorage key each restores to. */
@@ -31,8 +32,61 @@ export const BACKUP_KEY_MAP = {
 export type BackupField = keyof typeof BACKUP_KEY_MAP
 
 export type ValidationResult =
-  | { ok: true; fields: BackupField[] }
+  /**
+   * `backup` is the file in export format, ready for `applyBackup`: the parsed
+   * object itself for a normal backup, its mapped fields for a recovery file.
+   */
+  | { ok: true; fields: BackupField[]; backup: Record<string, unknown> }
   | { ok: false; error: string }
+
+/** Each field as the user would name it, for error messages. */
+const FIELD_LABELS: Record<BackupField, string> = {
+  accounts: 'accounts',
+  snapshots: 'snapshots',
+  settings: 'settings',
+  contributions: 'IKE/IKZE contributions',
+  version: 'version',
+  transactions: 'transactions',
+}
+
+/**
+ * Turn a recovery file into the export format, or explain why it can't be.
+ *
+ * The recovery screen (`components/layout/RecoveryScreen.tsx`) saves every
+ * `ft_*` localStorage key as-is, so its top-level keys are storage keys, and
+ * it includes caches and other keys that are not part of a backup. Only the
+ * keys `BACKUP_KEY_MAP` covers are taken; the rest are ignored.
+ *
+ * A value the recovery screen could not parse is in the file as the raw text
+ * that was stored. Every backup field is an object or a list, so a string
+ * means that part was already damaged when the file was saved; it is refused
+ * by name rather than reported as a type error, since the user can fix it in
+ * the file by hand.
+ */
+function fromRecoveryFile(
+  file: Record<string, unknown>,
+): { ok: true; backup: Record<string, unknown> } | { ok: false; error: string } {
+  const backup: Record<string, unknown> = {}
+  for (const [field, storageKey] of Object.entries(BACKUP_KEY_MAP) as [BackupField, string][]) {
+    const value = file[storageKey]
+    if (typeof value === 'string') {
+      return {
+        ok: false,
+        error:
+          `The ${FIELD_LABELS[field]} entry (\u201c${storageKey}\u201d) was already unreadable when this recovery file was saved. ` +
+          'Fix that entry in the file, or restore an earlier backup.',
+      }
+    }
+    if (value !== undefined) backup[field] = value
+  }
+  return { ok: true, backup }
+}
+
+/** A recovery file has storage keys at the top level and no export fields. */
+function isRecoveryFile(parsed: Record<string, unknown>): boolean {
+  const keys = Object.keys(parsed)
+  return keys.some((k) => k.startsWith(APP_KEY_PREFIX)) && !keys.some((k) => Object.hasOwn(BACKUP_KEY_MAP, k))
+}
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -215,10 +269,22 @@ function checkTransactions(transactions: unknown[]): string | null {
  * in settings) are accepted. It is not a full schema: a backup that passes can
  * still be semantically odd, and migrations remain responsible for version
  * drift.
+ *
+ * Also accepts a recovery file from the crash-recovery screen, mapping its
+ * storage keys back through `BACKUP_KEY_MAP` and holding it to the same
+ * rules. Restore from `result.backup`, not the file, so both formats write
+ * the same way.
  */
-export function validateBackup(parsed: unknown): ValidationResult {
-  if (!isPlainObject(parsed)) {
+export function validateBackup(file: unknown): ValidationResult {
+  if (!isPlainObject(file)) {
     return { ok: false, error: 'Not a Vestly backup — expected a JSON object.' }
+  }
+
+  let parsed = file
+  if (isRecoveryFile(file)) {
+    const converted = fromRecoveryFile(file)
+    if (!converted.ok) return converted
+    parsed = converted.backup
   }
 
   const present = (Object.keys(BACKUP_KEY_MAP) as BackupField[]).filter(
@@ -273,7 +339,7 @@ export function validateBackup(parsed: unknown): ValidationResult {
     }
   }
 
-  return { ok: true, fields: present }
+  return { ok: true, fields: present, backup: parsed }
 }
 
 /**

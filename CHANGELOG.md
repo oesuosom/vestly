@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The recovery screen's backup restores, without your API keys** — the file saved by
+  Download backup on the "Something went wrong" and "couldn't be read" screens now restores
+  through Settings → Data Management → Restore Backup, with the same checks as a normal backup.
+  Before, Restore Backup answered "Not a Vestly backup — no recognised data". The file also
+  leaves out your Anthropic, EODHD, CoinGecko and exchange-rate keys, as Export Backup always
+  has, and leaves out settings it can't read, since they could hold one. If part of your data
+  was already unreadable when the file was saved, Restore Backup names it and changes nothing,
+  so you can fix that entry in the file and try again. Cached prices and AI summaries in the
+  file are skipped; they refill on their own.
 - **Realized return counted the wrong costs** — the figure on Overview (also part of Total
   return, and sent to the AI summary) is now worked out separately for each account. Before,
   the same ticker held in two accounts shared one average: buy 10 for 1,000 PLN and sell them

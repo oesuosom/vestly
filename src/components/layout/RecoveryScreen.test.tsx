@@ -49,6 +49,46 @@ describe('RecoveryScreen', () => {
     })
   })
 
+  it('blanks every API key in the settings it downloads', () => {
+    localStorage.setItem('ft_settings', JSON.stringify({
+      theme: 'dark',
+      claudeApiKey: 'sk-ant-PLACEHOLDER',
+      coinGeckoApiKey: 'CG-PLACEHOLDER',
+      priceProvider: { id: 'eodhd', apiKey: 'EODHD-PLACEHOLDER', enabled: true },
+      exchangeRateProvider: { id: 'yahoo', apiKey: 'FX-PLACEHOLDER', enabled: true },
+    }))
+    renderScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'Download backup' }))
+
+    const file = vi.mocked(downloadJson).mock.calls[0][1] as Record<string, unknown>
+    expect(JSON.stringify(file)).not.toMatch(/PLACEHOLDER/)
+    expect(file.ft_settings).toEqual({
+      theme: 'dark',
+      claudeApiKey: '',
+      coinGeckoApiKey: '',
+      priceProvider: { id: 'eodhd', apiKey: '', enabled: true },
+      exchangeRateProvider: { id: 'yahoo', enabled: true },
+    })
+  })
+
+  it('leaves out settings it cannot read, since the raw text may hold a key', () => {
+    localStorage.setItem('ft_settings', '{"theme":"dark","claudeApiKey":"sk-ant-PLACEHOLDER"')
+    renderScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'Download backup' }))
+
+    const file = vi.mocked(downloadJson).mock.calls[0][1] as Record<string, unknown>
+    expect(file).toEqual({ ft_accounts: '{' })
+    expect(JSON.stringify(file)).not.toMatch(/PLACEHOLDER/)
+  })
+
+  it('leaves out settings that parse to something other than an object', () => {
+    localStorage.setItem('ft_settings', JSON.stringify('sk-ant-PLACEHOLDER'))
+    renderScreen()
+    fireEvent.click(screen.getByRole('button', { name: 'Download backup' }))
+
+    expect(downloadJson).toHaveBeenCalledWith('vestly-recovery', { ft_accounts: '{' })
+  })
+
   it('never writes to localStorage while rendering, downloading or reloading', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
     const removeItem = vi.spyOn(Storage.prototype, 'removeItem')
