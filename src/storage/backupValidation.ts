@@ -15,7 +15,7 @@
  * `validateBackup` addresses 1 and 2; `applyBackup` addresses 3 by rolling
  * back every key it touched if any single write fails.
  */
-import type { TransactionType } from '@/types'
+import type { AccountType, AssetCategory, TransactionType } from '@/types'
 import { KEYS } from './portfolioStore'
 
 /** Keys a backup may carry, mapped to the localStorage key each restores to. */
@@ -47,10 +47,35 @@ function isAmount(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v)
 }
 
-/**
- * Every `TransactionType`. Typed as a record so adding a type to the union
+/** `yyyy-MM-dd`, alone or as the start of a full ISO datetime — what every importer writes. */
+const DATE_PREFIX = /^\d{4}-\d{2}-\d{2}/
+
+function isDate(v: unknown): v is string {
+  return isText(v) && DATE_PREFIX.test(v)
+}
+
+/*
+ * The values the app looks up in tables keyed by these unions (account
+ * colours and icons, holding icons, Activity labels); anything else crashes
+ * the page that renders it. Typed as records so adding a member to a union
  * without listing it here is a compile error, not a backup that won't restore.
  */
+const ACCOUNT_TYPES: Record<AccountType, true> = {
+  brokerage: true,
+  ikze: true,
+  ike: true,
+  crypto: true,
+  savings: true,
+}
+
+const ASSET_CATEGORIES: Record<AssetCategory, true> = {
+  stock: true,
+  etf: true,
+  bond: true,
+  crypto: true,
+  cash: true,
+}
+
 const TRANSACTION_TYPES: Record<TransactionType, true> = {
   buy: true,
   sell: true,
@@ -65,22 +90,36 @@ const TRANSACTION_TYPES: Record<TransactionType, true> = {
   receive: true,
 }
 
+function oneOf(known: Record<string, true>): (v: unknown) => boolean {
+  return (v) => isText(v) && Object.hasOwn(known, v)
+}
+
 /**
  * A field the app reads without a guard, with the plain-language name used in
- * error messages. Optional fields (`ticker`, `notes`, `isSynthetic`…) are
- * deliberately not listed: older backups legitimately lack them.
+ * error messages. `'unknown'` marks a field limited to a fixed set of values:
+ * a failure then quotes the value ("has an unknown type “pension”"). Optional
+ * fields (`ticker`, `notes`, `isSynthetic`…) are deliberately not listed:
+ * older backups legitimately lack them.
  */
-type FieldRule = readonly [key: string, label: string, check: (v: unknown) => boolean]
+type FieldRule = readonly [
+  key: string,
+  label: string,
+  check: (v: unknown) => boolean,
+  failure?: 'unknown',
+]
 
 const ACCOUNT_RULES: FieldRule[] = [
   ['id', 'ID', isText],
   ['name', 'name', isText],
+  ['type', 'type', oneOf(ACCOUNT_TYPES), 'unknown'],
 ]
 
+// `purchaseDate` only has to be text: an empty or odd one shows no visible
+// problem, and backups from manual entry may carry either.
 const HOLDING_RULES: FieldRule[] = [
   ['id', 'ID', isText],
   ['name', 'name', isText],
-  ['category', 'category', isText],
+  ['category', 'category', oneOf(ASSET_CATEGORIES), 'unknown'],
   ['purchaseDate', 'purchase date', isText],
   ['quantity', 'quantity', isAmount],
   ['purchasePrice', 'purchase price', isAmount],
@@ -100,27 +139,32 @@ const SNAPSHOT_RULES: FieldRule[] = [
 const TRANSACTION_RULES: FieldRule[] = [
   ['id', 'ID', isText],
   ['accountId', 'account', isText],
-  ['date', 'date', isText],
+  ['type', 'type', oneOf(TRANSACTION_TYPES), 'unknown'],
+  ['date', 'date', isDate],
   ['amountPLN', 'amount', isAmount],
 ]
 
 /** First rule `record` breaks, phrased to follow its name ("… has no quantity."). */
 function findProblem(record: Record<string, unknown>, rules: FieldRule[]): string | null {
-  for (const [key, label, check] of rules) {
+  for (const [key, label, check, failure] of rules) {
     const value = record[key]
     if (value === undefined || value === null) return `has no ${label}`
-    if (!check(value)) return `has an invalid ${label}`
+    if (check(value)) continue
+    if (failure === 'unknown') return `has an unknown ${label}${isText(value) ? ` “${value}”` : ''}`
+    return `has an invalid ${label}`
   }
   return null
 }
 
-/** "“Broker”" when the record has a usable name, otherwise nothing. */
+/** " (“Broker”)" when the record has a usable name, otherwise nothing. */
 function quoted(v: unknown): string {
   return isText(v) && v.trim() !== '' ? ` (“${v}”)` : ''
 }
 
+/** " (2026-02-10)" or, for a legacy snapshot, " (2025-09)"; nothing for a non-date. */
 function dateLabel(v: unknown): string {
-  return isText(v) && v !== '' ? ` (${v.slice(0, 10)})` : ''
+  const match = isText(v) ? /^\d{4}-\d{2}(-\d{2})?/.exec(v) : null
+  return match ? ` (${match[0]})` : ''
 }
 
 function checkAccounts(accounts: unknown[]): string | null {
@@ -154,16 +198,8 @@ function checkSnapshots(snapshots: unknown[]): string | null {
 function checkTransactions(transactions: unknown[]): string | null {
   for (const [i, transaction] of transactions.entries()) {
     if (!isPlainObject(transaction)) return `Transaction ${i + 1} is not a valid transaction.`
-    const label = `Transaction ${i + 1}${dateLabel(transaction.date)}`
-
-    const { type } = transaction
-    if (type === undefined || type === null) return `${label} has no type.`
-    if (!isText(type) || !Object.hasOwn(TRANSACTION_TYPES, type)) {
-      return `${label} has an unknown type${isText(type) ? ` “${type}”` : ''}.`
-    }
-
     const problem = findProblem(transaction, TRANSACTION_RULES)
-    if (problem) return `${label} ${problem}.`
+    if (problem) return `Transaction ${i + 1}${dateLabel(transaction.date)} ${problem}.`
   }
   return null
 }

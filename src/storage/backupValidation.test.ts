@@ -20,7 +20,7 @@ const holding = {
   quantity: 10, purchasePrice: 100, currentPrice: 120, purchaseDate: '2025-03-01',
   createdAt: '2025-03-01T09:00:00.000Z', updatedAt: '2025-03-01T09:00:00.000Z',
 }
-const account = { id: 'a1', name: 'XTB', holdings: [] }
+const account = { id: 'a1', name: 'XTB', type: 'brokerage', holdings: [] }
 const transaction = {
   id: 't1', accountId: 'a1', type: 'buy', date: '2026-02-10', amountPLN: -100,
 }
@@ -178,6 +178,28 @@ describe('validateBackup — rejects records the app cannot read (#15)', () => {
     expect(errorFor({ transactions: [{ ...transaction, date: 20260210 }] }))
       .toBe('Transaction 1 has an invalid date.')
   })
+
+  it.each(['soon', '', '10.02.2026', '2026-02'])(
+    'rejects a transaction dated %j: it must start with yyyy-MM-dd, or Activity shows "Invalid Date"',
+    (date) => {
+      expect(errorFor({ transactions: [{ ...transaction, date }] })).toMatch(/^Transaction 1( \(2026-02\))? has an invalid date\.$/)
+    },
+  )
+
+  it('rejects an account with no type, which crashes its icon on every page', () => {
+    const { type: _omitted, ...bad } = account
+    expect(errorFor({ accounts: [{ ...bad, name: 'Broker' }] })).toBe('Account 1 (“Broker”) has no type.')
+  })
+
+  it('rejects an account with an unknown type, quoting it', () => {
+    expect(errorFor({ accounts: [account, { ...account, name: 'Pension', type: 'pension' }] }))
+      .toBe('Account 2 (“Pension”) has an unknown type “pension”.')
+  })
+
+  it('rejects a holding with an unknown category, which crashes the account page and Portfolio', () => {
+    expect(errorFor(withHolding({ ...holding, category: 'fund' })))
+      .toBe('Holding 3 (“Example Corp”) in “Broker” has an unknown category “fund”.')
+  })
 })
 
 describe('validateBackup — accepts real backups', () => {
@@ -203,11 +225,32 @@ describe('validateBackup — accepts real backups', () => {
       quantity: 1, purchasePrice: 100, currentPrice: 100, purchaseDate: '2025-01-01',
     }
     const r = validateBackup({
-      accounts: [{ id: 'a1', name: 'Bonds', holdings: [minimalHolding] }],
+      accounts: [{ id: 'a1', name: 'Bonds', type: 'savings', holdings: [minimalHolding] }],
       transactions: [{ id: 't1', accountId: 'a1', type: 'deposit', date: '2025-01-01', amountPLN: 100 }],
       snapshots: [{ date: '2025-01-01', totalValue: 0, allocation: {}, accountValues: {} }],
     })
     expect(r.ok).toBe(true)
+  })
+
+  it('accepts every account type and holding category', () => {
+    const types = ['brokerage', 'ikze', 'ike', 'crypto', 'savings']
+    const categories = ['stock', 'etf', 'bond', 'crypto', 'cash']
+    const r = validateBackup({
+      accounts: types.map((type, i) => ({
+        ...account,
+        id: `a${i}`,
+        type,
+        holdings: categories.map((category) => ({ ...holding, category })),
+      })),
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  it.each([
+    ['a date-only string (XTB cash operations)', '2026-02-10'],
+    ['a full ISO datetime (confirmations, eMakler, Revolut, bond buys)', '2026-02-10T09:02:54.000Z'],
+  ])('accepts a transaction dated with %s', (_label, date) => {
+    expect(validateBackup({ transactions: [{ ...transaction, date }] }).ok).toBe(true)
   })
 
   it('accepts every transaction type', () => {
