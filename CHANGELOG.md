@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Purchase prices after a sale, and across accounts** — the "update purchase prices" step
+  at the end of an XTB import now works out the average cost of the units you still hold.
+  Units you sold no longer count: buy 10 for 1,000 PLN, sell them all, buy 10 again for
+  2,000 PLN, and the holding costs 200 per unit rather than 150. A partial sale leaves the
+  average unchanged. The step also changes only the account you are importing into, and
+  writes exactly the prices it previewed; before, confirming it blended the same ticker's
+  buys from every account and rewrote purchase prices in accounts the preview never showed.
 - **Escape closes only the top pop-up** — with a drop-down or date picker open inside a
   dialog (e.g. Category in Add Holding), Escape now closes just that list and puts focus back
   on its button; the dialog stays open and keeps what you typed. Press Escape again to close
@@ -46,13 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **XTB import: missing exchanges** — when creating holdings for instruments the importer
   couldn't identify, the Exchange dropdown now offers UK (LSE) and XETRA alongside US and PL,
   so London- and Frankfurt-listed ETFs get the right price feed.
-- **Purchase prices after a sale, and across accounts** — the "update purchase prices" step
-  at the end of an XTB import now works out the average cost of the units you still hold.
-  Units you sold no longer count: buy 10 for 1,000 PLN, sell them all, buy 10 again for
-  2,000 PLN, and the holding costs 200 per unit rather than 150. A partial sale leaves the
-  average unchanged. The step also changes only the account you are importing into, and
-  writes exactly the prices it previewed; before, confirming it blended the same ticker's
-  buys from every account and rewrote purchase prices in accounts the preview never showed.
 
 ## [0.0.1] — 2026-09-13
 
