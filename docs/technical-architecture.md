@@ -173,11 +173,12 @@ Responses are cached in `ft_insight_cache` (4 h) and `ft_account_insight_<accoun
 
 - **Values and P&L** — `getHoldingValue`, `getHoldingPnL`, `getAccountValue(s)`, `getTotalValue`, `getTotalCostBasis`, `getUnrealizedPnL`, `getRealizedPnL`, `getTotalReturn`, `getAllTimeSummary`
 - **Allocation** — `getCurrentAllocation`, `getCategoryAllocation`, `getGroupDrift`, `needsRebalancing`
+- **Positions** — `walkPosition` (`position.ts`): one account's transactions for one ticker, walked in date order with the average-cost method. The single definition of quantity held and its cost
 - **Transactions** — `resolveTransactionTicker`, `calculateAverageCostBasis`, `calculateNetCryptoQuantity`, `computeAccountCashBalance`, `resolveDividendLinks`, `getDividendIncomeForHolding`, `getIncomeSummary`, `recalculateCostBases`
 - **Time series** — `quantityAtDate`, `computePortfolioAt`, `buildHistoriesMap`
 - **Snapshots and holdings** — `upsertTodaySnapshot`, `upsertSyntheticCashHolding`, `upsertBondBuyTransaction`, `buildBondBuyTransaction`
 
-`calculations.test.ts` covers this layer; `csvParser`, `tradeDedup`, `xtbConfirmationParser`, and `formatters` have their own suites.
+`calculations.test.ts` and `position.test.ts` cover this layer; `csvParser`, `tradeDedup`, `xtbConfirmationParser`, and `formatters` have their own suites.
 
 ---
 

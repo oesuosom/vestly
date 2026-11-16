@@ -11,6 +11,7 @@ import {
   needsRebalancing,
   calculateAverageCostBasis,
   calculateNetCryptoQuantity,
+  recalculateCostBases,
   getDividendIncomeForHolding,
   getTotalReturn,
   getIncomeSummary,
@@ -286,33 +287,143 @@ describe('calculateAverageCostBasis', () => {
       makeTx({ id: 't1', type: 'buy', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }), // 100 PLN each
       makeTx({ id: 't2', type: 'buy', ticker: 'ETFW', quantity: 10, amountPLN: -1200 }), // 120 PLN each
     ]
-    const result = calculateAverageCostBasis(transactions, 'ETFW')
-    expect(result.totalQuantity).toBe(20)
-    expect(result.totalCostPLN).toBe(2200)
+    const result = calculateAverageCostBasis(transactions, 'acc1', 'ETFW')
+    expect(result.quantity).toBe(20)
+    expect(result.costPLN).toBe(2200)
     expect(result.averageCostPLN).toBe(110) // (1000 + 1200) / 20
   })
 
   it('is case-insensitive for tickers', () => {
     const transactions = [makeTx({ type: 'buy', ticker: 'etfw', quantity: 5, amountPLN: -500 })]
-    const result = calculateAverageCostBasis(transactions, 'ETFW')
-    expect(result.totalQuantity).toBe(5)
+    const result = calculateAverageCostBasis(transactions, 'acc1', 'ETFW')
+    expect(result.quantity).toBe(5)
   })
 
-  it('ignores non-buy transactions (dividends, sells, etc.)', () => {
+  it('uses the rebuy price after everything was sold', () => {
     const transactions = [
-      makeTx({ id: 't1', type: 'buy',      ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
-      makeTx({ id: 't2', type: 'dividend', ticker: 'ETFW', quantity: undefined, amountPLN: 50 }),
-      makeTx({ id: 't3', type: 'sell',     ticker: 'ETFW', quantity: 5, amountPLN: 600 }),
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-03-10', ticker: 'ETFW', quantity: 10, amountPLN: -2000 }),
     ]
-    const result = calculateAverageCostBasis(transactions, 'ETFW')
-    expect(result.totalQuantity).toBe(10) // only the buy counts
+    const result = calculateAverageCostBasis(transactions, 'acc1', 'ETFW')
+    expect(result.averageCostPLN).toBe(200) // not (1000 + 2000) / 20 = 150
+    expect(result.quantity).toBe(10)
+    expect(result.costPLN).toBe(2000)
   })
 
-  it('returns zeroes when no buy transactions exist', () => {
-    const result = calculateAverageCostBasis([], 'ETFW')
-    expect(result.averageCostPLN).toBe(0)
-    expect(result.totalQuantity).toBe(0)
-    expect(result.totalCostPLN).toBe(0)
+  it('leaves the average cost unchanged after a partial sale', () => {
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',      date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'dividend', date: '2025-01-20', ticker: 'ETFW', quantity: undefined, amountPLN: 50 }),
+      makeTx({ id: 't3', type: 'sell',     date: '2025-02-10', ticker: 'ETFW', quantity: 4, amountPLN: 600 }),
+    ]
+    const result = calculateAverageCostBasis(transactions, 'acc1', 'ETFW')
+    expect(result.averageCostPLN).toBe(100)
+    expect(result.quantity).toBe(6)
+    expect(result.costPLN).toBe(600)
+  })
+
+  it('counts only the given account when the same ticker is held in two', () => {
+    const transactions = [
+      makeTx({ id: 't1', accountId: 'acc1', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', accountId: 'acc2', ticker: 'ETFW', quantity: 10, amountPLN: -3000 }),
+    ]
+    expect(calculateAverageCostBasis(transactions, 'acc1', 'ETFW').averageCostPLN).toBe(100)
+    expect(calculateAverageCostBasis(transactions, 'acc2', 'ETFW').averageCostPLN).toBe(300)
+  })
+
+  it('ignores other tickers in the same account', () => {
+    const transactions = [
+      makeTx({ id: 't1', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', ticker: 'OTHR', quantity: 10, amountPLN: -9000 }),
+    ]
+    expect(calculateAverageCostBasis(transactions, 'acc1', 'ETFW').averageCostPLN).toBe(100)
+  })
+
+  it('matches transactions that carry only an instrument name', () => {
+    // Imported before the ticker was known: `instrument` is all there is.
+    const transactions = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: undefined, instrument: 'KGH', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: undefined, instrument: 'KGH', quantity: 10, amountPLN: 1500 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-03-10', ticker: 'KGH', quantity: 10, amountPLN: -2000 }),
+    ]
+    expect(calculateAverageCostBasis(transactions, 'acc1', 'KGH').averageCostPLN).toBe(200)
+  })
+
+  it('returns zeroes when nothing is held', () => {
+    const empty = { averageCostPLN: 0, quantity: 0, costPLN: 0 }
+    expect(calculateAverageCostBasis([], 'acc1', 'ETFW')).toEqual(empty)
+
+    const soldOut = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
+    ]
+    expect(calculateAverageCostBasis(soldOut, 'acc1', 'ETFW')).toEqual(empty)
+  })
+})
+
+// ─── recalculateCostBases ─────────────────────────────────────────────────────
+
+describe('recalculateCostBases', () => {
+  /** Two accounts that each hold 10 ETFW with a stale purchase price of 1. */
+  function twoAccounts(): Account[] {
+    return [
+      makeAccount({ id: 'acc1', holdings: [makeHolding({ id: 'h1', accountId: 'acc1', ticker: 'ETFW', quantity: 10, purchasePrice: 1 })] }),
+      makeAccount({ id: 'acc2', holdings: [makeHolding({ id: 'h2', accountId: 'acc2', ticker: 'ETFW', quantity: 10, purchasePrice: 1 })] }),
+    ]
+  }
+  const transactions = [
+    makeTx({ id: 't1', accountId: 'acc1', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+    makeTx({ id: 't2', accountId: 'acc2', ticker: 'ETFW', quantity: 10, amountPLN: -3000 }),
+  ]
+
+  it("gives the same ticker in two accounts each account's own cost", () => {
+    const accounts = twoAccounts()
+    const afterFirst = recalculateCostBases(accounts, transactions, 'acc1')
+    const afterBoth = recalculateCostBases(afterFirst, transactions, 'acc2')
+    expect(afterBoth[0].holdings[0].purchasePrice).toBe(100) // not the blended 200
+    expect(afterBoth[1].holdings[0].purchasePrice).toBe(300)
+  })
+
+  it('changes only the given account', () => {
+    const accounts = twoAccounts()
+    const result = recalculateCostBases(accounts, transactions, 'acc1')
+    expect(result[0].holdings[0].purchasePrice).toBe(100)
+    expect(result[1]).toBe(accounts[1]) // same object: nothing rewritten, updatedAt not bumped
+    expect(result[1].holdings[0].purchasePrice).toBe(1)
+  })
+
+  it('uses the rebuy price after everything was sold', () => {
+    const accounts = [makeAccount({ holdings: [makeHolding({ ticker: 'ETFW', quantity: 10, purchasePrice: 150 })] })]
+    const sellAndRebuy = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'ETFW', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'sell', date: '2025-02-10', ticker: 'ETFW', quantity: 10, amountPLN: 1500 }),
+      makeTx({ id: 't3', type: 'buy',  date: '2025-03-10', ticker: 'ETFW', quantity: 10, amountPLN: -2000 }),
+    ]
+    const result = recalculateCostBases(accounts, sellAndRebuy, 'acc1')
+    expect(result[0].holdings[0].purchasePrice).toBe(200)
+  })
+
+  it('leaves holdings alone when the log has no open position for them', () => {
+    const untouched = [
+      makeHolding({ id: 'h-cash', ticker: 'CASH', isSynthetic: true, purchasePrice: 1 }),
+      makeHolding({ id: 'h-noticker', ticker: undefined, purchasePrice: 2 }),
+      makeHolding({ id: 'h-notx', ticker: 'NOTX', purchasePrice: 3 }),
+      makeHolding({ id: 'h-sold', ticker: 'SOLD', purchasePrice: 4 }),
+    ]
+    const accounts = [makeAccount({ holdings: untouched })]
+    const log = [
+      makeTx({ id: 't1', type: 'buy',  date: '2025-01-10', ticker: 'CASH', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't2', type: 'buy',  date: '2025-01-10', ticker: 'SOLD', quantity: 10, amountPLN: -1000 }),
+      makeTx({ id: 't3', type: 'sell', date: '2025-02-10', ticker: 'SOLD', quantity: 10, amountPLN: 1500 }),
+    ]
+    const result = recalculateCostBases(accounts, log, 'acc1')
+    expect(result[0].holdings).toEqual(untouched)
+  })
+
+  it('returns the accounts unchanged for an unknown account id', () => {
+    const accounts = twoAccounts()
+    expect(recalculateCostBases(accounts, transactions, 'missing')).toEqual(accounts)
   })
 })
 

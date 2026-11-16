@@ -116,8 +116,14 @@ cashBalance  = Σ amountPLN over all transactions in the account
 // Ticker resolution (resolveTransactionTicker)
 ticker = t.ticker ?? staticLookupInstrument(t.instrument)?.ticker
 
-// Cost basis and crypto quantity
-avgCost(ticker) = totalCostPLN(buys) / totalQty(buys)
+// Position — one ticker in one account, walked in date order (walkPosition)
+buy / receive : qty += quantity;  cost += |amountPLN|
+sell / send   : cost −= (cost / qty) × quantity;  qty −= quantity   // average unchanged
+qty reaches 0 : cost = 0          // a later buy starts a new pool at its own price
+avgCost(account, ticker) = cost / qty
+// Same day, time unknown (date-only rows): buys and receives run before sells and sends.
+
+// Crypto quantity
 netQty(ticker)  = Σ(buy + receive qty) − Σ(sell + send qty)
 
 // Income, per calendar year — the tax legs are already negative
