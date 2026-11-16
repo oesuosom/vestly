@@ -1,5 +1,6 @@
 import type { Account, AllocationGroup, AllocationTargets, CategoryAllocation, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from './instrumentLookup'
+import { walkPosition, type Position } from './position'
 
 /** Calculate the current market value of a single holding. */
 export function getHoldingValue(holding: Holding): number {
@@ -146,26 +147,30 @@ export function resolveTransactionTicker(
 }
 
 /**
- * Weighted average cost basis from buy transactions for a given ticker.
- * Returns zeroes when no buy transactions are found.
- * Uses `resolveTransactionTicker` so ticker-less ETF transactions (imported
- * before the static-lookup fix) are matched via instrument name resolution.
+ * Average cost of the units of `ticker` currently held in one account.
+ *
+ * Narrows the transactions to that account and ticker, then hands them to
+ * `walkPosition` (see `position.ts` for the rules): sales remove units at the
+ * running average, and a position that was sold out starts again from the
+ * next buy. Returns an empty position when nothing is held.
+ *
+ * Transactions belonging to other accounts are never counted, even when the
+ * caller passes the whole transaction log.
+ *
+ * Uses `resolveTransactionTicker` so ticker-less transactions (imported before
+ * their ticker was known) are matched via their instrument name.
  */
 export function calculateAverageCostBasis(
   transactions: Transaction[],
+  accountId: string,
   ticker: string
-): { averageCostPLN: number; totalQuantity: number; totalCostPLN: number } {
+): Position {
   const tickerUpper = ticker.toUpperCase()
-  const buys = transactions.filter(
-    (t) => t.type === 'buy' && resolveTransactionTicker(t) === tickerUpper
+  return walkPosition(
+    transactions.filter(
+      (t) => t.accountId === accountId && resolveTransactionTicker(t) === tickerUpper
+    )
   )
-  const totalCostPLN = buys.reduce((sum, t) => sum + Math.abs(t.amountPLN), 0)
-  const totalQuantity = buys.reduce((sum, t) => sum + (t.quantity ?? 0), 0)
-  return {
-    averageCostPLN: totalQuantity > 0 ? totalCostPLN / totalQuantity : 0,
-    totalQuantity,
-    totalCostPLN,
-  }
 }
 
 /**
@@ -320,33 +325,37 @@ export function getTotalCostBasis(accounts: Account[]): number {
 }
 
 /**
- * Recalculate purchasePrice for all holdings that have matching buy transactions.
+ * Recalculate purchasePrice for the holdings of one account from that
+ * account's transactions. Every other account is returned untouched (the same
+ * object), so the result can replace the full accounts array.
  *
  * Rules:
  * - Synthetic holdings (isSynthetic: true) are always skipped — they are
  *   managed by upsertSyntheticCashHolding, not the transaction log.
- * - Holdings without a ticker are skipped (no way to match buy transactions).
- * - Holdings whose ticker has no buy transactions are left unchanged
- *   (totalQuantity === 0 guard), preserving any manually entered cost basis.
- * - Matched holdings get purchasePrice set to the weighted average cost and
- *   updatedAt bumped to now.
- *
- * `resolveTransactionTicker` is used in calculateAverageCostBasis so ETF buy
- * transactions imported without a ticker are matched via the static lookup.
+ * - Holdings without a ticker are skipped (no way to match transactions).
+ * - Holdings whose ticker has no open position in the transaction log — no
+ *   trades at all, or everything sold — are left unchanged, preserving any
+ *   manually entered cost basis.
+ * - Matched holdings get purchasePrice set to the average cost of the units
+ *   still held (see calculateAverageCostBasis) and updatedAt bumped to now.
  */
 export function recalculateCostBases(
   accounts: Account[],
-  transactions: Transaction[]
+  transactions: Transaction[],
+  accountId: string
 ): Account[] {
   const now = new Date().toISOString()
-  return accounts.map((acc) => ({
-    ...acc,
-    holdings: acc.holdings.map((h) => {
-      if (h.isSynthetic) return h
-      if (!h.ticker) return h
-      const { averageCostPLN, totalQuantity } = calculateAverageCostBasis(transactions, h.ticker)
-      if (totalQuantity === 0) return h  // no buy transactions found, leave unchanged
-      return { ...h, purchasePrice: averageCostPLN, updatedAt: now }
-    }),
-  }))
+  return accounts.map((acc) => {
+    if (acc.id !== accountId) return acc
+    return {
+      ...acc,
+      holdings: acc.holdings.map((h) => {
+        if (h.isSynthetic) return h
+        if (!h.ticker) return h
+        const { averageCostPLN, quantity } = calculateAverageCostBasis(transactions, acc.id, h.ticker)
+        if (quantity === 0) return h  // no open position in the log, leave unchanged
+        return { ...h, purchasePrice: averageCostPLN, updatedAt: now }
+      }),
+    }
+  })
 }

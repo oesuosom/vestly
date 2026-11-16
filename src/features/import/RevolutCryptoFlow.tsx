@@ -157,11 +157,12 @@ export function RevolutCryptoFlow({
     const needsExchangePatch = !!(existingEth && !existingEth.exchange)
 
     if (added > 0 || needsExchangePatch) {
-      // Compute proposed holding from all ETH buy transactions in this account
-      const { averageCostPLN, totalQuantity, totalCostPLN } = calculateAverageCostBasis(
-        mergedTransactions.filter((t) => t.accountId === accountId),
-        'ETH',
-      )
+      // Compute proposed holding from this account's ETH position
+      const {
+        averageCostPLN,
+        quantity: totalQuantity,
+        costPLN: totalCostPLN,
+      } = calculateAverageCostBasis(mergedTransactions, accountId, 'ETH')
 
       if (totalQuantity > 0) {
         // Find earliest ETH buy date

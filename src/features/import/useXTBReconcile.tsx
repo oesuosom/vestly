@@ -206,7 +206,7 @@ export function useXTBReconcile({
   }
 
   function handleConfirmCostBasis() {
-    const recalculated = recalculateCostBases(cbAccountsSnapshot, cbTransactionsSnapshot)
+    const recalculated = recalculateCostBases(cbAccountsSnapshot, cbTransactionsSnapshot, accountId)
     replaceAccounts(recalculated)
 
     const parts = [...extraParts]

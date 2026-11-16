@@ -11,13 +11,14 @@ export type CostBasisDiffRow = {
   holdingName: string
   ticker: string
   currentPricePLN: number    // existing purchasePrice before recalculation
-  calculatedPricePLN: number // weighted average from buy transactions
+  calculatedPricePLN: number // average cost of the units still held
   quantity: number
 }
 
 /**
  * For each non-synthetic holding with a ticker in the given account, compute
- * the weighted-average cost from that account's buy transactions. Returns only
+ * the average cost of the units still held, from that account's transactions
+ * (see calculateAverageCostBasis). Returns only
  * rows where the calculated value differs from the stored purchasePrice
  * (±0.001 PLN tolerance).
  *
@@ -32,15 +33,12 @@ export function computeCostBasisDiff(
   const account = accounts.find(a => a.id === accountId)
   if (!account) return []
 
-  // Only consider buy transactions belonging to this account.
-  const accountTransactions = transactions.filter(t => t.accountId === accountId)
-
   const rows: CostBasisDiffRow[] = []
   for (const h of account.holdings) {
     if (h.isSynthetic) continue
     if (!h.ticker) continue
-    const { averageCostPLN, totalQuantity } = calculateAverageCostBasis(accountTransactions, h.ticker)
-    if (totalQuantity === 0) continue
+    const { averageCostPLN, quantity } = calculateAverageCostBasis(transactions, accountId, h.ticker)
+    if (quantity === 0) continue  // no open position in the log, nothing to propose
     if (Math.abs(averageCostPLN - h.purchasePrice) < 0.001) continue
     rows.push({
       holdingId: h.id,

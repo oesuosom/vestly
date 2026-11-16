@@ -6,8 +6,8 @@
  *
  *   1. **Unmatched instruments** — a buy arrived for a ticker with no holding,
  *      so the holding has to be created before the portfolio reflects it.
- *   2. **Cost basis** — the weighted average implied by the buy transactions
- *      differs from the holding's stored purchase price.
+ *   2. **Cost basis** — the average cost of the units still held, implied by the
+ *      account's transactions, differs from the holding's stored purchase price.
  *
  * This file holds the two step components; `useXTBReconcile` (in
  * useXTBReconcile.tsx) owns the state machine that sequences them. Both flows
@@ -430,8 +430,8 @@ export function CostBasisStep({
         </div>
 
         <p className="text-sm text-accent tracking-[-0.35px]">
-          Prices are per-unit, in PLN, weighted average across all buy transactions. Holdings
-          without matching buy transactions are not affected.
+          Prices are per-unit, in PLN: the average cost of the units you still hold in this
+          account, after any sales. Holdings without matching transactions are not affected.
         </p>
       </div>
 

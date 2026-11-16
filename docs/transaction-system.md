@@ -169,7 +169,7 @@ It runs after every import, on app mount (a holding may not have existed when th
 
 ## Cost basis recalculation
 
-After an XTB transaction import, `XTBTransactionFlow` offers to rebuild holding cost bases from the log: a diff table of current versus calculated average, then a single confirm that writes `holding.purchasePrice` from the weighted average of buys. Holdings that are synthetic or have no matching buys are skipped. Applied through `replaceAccounts()` as one atomic update.
+After an XTB transaction import, `XTBTransactionFlow` offers to rebuild holding cost bases from the log: a diff table of current versus calculated average, then a single confirm that writes `holding.purchasePrice` from the average cost of the units still held (`walkPosition`: sales remove units at the running average, and a sold-out position starts again from the next buy). Both the diff and the confirm are scoped to the importing account — the same ticker in another account keeps its own cost. Holdings that are synthetic or have no open position in the log are skipped. Applied through `replaceAccounts()` as one atomic update.
 
 ---
 
