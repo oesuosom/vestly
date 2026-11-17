@@ -284,6 +284,85 @@ describe('validateBackup — accepts real backups', () => {
   })
 })
 
+describe('validateBackup — recovery files (#16)', () => {
+  // What the recovery screen saves: every `ft_*` key, caches and all.
+  const recoveryFile = {
+    ft_version: goodBackup.version,
+    ft_accounts: [account],
+    ft_transactions: [transaction],
+    ft_snapshots: [snapshot],
+    ft_settings: goodBackup.settings,
+    ft_contribution: goodBackup.contributions,
+    ft_news_cache: { items: [], cachedAt: '2026-02-10T09:00:00.000Z' },
+    ft_emakler_order_keys: ['k1'],
+    ft_account_insight_a1: 'not JSON, and not part of a backup',
+  }
+
+  it('maps storage keys back to backup fields', () => {
+    const r = validateBackup(recoveryFile)
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.backup).toEqual(goodBackup)
+  })
+
+  it('ignores caches and other keys a backup does not carry, even unreadable ones', () => {
+    const r = validateBackup(recoveryFile)
+    if (!r.ok) throw new Error('recovery file should validate')
+    expect(r.fields.sort()).toEqual(Object.keys(goodBackup).sort())
+  })
+
+  it('accepts a recovery file holding only some backup keys', () => {
+    const r = validateBackup({ ft_accounts: [account], ft_price_cache_v2: {} })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.backup).toEqual({ accounts: [account] })
+  })
+
+  it('rejects a value saved as raw text because it was unreadable, naming it', () => {
+    expect(errorFor({ ...recoveryFile, ft_accounts: '[{"id":"a1",' })).toBe(
+      'The accounts entry (“ft_accounts”) was already unreadable when this recovery file was saved. '
+      + 'Fix that entry in the file, or restore an earlier backup.',
+    )
+    expect(errorFor({ ...recoveryFile, ft_contribution: '{' })).toMatch(/^The IKE\/IKZE contributions entry \(“ft_contribution”\)/)
+  })
+
+  it('holds records to the same rules as a normal backup', () => {
+    const badHolding = { ...holding, quantity: undefined }
+    const badAccount = { ...account, name: 'Broker', holdings: [badHolding] }
+    expect(errorFor({ ...recoveryFile, ft_accounts: [badAccount] }))
+      .toBe(errorFor({ ...goodBackup, accounts: [badAccount] }))
+    expect(errorFor({ ...recoveryFile, ft_settings: ['dark'] })).toBe('`settings` must be an object.')
+  })
+
+  it('rejects a recovery file with nothing a backup carries', () => {
+    expect(errorFor({ ft_news_cache: {}, ft_no_div_cache: {} })).toMatch(/no recognised data/)
+  })
+
+  it('reads a file with export fields as a normal backup, ignoring any storage keys', () => {
+    const r = validateBackup({ accounts: [account], ft_accounts: 'ignored' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.fields).toEqual(['accounts'])
+  })
+
+  it('returns a normal backup unchanged for restoring', () => {
+    const r = validateBackup(goodBackup)
+    if (!r.ok) throw new Error('fixture should validate')
+    expect(r.backup).toBe(goodBackup)
+  })
+
+  it('restores a recovery file through applyBackup, writing only backup keys', () => {
+    localStorage.clear()
+    const r = validateBackup(recoveryFile)
+    if (!r.ok) throw new Error('recovery file should validate')
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    applyBackup(r.backup, r.fields)
+
+    expect(setItem.mock.calls.map(([key]) => key).sort()).toEqual(Object.values(BACKUP_KEY_MAP).sort())
+    expect(JSON.parse(localStorage.getItem('ft_accounts')!)).toEqual([account])
+    expect(JSON.parse(localStorage.getItem('ft_contribution')!)).toEqual(goodBackup.contributions)
+    expect(localStorage.getItem('ft_news_cache')).toBeNull()
+    vi.restoreAllMocks()
+  })
+})
+
 describe('applyBackup — atomicity', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())

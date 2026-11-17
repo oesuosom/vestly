@@ -11,23 +11,60 @@ import { downloadJson } from '@/utils/download'
 // from `@/storage/*` or any context. Only dependency-free helpers belong here.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Where the app keeps its settings, including the user's API keys. */
+const SETTINGS_KEY = 'ft_settings'
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/**
+ * Blank the API keys in a stored settings object, so the recovery file can be
+ * shared when asking for help. The same fields `stripApiKeys` clears for a
+ * normal export in `DataManagementSettingsPage.tsx` (kept local: see the rule
+ * above); a test fails if the two drift apart. Only fields that exist are
+ * touched, so the file stays a faithful copy of what was stored.
+ */
+function blankApiKeys(settings: Record<string, unknown>): Record<string, unknown> {
+  const blanked = { ...settings }
+  if ('coinGeckoApiKey' in blanked) blanked.coinGeckoApiKey = ''
+  if ('claudeApiKey' in blanked) blanked.claudeApiKey = ''
+  if (isPlainObject(blanked.priceProvider)) {
+    blanked.priceProvider = { ...blanked.priceProvider, apiKey: '' }
+  }
+  if (isPlainObject(blanked.exchangeRateProvider)) {
+    const { apiKey: _apiKey, ...provider } = blanked.exchangeRateProvider
+    blanked.exchangeRateProvider = provider
+  }
+  return blanked
+}
+
 /**
  * Read every app-owned key straight out of localStorage and hand it back as a
- * downloadable file.
+ * downloadable file, which Settings → Data Management → Restore Backup accepts.
  *
  * Values are re-parsed where possible and passed through as raw strings where
- * not, so even corrupt entries survive into the backup exactly as stored.
+ * not, so even corrupt entries survive into the backup exactly as stored. The
+ * one exception is settings: API keys are blanked, and settings that can't be
+ * read are left out entirely, since there is no reliable way to find a key
+ * inside damaged text.
  */
 function downloadRawBackup(): void {
   const dump: Record<string, unknown> = {}
   for (const key of listAppKeys()) {
     const raw = localStorage.getItem(key)
     if (raw === null) continue
+    let value: unknown
     try {
-      dump[key] = JSON.parse(raw)
+      value = JSON.parse(raw)
     } catch {
-      dump[key] = raw
+      value = raw
     }
+    if (key === SETTINGS_KEY) {
+      if (!isPlainObject(value)) continue
+      value = blankApiKeys(value)
+    }
+    dump[key] = value
   }
   downloadJson('vestly-recovery', dump)
 }
@@ -83,7 +120,12 @@ export function RecoveryScreen({ title, description, details }: RecoveryScreenPr
           </Button>
         </div>
 
-        <p className="text-xs text-accent mt-4">
+        <p className="text-xs text-accent mt-4 text-balance">
+          If the file is readable, you can restore it later in
+          Settings&nbsp;→&nbsp;Data&nbsp;Management. It leaves out API keys, and any
+          settings that can&rsquo;t be read, since those could hold one.
+        </p>
+        <p className="text-xs text-accent mt-2">
           Resetting erases every account, holding and transaction stored in
           this browser. It cannot be undone.
         </p>
