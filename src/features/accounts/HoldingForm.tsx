@@ -2,7 +2,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { Input } from '@/components/ui/Input'
 import { Dropdown } from '@/components/ui/Dropdown'
 import { Button } from '@/components/ui/Button'
-import { Calendar } from '@/generated/icons'
+import { DateField } from '@/components/ui/DateField'
 import { exchangeOptions } from '@/domain/exchanges'
 import type { AssetCategory } from '@/types'
 
@@ -162,54 +162,20 @@ export function HoldingForm({ onSubmit, onCancel, defaultValues, transactionBack
             />
           </div>
 
-          <div className="flex flex-col">
-            <label
-              htmlFor="purchaseDate"
-              className="text-sm font-medium text-foregroundMuted mb-1 tracking-[-0.35px]"
-            >
-              First Purchase Date
-            </label>
-            <Controller
-              control={control}
-              name="purchaseDate"
-              rules={{ required: 'Date is required' }}
-              render={({ field }) => (
-                <div className="relative rounded-md focus-within:ring-1 focus-within:ring-foreground">
-                  {/* Visual layer — custom placeholder + app calendar icon */}
-                  <div
-                    className={`w-full px-3 py-2 text-sm border rounded-md bg-surface flex items-center justify-between gap-1.5 tracking-[-0.35px] ${
-                      errors.purchaseDate ? 'border-negative' : 'border-border'
-                    }`}
-                  >
-                    <span className={field.value ? 'text-foreground' : 'text-accent'}>
-                      {field.value ? field.value.split('-').reverse().join('/') : 'DD/MM/YYYY'}
-                    </span>
-                    <Calendar size={16} className="text-accent shrink-0" />
-                  </div>
-                  {/* Interaction layer — transparent native date input drives the value/picker */}
-                  <input
-                    id="purchaseDate"
-                    type="date"
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    onClick={(e) => e.currentTarget.showPicker?.()}
-                    name={field.name}
-                    ref={field.ref}
-                    value={field.value}
-                    onChange={field.onChange}
-                    onBlur={field.onBlur}
-                  />
-                </div>
-              )}
-            />
-            {errors.purchaseDate && (
-              <p className="text-xs text-negative mt-1">{errors.purchaseDate.message}</p>
+          <Controller
+            control={control}
+            name="purchaseDate"
+            rules={{ required: 'Date is required' }}
+            render={({ field }) => (
+              <DateField
+                id="purchaseDate"
+                label="First Purchase Date"
+                error={errors.purchaseDate?.message}
+                hint={transactionBacked && 'Derived from transaction history. Edit to override.'}
+                {...field}
+              />
             )}
-            {transactionBacked && (
-              <p className="mt-1 text-xs text-accent">
-                Derived from transaction history. Edit to override.
-              </p>
-            )}
-          </div>
+          />
         </div>
 
         <div className="border-t border-borderLight p-5 flex justify-end gap-2">

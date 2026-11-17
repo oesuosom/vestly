@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { AssetCategory, Holding, Transaction } from '@/types'
+import type { AssetCategory, Holding, Transaction, TransactionType } from '@/types'
 import {
   getHoldingValue,
   getHoldingPnL,
@@ -8,7 +8,9 @@ import {
   getDividendIncomeForHolding,
   resolveTransactionTicker,
 } from '@/domain/calculations'
-import { formatPLNDetail, formatQuantity } from '@/utils/formatters'
+import { closedPositionResult, findSharedPositionHolding } from '@/domain/closePosition'
+import { findHoldingTransactions } from '@/domain/holdingDeletion'
+import { formatDate, formatPLNDetail, formatQuantity } from '@/utils/formatters'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import { fetchAllPrices } from '@/services/market-data/priceFetcher'
@@ -18,6 +20,7 @@ import { Modal } from '@/components/ui/Modal'
 import { readCloseDuration } from '@/components/ui/panelTiming'
 import { HoldingForm } from './HoldingForm'
 import { DeleteHoldingDialog } from './DeleteHoldingDialog'
+import { ClosePositionDialog } from './ClosePositionDialog'
 import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
@@ -104,12 +107,126 @@ function buildDividendRows(transactions: Transaction[], holdingId: string): Divi
 // Stat cell — reusable within this panel
 // ─────────────────────────────────────────
 
-function StatCell({ label, children }: { label: string; children: React.ReactNode }) {
+function StatCell({ label, children, wide = false }: { label: string; children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="bg-muted rounded-lg p-3 flex flex-col gap-1 items-start">
+    <div className={`bg-muted rounded-lg p-3 flex flex-col gap-1 items-start ${wide ? 'col-span-2' : ''}`}>
       <p className="text-sm text-accent tracking-[-0.35px] [font-feature-settings:'lnum'_1,'tnum'_1]">{label}</p>
       {children}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────
+// Closed holding — read-only details
+// ─────────────────────────────────────────
+
+const TYPE_LABELS: Record<TransactionType, string> = {
+  buy: 'Buy',
+  sell: 'Sell',
+  deposit: 'Deposit',
+  withdrawal: 'Withdrawal',
+  dividend: 'Dividend',
+  withholding_tax: 'Dividend tax',
+  interest: 'Interest',
+  interest_tax: 'Interest tax',
+  fee: 'Fee',
+  send: 'Transfer out',
+  receive: 'Transfer in',
+}
+
+/**
+ * A closed holding: what the sale realized and the transactions that belong to
+ * it — the same ones Delete would remove, so the two never disagree.
+ */
+function ClosedHoldingDetails({ holding }: { holding: Holding }) {
+  const { accounts, transactions } = usePortfolio()
+  const closed = closedPositionResult(holding, transactions)
+  const own = findHoldingTransactions(holding, accounts, transactions)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const profit = closed?.result.profitPLN ?? 0
+  const sign = profit > 0 ? '+' : ''
+  const profitColour = profit > 0 ? 'text-positive' : profit < 0 ? 'text-negative' : 'text-foreground'
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <StatCell label="Closed">
+          <p className="text-sm font-semibold text-foreground">{formatDate(holding.closedAt!)}</p>
+        </StatCell>
+        <StatCell label="Quantity sold">
+          <p className="text-sm font-semibold text-foreground">
+            {formatQuantity(closed?.sale.quantity ?? holding.quantity)}
+          </p>
+        </StatCell>
+        <StatCell label="Proceeds">
+          <p className="text-sm font-semibold text-foreground">
+            {closed ? formatPLNDetail(closed.result.proceedsPLN) : '—'}
+          </p>
+          {closed?.sale.feePLN ? (
+            <p className="text-[10px] text-accent leading-tight">After a {formatPLNDetail(closed.sale.feePLN)} fee</p>
+          ) : null}
+        </StatCell>
+        <StatCell label="Cost">
+          <p className="text-sm font-semibold text-foreground">
+            {closed ? formatPLNDetail(closed.result.costPLN) : '—'}
+          </p>
+        </StatCell>
+        <StatCell label="Realized profit" wide>
+          {closed ? (
+            <div className={`flex items-center gap-1 ${profitColour}`}>
+              <span className="text-sm font-semibold">{sign}{formatPLNDetail(profit)}</span>
+              <span className="text-sm font-normal">
+                ({sign}{closed.profitPercent.toFixed(2).replace('.', ',')}%)
+              </span>
+            </div>
+          ) : (
+            <p className="text-sm text-accent leading-normal">
+              The sale is no longer in Activity. Reopen to put the holding back.
+            </p>
+          )}
+        </StatCell>
+      </div>
+
+      {own.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-foreground tracking-[-0.35px] mb-3">Transactions</h3>
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold text-accent">Date</th>
+                  <th className="text-left px-3 py-2 font-semibold text-accent">Type</th>
+                  <th className="text-right px-3 py-2 font-semibold text-accent">Qty</th>
+                  <th className="text-right px-3 py-2 font-semibold text-accent">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {own.map((t) => (
+                  <tr key={t.id} className="border-t border-borderLight align-top">
+                    <td className="px-3 py-2 text-foregroundMuted">{t.date.slice(0, 10).split('-').reverse().join('/')}</td>
+                    <td className="px-3 py-2 text-foreground">{TYPE_LABELS[t.type]}</td>
+                    <td className="px-3 py-2 text-right text-foreground">
+                      {t.quantity != null ? formatQuantity(t.quantity) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <span className={t.amountPLN > 0 ? 'text-positive' : 'text-foreground'}>
+                        {t.amountPLN > 0 ? '+' : ''}{formatPLNDetail(t.amountPLN)}
+                      </span>
+                      {t.feePLN ? (
+                        <span className="block text-[10px] text-accent leading-tight mt-0.5">
+                          Fee {formatPLNDetail(t.feePLN)}
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -118,10 +235,11 @@ function StatCell({ label, children }: { label: string; children: React.ReactNod
 // ─────────────────────────────────────────
 
 export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: HoldingSlidePanelProps) {
-  const { accounts, transactions, updateHolding, replaceAccounts } = usePortfolio()
+  const { accounts, transactions, updateHolding, replaceAccounts, reopenPosition } = usePortfolio()
   const settings = useSettings()
   const [editOpen, setEditOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [closeOpen, setCloseOpen] = useState(false)
   const [priceStatus, setPriceStatus] = useState<'idle' | 'fetching' | 'ok' | 'no-provider' | 'error'>('idle')
   // The panel is always rendered; `mounted` is used only as the scroll lock,
   // which must be held through the close animation. Releasing it on
@@ -146,6 +264,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
     if (!isOpen) {
       setEditOpen(false)
       setDeleteConfirmOpen(false)
+      setCloseOpen(false)
       setPriceStatus('idle')
     }
   }
@@ -175,6 +294,10 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
   const dividendRows       = buildDividendRows(transactions, holding.id)
   const priceIsPlaceholder = holding.currentPrice === holding.purchasePrice
   const buyLots            = holding.ticker ? buildBuyLots(transactions, holding.ticker, holding.accountId) : []
+  const isClosed           = holding.closedAt !== undefined
+  const account            = accounts.find((a) => a.id === holding.accountId)
+  // Reopen waits while a rebuy of the same ticker is open (one position per ticker).
+  const reopenBlockedBy    = isClosed && account ? findSharedPositionHolding(holding, account) : undefined
 
   // ── Handlers ─────────────────────────
   async function handleEdit(data: {
@@ -339,6 +462,10 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
         {/* ── Body ── */}
         <div className="flex-1 overflow-y-auto overscroll-contain px-6 pt-2 pb-6 flex flex-col gap-6">
 
+          {isClosed ? (
+            <ClosedHoldingDetails holding={holding} />
+          ) : (
+          <>
           {/* ── Stats grid ── */}
           <div className="grid grid-cols-2 gap-2">
             <StatCell label="Current value">
@@ -546,9 +673,32 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
             )}
           </div>
           )}
+          </>
+          )}
         </div>
 
         {/* ── Footer actions ── */}
+        {isClosed ? (
+          <div className="px-6 py-6 flex flex-col gap-3 shrink-0">
+            {reopenBlockedBy && (
+              <p className="text-xs text-accent leading-normal">
+                Reopen is unavailable while {reopenBlockedBy.name} is open in this account.
+              </p>
+            )}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => reopenPosition(holding.id)}
+                disabled={reopenBlockedBy !== undefined}
+              >
+                Reopen
+              </Button>
+              <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="px-6 py-6 flex items-center gap-2 shrink-0">
           <Button variant="secondary" onClick={() => setEditOpen(true)}>
             Edit
@@ -562,10 +712,16 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
               Refresh Price
             </Button>
           )}
+          {!holding.isSynthetic && (
+            <Button variant="secondary" onClick={() => setCloseOpen(true)}>
+              Close Position
+            </Button>
+          )}
           <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
             Delete
           </Button>
         </div>
+        )}
         </div>
       </div>
 
@@ -593,6 +749,14 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
           onCancel={() => setEditOpen(false)}
         />
       </Modal>
+
+      {/* Close position modal */}
+      <ClosePositionDialog
+        holding={isClosed ? null : holding}
+        isOpen={closeOpen}
+        onClose={() => setCloseOpen(false)}
+        onClosed={onClose}
+      />
 
       {/* Delete confirmation modal */}
       <DeleteHoldingDialog

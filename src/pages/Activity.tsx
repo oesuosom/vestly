@@ -441,6 +441,8 @@ export function Activity() {
   // Name entries prefer holdings that have a ticker set, so a no-ticker duplicate
   // (e.g. same stock imported via eMakler into a second account) never shadows
   // a ticker-bearing holding from an earlier account.
+  // Closed holdings fill in last, only for keys no open holding has, so a sold
+  // position's rows keep their icon without shadowing a current holding.
   const holdingByKey = useMemo(() => {
     const map = new Map<string, Holding>()
     for (const acc of accounts) {
@@ -451,6 +453,10 @@ export function Activity() {
           map.set(nameKey, h)
         }
       }
+    }
+    for (const h of accounts.flatMap((a) => a.closedHoldings ?? [])) {
+      if (h.ticker && !map.has(h.ticker.toUpperCase())) map.set(h.ticker.toUpperCase(), h)
+      if (!map.has(h.name.toLowerCase())) map.set(h.name.toLowerCase(), h)
     }
     return map
   }, [accounts])
@@ -504,6 +510,9 @@ export function Activity() {
         case 'buy':
         case 'sell':            invested       -= t.amountPLN; break
       }
+      // A trade's own fee (Close position) is already inside its amount; it is
+      // counted here as well only because this card lists fees, not cash flow.
+      if (t.type !== 'fee' && t.feePLN) fees -= t.feePLN
     }
     return {
       feesAndTaxes: fees + withholdingTax + interestTax,
@@ -717,6 +726,14 @@ export function Activity() {
                       >
                         {formatAmountRaw(t.amountPLN)} PLN
                       </span>
+                      {t.feePLN ? (
+                        <span
+                          className="block text-xs leading-none mt-1 text-accent tabular-nums lining-nums"
+                          style={{ fontFeatureSettings: "'lnum' 1, 'tnum' 1" }}
+                        >
+                          after {formatPLNDetail(t.feePLN)} fee
+                        </span>
+                      ) : null}
                     </td>
                     <td className="w-14 px-4 py-2">
                       <div className="flex items-center justify-center">

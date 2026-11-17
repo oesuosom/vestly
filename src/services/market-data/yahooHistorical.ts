@@ -255,6 +255,15 @@ export async function buildHistoricalPricesCache(
     }
   }
 
+  // Closed holdings are never fetched — they have no price to refresh — but the
+  // series cached while they were open is kept, so the chart's history before
+  // the close date stays on real prices. Without one the chart interpolates
+  // up to the close date (computePortfolioAt).
+  for (const holding of accounts.flatMap((a) => a.closedHoldings ?? [])) {
+    const cachedPrices = reuseMap.get(holding.id)?.prices ?? []
+    if (cachedPrices.length > 0) histories.push({ holdingId: holding.id, prices: cachedPrices })
+  }
+
   // Process one at a time with per-provider throttling to stay within rate limits.
   // Demo CoinGecko key: 100 req/min → 750ms between calls keeps us at ~80 req/min.
   // EODHD (keyed): generous limits → light spacing. Yahoo (public): 429s hard → 2.5s spacing.

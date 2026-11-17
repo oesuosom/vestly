@@ -180,6 +180,9 @@ const HOLDING_RULES: FieldRule[] = [
   ['currentPrice', 'current price', isAmount],
 ]
 
+// A closed holding is also read for its close date (Closed positions, chart).
+const CLOSED_HOLDING_RULES: FieldRule[] = [...HOLDING_RULES, ['closedAt', 'close date', isText]]
+
 // `id` is not required: snapshots are looked up by date, and older stores
 // carry legacy `yyyy-MM` dates and a `realEstate` allocation key that startup
 // migrates, so only the containers and the total are checked.
@@ -234,6 +237,17 @@ function checkAccounts(accounts: unknown[]): string | null {
       if (!isPlainObject(holding)) return `Holding ${j + 1} in “${account.name}” is not a valid holding.`
       const holdingLabel = `Holding ${j + 1}${quoted(holding.name)} in “${account.name}”`
       const holdingProblem = findProblem(holding, HOLDING_RULES)
+      if (holdingProblem) return `${holdingLabel} ${holdingProblem}.`
+    }
+
+    // Optional: only accounts that closed a position have it. Its holdings are
+    // read by the chart and Account detail, so they meet the same rules.
+    if (account.closedHoldings === undefined) continue
+    if (!Array.isArray(account.closedHoldings)) return `${accountLabel} has an invalid list of closed positions.`
+    for (const [j, holding] of account.closedHoldings.entries()) {
+      if (!isPlainObject(holding)) return `Closed position ${j + 1} in “${account.name}” is not a valid holding.`
+      const holdingLabel = `Closed position ${j + 1}${quoted(holding.name)} in “${account.name}”`
+      const holdingProblem = findProblem(holding, CLOSED_HOLDING_RULES)
       if (holdingProblem) return `${holdingLabel} ${holdingProblem}.`
     }
   }

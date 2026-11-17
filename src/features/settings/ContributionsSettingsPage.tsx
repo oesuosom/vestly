@@ -4,11 +4,13 @@ import { getStore, saveContributions } from '@/storage/portfolioStore'
 import { formatPLN } from '@/utils/formatters'
 import type { Account, ContributionTracking } from '@/types'
 
+// Closed holdings count too: money paid into an IKE/IKZE this year still uses
+// up this year's limit after what it bought is sold.
 function calcContributed(accounts: Account[], accountType: 'ike' | 'ikze'): number {
   const year = new Date().getFullYear()
   return accounts
     .filter((a) => a.type === accountType)
-    .flatMap((a) => a.holdings)
+    .flatMap((a) => [...a.holdings, ...(a.closedHoldings ?? [])])
     .filter((h) => !h.isSynthetic && h.purchaseDate.startsWith(String(year)))
     .reduce((sum, h) => sum + h.purchasePrice * h.quantity, 0)
 }

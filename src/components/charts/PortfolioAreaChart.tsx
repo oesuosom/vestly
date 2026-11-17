@@ -199,9 +199,10 @@ export function PortfolioAreaChart({
       .map((s) => ({ date: s.date, value: s.totalValue }))
     anchors.push({ date: todayStr, value: liveTotal })
 
-    // Timeline starts from the earliest holding purchase date (or first snapshot).
-    // This preserves the full pre-snapshot history via computePortfolioAt.
-    const allHoldings = accounts.flatMap((a) => a.holdings)
+    // Timeline starts from the earliest holding purchase date (or first snapshot),
+    // closed holdings included. This preserves the full pre-snapshot history via
+    // computePortfolioAt.
+    const allHoldings = accounts.flatMap((a) => [...a.holdings, ...(a.closedHoldings ?? [])])
     const firstPurchaseDate = allHoldings.length > 0
       ? allHoldings.map((h) => h.purchaseDate).sort()[0]
       : null

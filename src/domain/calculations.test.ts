@@ -17,6 +17,8 @@ import {
   getIncomeSummary,
   getPositions,
   getRealizedPnL,
+  affectsCash,
+  computeAccountCashBalance,
 } from './calculations'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -685,6 +687,62 @@ describe('getPositions', () => {
     const incomplete = getPositions(transactions).filter((p) => p.position.unexplainedQuantity > 0)
     expect(incomplete).toEqual([
       { accountId: 'acc1', ticker: 'ETFW', position: expect.objectContaining({ unexplainedQuantity: 9 }) },
+    ])
+  })
+})
+
+// ─── Cash ──────────────────────────────────────────────────────────────────────
+
+describe('affectsCash', () => {
+  it('counts imported XTB and Revolut rows, and rows with no other rule', () => {
+    expect(affectsCash(makeTx({ source: 'xtb_import' }))).toBe(true)
+    expect(affectsCash(makeTx({ source: 'xtb_confirmation' }))).toBe(true)
+    expect(affectsCash(makeTx({ source: 'manual' }))).toBe(true)
+  })
+
+  it('skips the buys behind bond holdings and eMakler trades', () => {
+    expect(affectsCash(makeTx({ source: 'bond_holding' }))).toBe(false)
+    expect(affectsCash(makeTx({ source: 'emakler_import' }))).toBe(false)
+  })
+
+  it('lets a row created by Close position decide for itself', () => {
+    expect(affectsCash(makeTx({ source: 'manual', affectsCash: false }))).toBe(false)
+    expect(affectsCash(makeTx({ source: 'emakler_import', affectsCash: true }))).toBe(true)
+  })
+})
+
+describe('computeAccountCashBalance', () => {
+  const txs = [
+    makeTx({ id: 'd', type: 'deposit', date: '2026-01-02', amountPLN: 2000, source: 'xtb_import' }),
+    makeTx({ id: 'b', type: 'buy', date: '2026-01-05T10:00:00.000Z', amountPLN: -1000, source: 'xtb_import' }),
+    makeTx({ id: 'bond', type: 'buy', date: '2026-01-06', amountPLN: -500, source: 'bond_holding' }),
+    makeTx({ id: 'filled', type: 'buy', date: '2026-01-07', amountPLN: -300, source: 'manual', affectsCash: false }),
+    makeTx({ id: 's', type: 'sell', date: '2026-03-10', amountPLN: 1490, source: 'manual', affectsCash: true }),
+    makeTx({ id: 'other', accountId: 'acc2', type: 'deposit', date: '2026-01-02', amountPLN: 9999, source: 'xtb_import' }),
+  ]
+
+  it('sums the account\'s rows that move cash', () => {
+    // 2 000 − 1 000 + 1 490 = 2 490; the bond buy, the filled-in buy and acc2 don't count.
+    expect(computeAccountCashBalance(txs, 'acc1')).toBe(2490)
+  })
+
+  it('stops at a date, for the chart, including that whole day', () => {
+    // 2 000 − 1 000 = 1 000 on 5 Jan (the 10:00 buy counts); the sale is not in yet on 9 Mar.
+    expect(computeAccountCashBalance(txs, 'acc1', '2026-01-04')).toBe(2000)
+    expect(computeAccountCashBalance(txs, 'acc1', '2026-01-05')).toBe(1000)
+    expect(computeAccountCashBalance(txs, 'acc1', '2026-03-09')).toBe(1000)
+    expect(computeAccountCashBalance(txs, 'acc1', '2026-03-10')).toBe(2490)
+  })
+})
+
+describe('getPositions — bond lots', () => {
+  it('keeps each lot of a series as its own position, even with a shared ticker', () => {
+    const buy = (id: string, holdingId: string, amountPLN: number) =>
+      makeTx({ id, ticker: 'EDO0535', quantity: 10, amountPLN, source: 'bond_holding', relatedHoldingId: holdingId })
+    const positions = getPositions([buy('a', 'lot-a', -1000), buy('b', 'lot-b', -999)])
+    expect(positions.map((p) => [p.ticker, p.position.quantity, p.position.costPLN])).toEqual([
+      ['#lot-a', 10, 1000],
+      ['#lot-b', 10, 999],
     ])
   })
 })

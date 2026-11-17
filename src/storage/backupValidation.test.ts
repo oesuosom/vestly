@@ -363,6 +363,46 @@ describe('validateBackup — recovery files (#16)', () => {
   })
 })
 
+describe('validateBackup — closed positions (#28)', () => {
+  // An account after Close position: the sold holding sits in `closedHoldings`,
+  // and its sale carries the optional `feePLN` and `affectsCash`.
+  const closedHolding = { ...holding, closedAt: '2026-03-10' }
+  const closedAccount = { ...account, holdings: [], closedHoldings: [closedHolding] }
+  const sale = {
+    id: 't2', accountId: 'a1', type: 'sell', date: '2026-03-10', amountPLN: 1190, quantity: 10,
+    feePLN: 10, affectsCash: true, relatedHoldingId: 'h1', externalId: 'close-sell-h1', source: 'manual',
+  }
+  const backup = { ...goodBackup, accounts: [closedAccount], transactions: [transaction, sale] }
+
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('validates and restores the new optional fields unchanged', () => {
+    const r = validateBackup(backup)
+    if (!r.ok) throw new Error(r.error)
+    applyBackup(r.backup, r.fields)
+
+    expect(JSON.parse(localStorage.getItem(BACKUP_KEY_MAP.accounts)!)).toEqual([closedAccount])
+    expect(JSON.parse(localStorage.getItem(BACKUP_KEY_MAP.transactions)!)).toEqual([transaction, sale])
+  })
+
+  it('restores them from a recovery file too', () => {
+    const r = validateBackup({ ft_accounts: [closedAccount], ft_transactions: [sale] })
+    if (!r.ok) throw new Error(r.error)
+    applyBackup(r.backup, r.fields)
+    expect(JSON.parse(localStorage.getItem(BACKUP_KEY_MAP.accounts)!)).toEqual([closedAccount])
+  })
+
+  it('holds closed positions to the holding rules, plus a close date', () => {
+    expect(errorFor({ accounts: [{ ...account, closedHoldings: {} }] }))
+      .toBe('Account 1 (“XTB”) has an invalid list of closed positions.')
+    expect(errorFor({ accounts: [{ ...account, closedHoldings: [{ ...closedHolding, quantity: 'ten' }] }] }))
+      .toBe('Closed position 1 (“Example Corp”) in “XTB” has an invalid quantity.')
+    expect(errorFor({ accounts: [{ ...account, closedHoldings: [holding] }] }))
+      .toBe('Closed position 1 (“Example Corp”) in “XTB” has no close date.')
+  })
+})
+
 describe('applyBackup — atomicity', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())

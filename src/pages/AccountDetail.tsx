@@ -34,6 +34,8 @@ import { AccountFormModal } from '@/features/accounts/AccountFormModal'
 import { HoldingForm } from '@/features/accounts/HoldingForm'
 import { HoldingSlidePanel } from '@/features/accounts/HoldingSlidePanel'
 import { DeleteHoldingDialog } from '@/features/accounts/DeleteHoldingDialog'
+import { ClosePositionDialog } from '@/features/accounts/ClosePositionDialog'
+import { ClosedPositions } from '@/features/accounts/ClosedPositions'
 import { UnifiedImportModal } from '@/features/import/UnifiedImportModal'
 import type { AssetCategory, Holding, AccountType, Snapshot } from '@/types'
 import {
@@ -43,6 +45,7 @@ import {
   Plus,
   ArrowBoxOut,
   Trash,
+  BanknoteStack,
 } from '@/generated/icons'
 
 // TanStack's ColumnMeta is augmented with { width?, align? } in Portfolio.tsx.
@@ -109,9 +112,12 @@ function StatStrip({ label, valuePLN }: { label: string; valuePLN: number }) {
 
 function HoldingMenuCell({
   onEdit,
+  onClosePosition,
   onDelete,
 }: {
   onEdit: () => void
+  /** Absent for the Cash row, which can't be sold. */
+  onClosePosition?: () => void
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -135,6 +141,14 @@ function HoldingMenuCell({
                   label="Edit"
                   onClick={() => { setOpen(false); onEdit() }}
                 />
+                {onClosePosition && (
+                  <DropdownItem
+                    type="default"
+                    icon={<BanknoteStack size={16} />}
+                    label="Close position"
+                    onClick={() => { setOpen(false); onClosePosition() }}
+                  />
+                )}
                 <DropdownItem
                   type="default"
                   icon={<Trash size={16} className="text-negative" />}
@@ -185,6 +199,7 @@ export function AccountDetail() {
   const [editingHolding, setEditingHolding] = useState<Holding | null>(null)
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false)
   const [deletingHolding, setDeletingHolding] = useState<Holding | null>(null)
+  const [closingHolding, setClosingHolding] = useState<Holding | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -382,6 +397,7 @@ export function AccountDetail() {
           return (
             <HoldingMenuCell
               onEdit={() => setEditingHolding(h)}
+              onClosePosition={h.isSynthetic ? undefined : () => setClosingHolding(h)}
               onDelete={() => setDeletingHolding(h)}
             />
           )
@@ -682,9 +698,19 @@ export function AccountDetail() {
         </div>
       ) : (
         <EmptyState
-          title="No holdings yet"
-          description="Add your first holding to start tracking this account."
+          title={account.closedHoldings?.length ? 'No open holdings' : 'No holdings yet'}
+          description={account.closedHoldings?.length
+            ? 'Everything in this account has been sold. Add a holding to start tracking it again.'
+            : 'Add your first holding to start tracking this account.'}
           action={{ label: 'Add holding', onClick: () => setAddHoldingOpen(true) }}
+        />
+      )}
+
+      {account.closedHoldings && account.closedHoldings.length > 0 && (
+        <ClosedPositions
+          holdings={account.closedHoldings}
+          transactions={accountTransactions}
+          onSelect={setSelectedHoldingId}
         />
       )}
 
@@ -742,6 +768,12 @@ export function AccountDetail() {
         confirmLabel="Delete Account"
       />
 
+      <ClosePositionDialog
+        holding={closingHolding}
+        isOpen={closingHolding !== null}
+        onClose={() => setClosingHolding(null)}
+      />
+
       <DeleteHoldingDialog
         holding={deletingHolding}
         isOpen={deletingHolding !== null}
@@ -755,7 +787,11 @@ export function AccountDetail() {
       />
 
       <HoldingSlidePanel
-        holding={account.holdings.find((h) => h.id === selectedHoldingId) ?? null}
+        holding={
+          account.holdings.find((h) => h.id === selectedHoldingId)
+          ?? account.closedHoldings?.find((h) => h.id === selectedHoldingId)
+          ?? null
+        }
         isOpen={selectedHoldingId !== null}
         onClose={() => setSelectedHoldingId(null)}
       />

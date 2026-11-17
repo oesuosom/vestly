@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Close position: record that you sold a holding** — "Close position" sits next to Edit and
+  Delete, in the holdings table menu and the holding panel. Enter the date, the sale amount and
+  an optional fee, and Vestly records one sale, keeps the holding's buys and dividends, and
+  moves it to a new Closed positions list under the holdings table on the account page. Before
+  you confirm, it shows the proceeds, the realized profit and what happens to Cash. Proceeds go
+  to the account's Cash only when the purchases came out of it (XTB trades you imported): sell
+  10 shares bought for 1,000 PLN for 1,600 PLN with a 10 PLN fee, and Cash rises by 1,590 PLN
+  while Realized return on Overview rises by 590 PLN. Bonds, eMakler and crypto holdings and
+  holdings you entered by hand leave Cash unchanged. A closed holding drops out of totals,
+  allocation, price refresh, imports and the Portfolio page, but the chart still shows it up to
+  the day you sold it. Open one from Closed positions to see its sale and transactions, or
+  Reopen it if you closed it by mistake. Delete is still there, for holdings that should never
+  have existed. For a bond, enter the amount PKO paid out: it already has the early-redemption
+  fee (and any tax) taken out, so the fee you add is recorded but not taken off again. Each bond
+  lot closes on its own, at its own cost, even when you hold several lots of one series. And an
+  XTB import no longer offers to create a holding for an instrument you have sold: a closed or
+  sold-out one isn't proposed, and a partly sold one is proposed at the units you still hold and
+  their average cost.
+
 ### Changed
 
 - **Faster repeat visits after an update** — React, Recharts, framer-motion and the web3icons

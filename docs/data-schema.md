@@ -1,6 +1,6 @@
 # Vestly — Data Schema
 
-*Last updated: September 2026 · Schema version: 5.0.0*
+*Last updated: November 2026 · Schema version: 5.0.0*
 
 > **Type definitions live in [`src/types/index.ts`](../src/types/index.ts)** — that file is the source of truth and is compiler-enforced. This document deliberately does not restate it. What lives here is the knowledge the types can't carry: which localStorage keys exist and how long they live, why the migrations exist, and how derived values are calculated.
 
@@ -108,9 +108,11 @@ groupValue(g)  = Σ categoryValue(c) for c in g.categories
 drift(g)       = groupPct(g) − g.target
 needsRebalancing = any |drift(g)| > settings.rebalancingThreshold
 
-// XTB synthetic cash holding
-cashBalance  = Σ amountPLN over all transactions in the account
+// XTB synthetic cash holding (computeAccountCashBalance — also the chart's cash on a past day)
+cashBalance  = Σ amountPLN over the account's transactions where affectsCash(t)
 // deposits/dividends/interest are positive; buys/taxes/fees negative.
+// affectsCash(t) = t.affectsCash when set (rows made by Close position),
+//                  otherwise source is not 'bond_holding' or 'emakler_import'.
 // Crypto accounts are excluded — they get no synthetic cash holding.
 
 // Ticker resolution (resolveTransactionTicker)
@@ -131,6 +133,23 @@ avgCost(account, ticker) = cost / qty
 
 // Realized profit, whole portfolio (getRealizedPnL)
 realizedPnL = Σ position.realizedProfitPLN over every account and ticker (getPositions)
+// Positions are keyed by positionKey(t): `#relatedHoldingId` for a bond lot's own rows
+// (source 'bond_holding' — each lot is costed on its own, even when lots share a ticker);
+// otherwise the resolved ticker; otherwise `#relatedHoldingId` for a trade linked to a holding.
+
+// Close position (domain/closePosition.ts) — whole holding, one sale
+sale.amountPLN = saleAmount − fee          // fee also kept in sale.feePLN, for display only
+sale.amountPLN = amountReceived            // bonds: PKO pays out after the fee; the fee is recorded only
+filledInBuy    = holding.quantity − units the log holds at the sale date, at purchasePrice,
+                 dated purchaseDate, affectsCash: false     // only when the log is short
+sale.affectsCash = account is not crypto ∧ no buy was filled in
+                 ∧ every buy/receive of the position up to the sale has affectsCash
+closedRow.profit = the sale's own entry in the position walk (walkSales) — the same number
+                   it adds to realizedPnL; closedRow.% = profit / cost of the units it removed
+
+// Chart, closed holdings
+value(h, d) counts only while d < h.closedAt; without cached prices it is interpolated
+from purchasePrice at purchaseDate to currentPrice at closedAt (crypto included).
 
 // Crypto quantity
 netQty(ticker)  = Σ(buy + receive qty) − Σ(sell + send qty)
@@ -155,10 +174,15 @@ qtyAtDate(h, d) = Σ(buy + receive qty on or before d) − Σ(sell + send qty on
 Details worth knowing that aren't obvious from reading the type alone:
 
 - **`Holding.isSynthetic`** — auto-managed, never manually edited. Currently only the XTB Cash holding, derived from transaction history.
+- **`Account.closedHoldings`** — optional. Holdings marked as sold with Close position, kept apart from `holdings` so totals, allocation, snapshots, price refresh, imports, the Portfolio page and AI summaries never see them. Only Account detail (Closed positions), the chart's history, IKE/IKZE contribution totals and holding deletion read them. Absent until an account closes something; no migration.
+- **`Holding.closedAt`** — optional `yyyy-MM-dd`, set on every holding in `closedHoldings` and removed by Reopen.
+- **`Transaction.feePLN`** — optional, positive. The fee on a sale recorded by Close position, already out of `amountPLN` (subtracted by the app for stocks, ETFs and crypto; for a bond, taken by PKO before paying out); Activity shows it, and nothing subtracts it again (`walkPosition` reads only `pairTradeFees`).
+- **`Transaction.affectsCash`** — optional. Set on the rows Close position creates, saying whether they move Cash (see the calculation reference). Absent on every other row, where the source decides.
+- **Close position rows** — `source: 'manual'` (`'bond_holding'` for a bond lot, so the lot stays its own position), `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids.
 - **`Transaction.externalId`** — the deduplication key. On import, any row whose `externalId` already exists is skipped. XTB supplies its own ID column; Revolut and eMakler rows get one generated.
-- **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
+- **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. `bond_holding` marks the rows the app makes for one bond lot: its buy, and its sale once closed. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
 - **`send` / `receive`** — crypto transfers. `send` carries `amountPLN: 0` (no fiat proceeds); `receive` carries the cost basis in PLN, or 0 when unknown.
-- **`sell`** — `amountPLN` is the proceeds, positive. Realized profit uses the average-cost method (see the calculation reference); there is no FIFO logic.
+- **`sell`** — `amountPLN` is the proceeds after fees, positive. Realized profit uses the average-cost method (see the calculation reference); there is no FIFO logic.
 - **`fee`** — Revolut crypto imports store each trade's fee as its own `fee` row with no ticker. Its `externalId` is the only link to the trade; `pairTradeFees` ([`domain/tradeFees.ts`](../src/domain/tradeFees.ts)) documents the id scheme.
 - **`ImportUndoData`** — in-memory only, never persisted. Backs the single-step undo after an import.
 

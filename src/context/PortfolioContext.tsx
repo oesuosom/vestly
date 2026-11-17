@@ -22,6 +22,15 @@ import {
 import { buildBondBuyTransaction, resolveDividendLinks, upsertBondBuyTransaction } from '@/domain/transactions'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import { deleteHoldingFromLog, findAccountTransactions } from '@/domain/holdingDeletion'
+import {
+  findSharedPositionHolding,
+  moveToClosed,
+  moveToOpen,
+  planClose,
+  removeCloseTransactions,
+  type CloseInput,
+  type ClosePlan,
+} from '@/domain/closePosition'
 import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 
 // ─────────────────────────────────────────
@@ -62,7 +71,21 @@ type PortfolioActions = {
   deleteAccount: (id: string) => void
   addHolding: (accountId: string, holding: Omit<Holding, 'id' | 'accountId' | 'createdAt' | 'updatedAt'>) => void
   updateHolding: (holdingId: string, data: Partial<Omit<Holding, 'id' | 'accountId' | 'createdAt'>>) => void
+  /** Delete an open or closed holding, with the transactions that belong to it. */
   deleteHolding: (holdingId: string) => void
+  /**
+   * Record that a whole holding was sold: add its sale (and a buy, for a
+   * holding entered by hand) and move it to the account's closed holdings.
+   * Returns what was recorded, or null when the holding can't be closed (not
+   * open, the Cash row, or sharing its ticker with another open holding).
+   */
+  closePosition: (holdingId: string, input: CloseInput) => ClosePlan | null
+  /**
+   * Undo a close: remove exactly the transactions closing added and move the
+   * holding back to the open list. Returns false, changing nothing, while an
+   * open holding in the account shares its ticker.
+   */
+  reopenPosition: (holdingId: string) => boolean
   importSnapshot: (snapshot: Snapshot) => void
   importHoldings: (accountId: string, actions: ImportAction[]) => { updated: number; added: number; removed: number }
   undoLastImport: () => void
@@ -450,7 +473,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       invalidateUndo()
       const now = new Date().toISOString()
 
-      const holding = accountsRef.current.flatMap(a => a.holdings).find(h => h.id === holdingId)
+      const holding = accountsRef.current
+        .flatMap(a => [...a.holdings, ...(a.closedHoldings ?? [])])
+        .find(h => h.id === holdingId)
 
       // Remove the transactions that belong to the holding (counted by the
       // confirm dialog with the same matching) and re-link the dividends that
@@ -468,11 +493,16 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const nextTransactions = nextTransactionsRef.current
 
       setAccounts((prev) => {
-        const withoutHolding = prev.map((a) => ({
-          ...a,
-          holdings: a.holdings.filter((h) => h.id !== holdingId),
-          lastUpdated: a.holdings.some((h) => h.id === holdingId) ? now : a.lastUpdated,
-        }))
+        const withoutHolding = prev.map((a) => {
+          if (a.id !== holding?.accountId) return a
+          const closedHoldings = a.closedHoldings?.filter((h) => h.id !== holdingId)
+          return {
+            ...a,
+            holdings: a.holdings.filter((h) => h.id !== holdingId),
+            ...(closedHoldings && { closedHoldings }),
+            lastUpdated: now,
+          }
+        })
         // Recalculate Cash now, the way imports do, rather than on next load.
         const next = holding && nextTransactions
           ? upsertSyntheticCashHolding(withoutHolding, nextTransactions, holding.accountId)
@@ -480,6 +510,66 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         refreshSnapshot(next)
         return next
       })
+    },
+    [refreshSnapshot, invalidateUndo]
+  )
+
+  const closePosition = useCallback(
+    (holdingId: string, input: CloseInput): ClosePlan | null => {
+      const account = accountsRef.current.find((a) => a.holdings.some((h) => h.id === holdingId))
+      const holding = account?.holdings.find((h) => h.id === holdingId)
+      if (!account || !holding || holding.isSynthetic || findSharedPositionHolding(holding, account)) return null
+
+      invalidateUndo()
+      const now = new Date().toISOString()
+      // Planned once, outside any updater, so StrictMode's double-run can't
+      // mint two sets of ids.
+      const plan = planClose(holding, account, transactionsRef.current, input, now)
+
+      // flushSync: see addHolding — Cash below is recalculated from exactly
+      // the log that was committed.
+      const nextTransactionsRef = { current: null as Transaction[] | null }
+      flushSync(() => setTransactionsState((prev) => {
+        const next = [...prev, ...plan.transactions]
+        nextTransactionsRef.current = next
+        return next
+      }))
+      const nextTransactions = nextTransactionsRef.current ?? [...transactionsRef.current, ...plan.transactions]
+
+      setAccounts((prev) => {
+        const closed = moveToClosed(prev, holdingId, input.date, now)
+        const next = upsertSyntheticCashHolding(closed, nextTransactions, account.id)
+        refreshSnapshot(next)
+        return next
+      })
+      return plan
+    },
+    [refreshSnapshot, invalidateUndo]
+  )
+
+  const reopenPosition = useCallback(
+    (holdingId: string): boolean => {
+      const account = accountsRef.current.find((a) => a.closedHoldings?.some((h) => h.id === holdingId))
+      const holding = account?.closedHoldings?.find((h) => h.id === holdingId)
+      if (!account || !holding || findSharedPositionHolding(holding, account)) return false
+
+      invalidateUndo()
+      const now = new Date().toISOString()
+      const nextTransactionsRef = { current: null as Transaction[] | null }
+      flushSync(() => setTransactionsState((prev) => {
+        const next = removeCloseTransactions(holding, prev)
+        nextTransactionsRef.current = next
+        return next
+      }))
+      const nextTransactions = nextTransactionsRef.current ?? removeCloseTransactions(holding, transactionsRef.current)
+
+      setAccounts((prev) => {
+        const reopened = moveToOpen(prev, holdingId, now)
+        const next = upsertSyntheticCashHolding(reopened, nextTransactions, account.id)
+        refreshSnapshot(next)
+        return next
+      })
+      return true
     },
     [refreshSnapshot, invalidateUndo]
   )
@@ -810,6 +900,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         addHolding,
         updateHolding,
         deleteHolding,
+        closePosition,
+        reopenPosition,
         importSnapshot,
         importHoldings,
         undoLastImport,

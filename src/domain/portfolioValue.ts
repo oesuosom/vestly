@@ -1,5 +1,6 @@
 import { differenceInDays, parseISO } from 'date-fns'
-import type { Account, HistoricalPricesCache, HoldingPricePoint, Transaction } from '@/types'
+import type { Account, HistoricalPricesCache, Holding, HoldingPricePoint, Transaction } from '@/types'
+import { computeAccountCashBalance } from './calculations'
 import { quantityAtDate } from './historicalQuantity'
 
 function getPriceAt(prices: HoldingPricePoint[], date: string): number | undefined {
@@ -18,14 +19,19 @@ function getPriceAt(prices: HoldingPricePoint[], date: string): number | undefin
   return result
 }
 
+/**
+ * Straight line from the purchase price on the purchase date to the current
+ * price on `end` — today for an open holding, the close date for a closed one
+ * (whose current price is the last one known before it was sold).
+ */
 function getInterpolatedPrice(
   holding: { purchasePrice: number; currentPrice: number; purchaseDate: string },
   date: string,
-  today: Date,
+  end: Date,
 ): number {
   const purchaseDate = parseISO(holding.purchaseDate)
   const queryDate = parseISO(date)
-  const totalDays = differenceInDays(today, purchaseDate)
+  const totalDays = differenceInDays(end, purchaseDate)
   if (totalDays <= 0) return holding.currentPrice
   const daysSince = differenceInDays(queryDate, purchaseDate)
   const t = Math.max(0, Math.min(1, daysSince / totalDays))
@@ -36,6 +42,9 @@ function getInterpolatedPrice(
  * Compute an estimated total portfolio value for a given date.
  * Uses cached market prices when available, falls back to linear interpolation per holding.
  * Crypto holdings are never interpolated (too volatile) — skipped when no historical price exists.
+ * Closed holdings count on the days before their close date, the same way, except that
+ * with no cached prices they are interpolated up to the close date, crypto included:
+ * both ends of the line are known.
  * Returns undefined only when no holdings were active on that date.
  */
 export function computePortfolioAt(
@@ -47,20 +56,38 @@ export function computePortfolioAt(
 ): number | undefined {
   let total = 0
   let hasAny = false
+
+  function addHolding(account: Account, holding: Holding) {
+    if (date < holding.purchaseDate) return
+    if (holding.closedAt && date >= holding.closedAt) return
+
+    const qty = quantityAtDate(holding, account.id, transactions, date)
+    if (qty === 0) return
+
+    let price: number | undefined
+    if (historiesMap) {
+      const prices = historiesMap.get(holding.id)
+      price = prices ? getPriceAt(prices, date) : undefined
+    }
+    if (price === undefined) {
+      if (holding.closedAt) {
+        price = getInterpolatedPrice(holding, date, parseISO(holding.closedAt))
+      } else {
+        if (holding.category === 'crypto') return
+        price = getInterpolatedPrice(holding, date, today)
+      }
+    }
+
+    total += price * qty
+    hasAny = true
+  }
+
   for (const account of accounts) {
     for (const holding of account.holdings) {
       // Synthetic cash: derive the balance from transactions up to this date so
       // historical values reflect the actual cash on that day, not the current balance.
       if (holding.isSynthetic && holding.category === 'cash') {
-        const balance = transactions
-          .filter(
-            (t) =>
-              t.accountId === account.id &&
-              t.source !== 'bond_holding' &&
-              t.source !== 'emakler_import' &&
-              t.date.slice(0, 10) <= date,
-          )
-          .reduce((sum, t) => sum + t.amountPLN, 0)
+        const balance = computeAccountCashBalance(transactions, account.id, date)
         if (balance !== 0) {
           total += balance
           hasAny = true
@@ -68,24 +95,9 @@ export function computePortfolioAt(
         continue
       }
       if (holding.isSynthetic) continue
-      if (date < holding.purchaseDate) continue
-
-      const qty = quantityAtDate(holding, account.id, transactions, date)
-      if (qty === 0) continue
-
-      let price: number | undefined
-      if (historiesMap) {
-        const prices = historiesMap.get(holding.id)
-        price = prices ? getPriceAt(prices, date) : undefined
-      }
-      if (price === undefined) {
-        if (holding.category === 'crypto') continue
-        price = getInterpolatedPrice(holding, date, today)
-      }
-
-      total += price * qty
-      hasAny = true
+      addHolding(account, holding)
     }
+    for (const holding of account.closedHoldings ?? []) addHolding(account, holding)
   }
   return hasAny ? total : undefined
 }
