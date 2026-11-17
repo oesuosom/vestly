@@ -79,10 +79,10 @@ function ClosePositionForm({
   const preview = useMemo(() => {
     if (!account || shared) return null
     const feePLN = Number.isFinite(fee) ? fee : 0
-    if (!Number.isFinite(saleAmount) || saleAmount < 0 || feePLN < 0 || feePLN > saleAmount) return null
+    if (!Number.isFinite(saleAmount) || saleAmount < 0 || feePLN < 0 || (!isBond && feePLN > saleAmount)) return null
     if (!date || date < earliest || date > today) return null
     return planClose(holding, account, transactions, { date, saleAmountPLN: saleAmount, feePLN })
-  }, [account, shared, holding, transactions, date, saleAmount, fee, earliest, today])
+  }, [account, shared, isBond, holding, transactions, date, saleAmount, fee, earliest, today])
 
   function onSubmit(values: FormValues) {
     const plan = closePosition(holding.id, {
@@ -157,14 +157,14 @@ function ClosePositionForm({
                     validate: (v, all) =>
                       !Number.isFinite(v) ? true
                         : v < 0 ? 'Min 0'
-                          : Number.isFinite(all.saleAmount) && v > all.saleAmount ? 'More than the sale'
+                          : !isBond && Number.isFinite(all.saleAmount) && v > all.saleAmount ? 'More than the sale'
                             : true,
                   })}
                 />
               </div>
               <p className="-mt-3 text-xs text-accent leading-normal">
                 {isBond
-                  ? 'What was paid out, after the 19% tax where it applies (IKE bonds have none). Put an early-redemption fee in Fee.'
+                  ? 'What was paid out, after the 19% tax where it applies (IKE bonds have none) and after any early-redemption fee. Enter the fee too, for the record: it isn’t taken off again.'
                   : 'The total before fees. Fee is optional.'}
               </p>
 

@@ -92,11 +92,26 @@ describe('ClosePositionDialog', () => {
     expect(portfolio.closePosition).not.toHaveBeenCalled()
   })
 
-  it('labels a bond’s amount as what was received', () => {
+  it('labels a bond’s amount as what was received, with the fee already out of it', () => {
     setAccount('ike', [bond], [])
     render(<ClosePositionDialog holding={bond} isOpen onClose={() => {}} />)
     expect(screen.getByLabelText('Amount received (PLN)')).toBeTruthy()
-    expect(screen.getByText(/after the 19% tax where it applies/)).toBeTruthy()
+    expect(screen.getByText(/after any early-redemption fee\. Enter the fee too, for the record: it isn’t taken off again\./)).toBeTruthy()
+
+    fireEvent.change(amount(), { target: { value: '2232.5' } })
+    fireEvent.change(fee(), { target: { value: '40' } })
+    // 20 bonds bought by hand at 100 → cost 2 000. Proceeds = amount received; the fee isn't subtracted.
+    expect(previewRow('Proceeds')).toBe('2 232,50 PLN')
+    expect(previewRow('Realized profit')).toMatch(/^\+232,50 PLN/)
+  })
+
+  it('records a bond close with the amount and fee as entered', async () => {
+    setAccount('ike', [bond], [])
+    render(<ClosePositionDialog holding={bond} isOpen onClose={() => {}} />)
+    fireEvent.change(amount(), { target: { value: '2232.5' } })
+    fireEvent.change(fee(), { target: { value: '40' } })
+    fireEvent.click(confirm())
+    await waitFor(() => expect(portfolio.closePosition).toHaveBeenCalledWith('edo', expect.objectContaining({ saleAmountPLN: 2232.5, feePLN: 40 })))
   })
 
   it('lets one of two lots of the same bond series be closed', () => {

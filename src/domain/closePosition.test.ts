@@ -97,22 +97,31 @@ describe('Close position — PKO bond', () => {
   const acc = account('ike', [bond])
 
   it('uses the existing bond buy and leaves Cash alone', () => {
-    // Amount received 2 232.50, early-redemption fee 2 PLN × 20 = 40 → proceeds 2 192.50.
+    // Amount received 2 232.50 — PKO already took the 2 PLN × 20 = 40 early-redemption fee
+    // out of it — so the proceeds are 2 232.50; the fee is recorded, not subtracted again.
     const { plan, after } = close(bond, acc, log, 2232.5, 40)
     expect(plan.filledInBuy).toBeNull()
-    expect(plan.sale).toMatchObject({ source: 'bond_holding', relatedHoldingId: 'bond' })
+    expect(plan.sale).toMatchObject({ source: 'bond_holding', relatedHoldingId: 'bond', amountPLN: 2232.5, feePLN: 40 })
     expect(plan.addsToCash).toBe(false)
-    expect(plan.sale.amountPLN).toBeCloseTo(2192.5, 9)
     expect(computeAccountCashBalance(after, 'acc')).toBe(0)
   })
 
   it('counts the profit on Overview even without a ticker', () => {
     const { after, closedHolding } = close(bond, acc, log, 2232.5, 40)
-    // Cost 20 × 100 = 2 000. Profit 2 192.50 − 2 000 = 192.50, 192.50 / 2 000 = 9.625 %.
+    // Cost 20 × 100 = 2 000. Profit 2 232.50 − 2 000 = 232.50, 232.50 / 2 000 = 11.625 %.
     const row = closedPositionResult(closedHolding, after)!
-    expect(row.result.profitPLN).toBeCloseTo(192.5, 9)
-    expect(row.profitPercent).toBeCloseTo(9.625, 9)
-    expect(getRealizedPnL(after)).toBeCloseTo(192.5, 9)
+    expect(row.result).toEqual({ proceedsPLN: 2232.5, costPLN: 2000, profitPLN: 232.5 })
+    expect(row.profitPercent).toBeCloseTo(11.625, 9)
+    expect(getRealizedPnL(after)).toBeCloseTo(232.5, 9)
+  })
+
+  it('still subtracts the fee for a stock given the same inputs', () => {
+    // A stock's amount is gross: 2 232.50 − 40 = 2 192.50.
+    const stock = { ...bond, id: 'stock', name: 'Stock', ticker: 'STK', category: 'stock' as const }
+    const stockBuy = tx({ type: 'buy', date: '2025-05-15', amountPLN: -2000, quantity: 20, ticker: 'STK', source: 'xtb_import' })
+    const { plan } = close(stock, account('brokerage', [stock]), [stockBuy], 2232.5, 40)
+    expect(plan.sale).toMatchObject({ amountPLN: 2192.5, feePLN: 40 })
+    expect(plan.result.profitPLN).toBeCloseTo(192.5, 9)
   })
 })
 

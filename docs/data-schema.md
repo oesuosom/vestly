@@ -139,6 +139,7 @@ realizedPnL = Σ position.realizedProfitPLN over every account and ticker (getPo
 
 // Close position (domain/closePosition.ts) — whole holding, one sale
 sale.amountPLN = saleAmount − fee          // fee also kept in sale.feePLN, for display only
+sale.amountPLN = amountReceived            // bonds: PKO pays out after the fee; the fee is recorded only
 filledInBuy    = holding.quantity − units the log holds at the sale date, at purchasePrice,
                  dated purchaseDate, affectsCash: false     // only when the log is short
 sale.affectsCash = account is not crypto ∧ no buy was filled in
@@ -175,7 +176,7 @@ Details worth knowing that aren't obvious from reading the type alone:
 - **`Holding.isSynthetic`** — auto-managed, never manually edited. Currently only the XTB Cash holding, derived from transaction history.
 - **`Account.closedHoldings`** — optional. Holdings marked as sold with Close position, kept apart from `holdings` so totals, allocation, snapshots, price refresh, imports, the Portfolio page and AI summaries never see them. Only Account detail (Closed positions), the chart's history, IKE/IKZE contribution totals and holding deletion read them. Absent until an account closes something; no migration.
 - **`Holding.closedAt`** — optional `yyyy-MM-dd`, set on every holding in `closedHoldings` and removed by Reopen.
-- **`Transaction.feePLN`** — optional, positive. The fee on a sale recorded by Close position, already taken out of `amountPLN`; Activity shows it, and nothing subtracts it again (`walkPosition` reads only `pairTradeFees`).
+- **`Transaction.feePLN`** — optional, positive. The fee on a sale recorded by Close position, already out of `amountPLN` (subtracted by the app for stocks, ETFs and crypto; for a bond, taken by PKO before paying out); Activity shows it, and nothing subtracts it again (`walkPosition` reads only `pairTradeFees`).
 - **`Transaction.affectsCash`** — optional. Set on the rows Close position creates, saying whether they move Cash (see the calculation reference). Absent on every other row, where the source decides.
 - **Close position rows** — `source: 'manual'` (`'bond_holding'` for a bond lot, so the lot stays its own position), `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids.
 - **`Transaction.externalId`** — the deduplication key. On import, any row whose `externalId` already exists is skipped. XTB supplies its own ID column; Revolut and eMakler rows get one generated.

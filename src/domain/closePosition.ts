@@ -18,9 +18,17 @@ import { pairTradeFees } from './tradeFees'
 export type CloseInput = {
   /** Day of the sale, `yyyy-MM-dd`. */
   date: string
-  /** What the sale brought in before fees, in PLN. For bonds: the amount paid out. */
+  /**
+   * What the sale brought in, in PLN. For stocks, ETFs and crypto: the gross
+   * amount, before the fee. For bonds: the amount PKO paid out, which already
+   * has the early-redemption fee (and the 19% tax where it applies) taken out.
+   */
   saleAmountPLN: number
-  /** Broker or early-redemption fee, in PLN. 0 when there was none. */
+  /**
+   * Broker or early-redemption fee, in PLN. 0 when there was none. Subtracted
+   * from the sale amount, except for bonds, where it is already out of the
+   * amount received and is kept for the record only.
+   */
   feePLN: number
 }
 
@@ -73,6 +81,18 @@ function positionRows(transactions: Transaction[], accountId: string, key: strin
 }
 
 /**
+ * What a close brings in after its fee, in PLN — the sale's `amountPLN`.
+ *
+ * For a bond the amount entered is what PKO paid out, which already has the
+ * early-redemption fee taken out, so it is the proceeds as it stands and the
+ * fee is only recorded. Everywhere else the amount is gross and the fee comes
+ * off it, the way XTB confirmations store trades.
+ */
+export function closeProceeds(holding: Holding, input: CloseInput): number {
+  return holding.category === 'bond' ? input.saleAmountPLN : input.saleAmountPLN - input.feePLN
+}
+
+/**
  * Another open holding in the account that shares this holding's position, if
  * any. Realized profit is worked out per account and ticker, not per holding,
  * so with two such holdings a sale can't be pinned on one of them. Closing is
@@ -120,7 +140,8 @@ export function closeAddsToCash(account: Account, positionInflows: Transaction[]
  *
  * Inputs are assumed valid: a non-synthetic open holding with no
  * {@link findSharedPositionHolding}, a date from {@link earliestCloseDate} to
- * today, and a fee no larger than the sale amount.
+ * today, and — except for a bond, whose fee is only recorded — a fee no larger
+ * than the sale amount.
  */
 export function planClose(
   holding: Holding,
@@ -160,7 +181,7 @@ export function planClose(
 
   const inflows = upToSale.filter((t) => t.type === 'buy' || t.type === 'receive')
   const addsToCash = closeAddsToCash(account, inflows, filledInBuy !== null)
-  const proceedsPLN = input.saleAmountPLN - input.feePLN
+  const proceedsPLN = closeProceeds(holding, input)
 
   const sale: Transaction = {
     id: uuidv4(),
@@ -168,8 +189,8 @@ export function planClose(
     type: 'sell',
     // Date-only: with the time unknown, the walk runs it after same-day buys.
     date: input.date,
-    // Net of the fee, the way XTB confirmations store trades. The fee is kept
-    // alongside for Activity only; nothing subtracts it a second time.
+    // Net of the fee, the way XTB confirmations store trades (see closeProceeds).
+    // The fee is kept alongside for Activity only; nothing subtracts it again.
     amountPLN: proceedsPLN,
     instrument: holding.name,
     ticker: holding.ticker,
