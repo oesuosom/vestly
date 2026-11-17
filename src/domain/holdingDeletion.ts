@@ -22,7 +22,9 @@ const TICKER_LINKED_TYPES: ReadonlySet<TransactionType> = new Set(['dividend', '
  *    so it stays.
  *
  * A transaction linked to a different, existing holding is never matched.
- * Synthetic holdings (the Cash row) own no transactions.
+ * Synthetic holdings (the Cash row) own no transactions. Closed holdings count
+ * as existing holdings on both sides: a closed one takes its own sale with it,
+ * and an open one sharing its ticker never takes that sale.
  *
  * Both the delete itself and the confirm dialog's count call this, so the
  * dialog can never promise something other than what is removed.
@@ -37,10 +39,10 @@ export function findHoldingTransactions(
   const ticker = holding.ticker?.toUpperCase()
   const name = holding.name.toLowerCase()
   const account = accounts.find((a) => a.id === holding.accountId)
-  const others = (account?.holdings ?? []).filter((h) => h.id !== holding.id)
+  const others = (account ? allHoldings(account) : []).filter((h) => h.id !== holding.id)
   const tickerShared = ticker !== undefined && others.some((h) => h.ticker?.toUpperCase() === ticker)
   const ambiguous = tickerShared || others.some((h) => h.name.toLowerCase() === name)
-  const holdingIds = new Set(accounts.flatMap((a) => a.holdings.map((h) => h.id)))
+  const holdingIds = new Set(accounts.flatMap((a) => allHoldings(a).map((h) => h.id)))
 
   return transactions.filter((t) => {
     if (t.relatedHoldingId === holding.id) {
@@ -75,9 +77,20 @@ export function deleteHoldingFromLog(
   const removed = new Set(findHoldingTransactions(holding, accounts, transactions))
   const kept = removed.size > 0 ? transactions.filter((t) => !removed.has(t)) : transactions
   const remainingAccounts = accounts.map((a) =>
-    a.id === holding.accountId ? { ...a, holdings: a.holdings.filter((h) => h.id !== holding.id) } : a,
+    a.id === holding.accountId
+      ? {
+          ...a,
+          holdings: a.holdings.filter((h) => h.id !== holding.id),
+          closedHoldings: a.closedHoldings?.filter((h) => h.id !== holding.id),
+        }
+      : a,
   )
   return resolveDividendLinks(kept, remainingAccounts)
+}
+
+/** An account's open and closed holdings. */
+function allHoldings(account: Account): Holding[] {
+  return account.closedHoldings ? [...account.holdings, ...account.closedHoldings] : account.holdings
 }
 
 /** Deleting an account takes its whole transaction log with it. */

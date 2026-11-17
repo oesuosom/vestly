@@ -168,6 +168,32 @@ describe('findHoldingTransactions', () => {
   })
 })
 
+describe('findHoldingTransactions — closed holdings', () => {
+  // AAPL bought by hand, closed (a filled-in buy and the sale), then bought again as a new holding.
+  const closed = makeHolding({ id: 'closed', closedAt: '2026-03-10' })
+  const rebuy = makeHolding({ id: 'rebuy' })
+  const accounts = [{ ...makeAccount('acc1', [rebuy]), closedHoldings: [closed] }]
+  const closeBuy = makeTx({ id: 'close-buy', ticker: 'AAPL', relatedHoldingId: 'closed' })
+  const closeSale = makeTx({ id: 'close-sale', type: 'sell', amountPLN: 150, ticker: 'AAPL', relatedHoldingId: 'closed' })
+  const rebuyBuy = makeTx({ id: 'rebuy-buy', ticker: 'AAPL' })
+  const txs = [closeBuy, closeSale, rebuyBuy]
+
+  it('gives a closed holding its own sale and filled-in buy', () => {
+    expect(ids(findHoldingTransactions(closed, accounts, txs))).toEqual(['close-buy', 'close-sale'])
+    expect(describeTransactions(findHoldingTransactions(closed, accounts, txs))).toBe('2 transactions (1 buy, 1 sell)')
+  })
+
+  it('never lets the open holding take the closed one\'s rows', () => {
+    // The unlinked rebuy buy is ambiguous (two AAPL holdings), and the linked rows belong to `closed`.
+    expect(findHoldingTransactions(rebuy, accounts, txs)).toEqual([])
+  })
+
+  it('drops the closed holding when re-linking the log after its delete', () => {
+    const kept = deleteHoldingFromLog(closed, accounts, txs)
+    expect(ids(kept)).toEqual(['rebuy-buy'])
+  })
+})
+
 // ─── deleteHoldingFromLog ─────────────────────────────────────────────────────
 
 describe('deleteHoldingFromLog', () => {

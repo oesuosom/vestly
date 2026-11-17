@@ -99,18 +99,43 @@ export function needsRebalancing(
 
 
 /**
- * Sum all transaction amounts for a given account.
- * All transaction types contribute their signed amountPLN:
- *   deposits (+), dividends (+), interest (+)
- *   buys (-), taxes (-), fees (-)
- * Result = uninvested cash balance in PLN.
+ * Whether a transaction moves its account's Cash row.
+ *
+ * Cash counts the money that went through the account: deposits, dividends and
+ * interest in; buys, taxes and fees out. Some rows record a trade whose money
+ * never passed through it, so they don't count:
+ * - `bond_holding` — the buy behind a bond holding, created by the app.
+ * - `emakler_import` — eMakler trades, paid from a bank account outside Vestly.
+ * - Rows Close position creates carry `affectsCash` and say for themselves: a
+ *   sale counts only when the holding's purchases were taken out of cash (see
+ *   `closePosition.ts`), and a buy it fills in for a hand-entered holding never does.
+ *
+ * Crypto accounts have no Cash row at all (`upsertSyntheticCashHolding`).
+ */
+export function affectsCash(t: Transaction): boolean {
+  if (t.affectsCash !== undefined) return t.affectsCash
+  return t.source !== 'bond_holding' && t.source !== 'emakler_import'
+}
+
+/**
+ * The uninvested cash in an account, in PLN: the signed sum of `amountPLN`
+ * over the account's transactions that move cash (see `affectsCash`).
+ *
+ * With `onOrBefore` (`yyyy-MM-dd`), only transactions dated that day or
+ * earlier count — the balance the chart shows for that day.
  */
 export function computeAccountCashBalance(
   transactions: Transaction[],
-  accountId: string
+  accountId: string,
+  onOrBefore?: string,
 ): number {
   return transactions
-    .filter((t) => t.accountId === accountId && t.source !== 'bond_holding' && t.source !== 'emakler_import')
+    .filter(
+      (t) =>
+        t.accountId === accountId &&
+        affectsCash(t) &&
+        (onOrBefore === undefined || t.date.slice(0, 10) <= onOrBefore),
+    )
     .reduce((sum, t) => sum + t.amountPLN, 0)
 }
 
@@ -254,10 +279,26 @@ export function getIncomeSummary(
   return getAllTimeSummary(transactions.filter((t) => t.date.slice(0, 4) === String(year)))
 }
 
+/** Transaction types that move units in or out of a position. */
+const TRADE_TYPES: ReadonlySet<TransactionType> = new Set(['buy', 'sell', 'send', 'receive'])
+
+/**
+ * Which position a transaction belongs to within its account: its ticker
+ * (`resolveTransactionTicker`), or — for a trade that has none but is linked
+ * to a holding, such as the buy and sale of a bond entered without a ticker —
+ * `#` followed by that holding's id. Rows with neither belong to no position.
+ */
+export function positionKey(t: Transaction): string | undefined {
+  const ticker = resolveTransactionTicker(t)
+  if (ticker) return ticker
+  if (t.relatedHoldingId && TRADE_TYPES.has(t.type)) return `#${t.relatedHoldingId}`
+  return undefined
+}
+
 /** One account's position in one ticker. */
 export type AccountPosition = {
   accountId: string
-  /** Uppercased, as `resolveTransactionTicker` returns it. */
+  /** The `positionKey`: the ticker uppercased, or `#holdingId` for a ticker-less holding. */
   ticker: string
   position: Position
 }
@@ -267,9 +308,10 @@ export type AccountPosition = {
  * at least one transaction, each walked on its own by `walkPosition` (see
  * `position.ts` for the rules), with Revolut fees paired to their trades.
  *
- * Tickers are resolved with `resolveTransactionTicker`, so rows that carry only
- * an instrument name are matched; rows that resolve to no ticker belong to no
- * position and are left out.
+ * Rows are grouped by `positionKey`: tickers are resolved with
+ * `resolveTransactionTicker`, so rows that carry only an instrument name are
+ * matched, and a ticker-less trade linked to a holding forms that holding's own
+ * position. Rows with no key belong to no position and are left out.
  *
  * A position with `unexplainedQuantity > 0` sold or sent more than the log
  * recorded coming in — its history is incomplete.
@@ -277,7 +319,7 @@ export type AccountPosition = {
 export function getPositions(transactions: Transaction[]): AccountPosition[] {
   const groups = new Map<string, { accountId: string; ticker: string; rows: Transaction[] }>()
   for (const t of transactions) {
-    const ticker = resolveTransactionTicker(t)
+    const ticker = positionKey(t)
     if (!ticker) continue
     const key = `${t.accountId}\n${ticker}`
     const group = groups.get(key)

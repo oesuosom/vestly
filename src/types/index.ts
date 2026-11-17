@@ -28,7 +28,15 @@ export type Account = {
   notes?: string
   createdAt: string
   lastUpdated: string
+  /** Open holdings. Everything that values the portfolio reads only these. */
   holdings: Holding[]
+  /**
+   * Holdings marked as sold with Close position, newest last. Kept apart from
+   * `holdings` so totals, allocation, price refresh, imports and the AI summary
+   * never see them; only the chart's history and Account detail read them.
+   * Absent on accounts that never closed anything.
+   */
+  closedHoldings?: Holding[]
 }
 
 // ─────────────────────────────────────────
@@ -60,6 +68,7 @@ export type Holding = {
   updatedAt: string
   isSynthetic?: boolean   // true = auto-managed, never manually edited
                           // used for XTB Cash holding derived from transactions
+  closedAt?: string       // 'yyyy-MM-dd' — set while the holding is in Account.closedHoldings
 }
 
 // ─────────────────────────────────────────
@@ -278,6 +287,17 @@ export type Transaction = {
   // Deduplication — XTB's own transaction ID
   // On import: skip any row whose externalId already exists in ft_transactions
   externalId: string            // the "ID" column from XTB CSV
+
+  /**
+   * Fee charged on this trade, in PLN (positive), for display only: it is
+   * already taken out of `amountPLN`. Set on sales recorded by Close position.
+   */
+  feePLN?: number
+  /**
+   * Whether this row moves the account's Cash. Set on rows Close position
+   * creates; absent everywhere else, where the source decides (see `affectsCash`).
+   */
+  affectsCash?: boolean
 
   comment?: string              // raw XTB comment, preserved for debugging
   source: 'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Transaction } from '@/types'
-import { walkPosition } from './position'
+import { walkPosition, walkSales } from './position'
 import type { TradeFees } from './tradeFees'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -467,5 +467,42 @@ describe('walkPosition — trade fees', () => {
   it('takes amounts as they stand when no fees are passed', () => {
     const position = walkPosition([tx('buy', '2025-01-10', 1, -1000), tx('sell', '2025-02-10', 1, 1500)])
     expect(position.realizedProfitPLN).toBe(500)
+  })
+})
+
+// ─── walkSales ─────────────────────────────────────────────────────────────────
+
+describe('walkSales', () => {
+  it('reports each sale on its own, adding up to the walk\'s realized profit', () => {
+    const buy1 = tx('buy', '2025-01-10', 10, -1000)
+    const buy2 = tx('buy', '2025-02-10', 10, -1200) // 20 for 2,200 → average 110
+    const first = tx('sell', '2025-03-10', 5, 900)  // 900 − 5 × 110 = +350
+    const buy3 = tx('buy', '2025-04-10', 5, -950)   // 20 for 2,600 → average 130
+    const second = tx('sell', '2025-05-10', 10, 1000) // 1,000 − 10 × 130 = −300
+    const rows = [buy1, buy2, first, buy3, second]
+
+    const sales = walkSales(rows)
+    expect(sales.get(first.id)).toEqual({ proceedsPLN: 900, costPLN: 550, profitPLN: 350 })
+    expect(sales.get(second.id)).toEqual({ proceedsPLN: 1000, costPLN: 1300, profitPLN: -300 })
+    expect(sales.size).toBe(2)
+    // 350 − 300 = +50, the same as walkPosition.
+    expect(walkPosition(rows).realizedProfitPLN).toBe(50)
+  })
+
+  it('applies paired fees and the explained share the same way as the walk', () => {
+    const buy = tx('buy', '2025-01-10', 1, -100)
+    const sell = tx('sell', '2025-02-10', 10, 1000)
+    // 1 of 10 explained: proceeds (1,000 − 50) × 1/10 = 95, cost 100 → −5.
+    const result = walkSales([buy, sell], feesFor([sell, 50])).get(sell.id)!
+    expect(result.proceedsPLN).toBeCloseTo(95, 9)
+    expect(result.costPLN).toBe(100)
+    expect(result.profitPLN).toBeCloseTo(-5, 9)
+  })
+
+  it('ignores a transaction\'s own feePLN, which is already inside its amount', () => {
+    const buy = tx('buy', '2025-01-10', 1, -100)
+    const sell = { ...tx('sell', '2025-02-10', 1, 140), feePLN: 10 } // sold for 150, 10 fee
+    expect(walkSales([buy, sell]).get(sell.id)!.profitPLN).toBe(40)
+    expect(walkPosition([buy, sell]).realizedProfitPLN).toBe(40)
   })
 })

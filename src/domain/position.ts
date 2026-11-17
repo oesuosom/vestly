@@ -93,6 +93,8 @@ const NO_FEES: TradeFees = new Map()
  *
  * `tradeFees` holds fees that are stored apart from their trade (Revolut; see
  * `pairTradeFees`). Without it every trade's amount is taken as it stands.
+ * A transaction's own `feePLN` is never read here: it is already inside
+ * `amountPLN` (Close position stores it for display only).
  *
  * Rules:
  * - **buy** adds its quantity and its cost: `|amountPLN|` plus its fee. The
@@ -118,6 +120,37 @@ const NO_FEES: TradeFees = new Map()
  * Same-day ordering is described on {@link sortKey}.
  */
 export function walkPosition(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): Position {
+  return walk(transactions, tradeFees)
+}
+
+/** What one sale realized, as `walkPosition` counted it. */
+export type SaleResult = {
+  /** What the sale brought in, after its fee, for the units the log explains. */
+  proceedsPLN: number
+  /** The average cost of the units the sale removed. */
+  costPLN: number
+  /** `proceedsPLN − costPLN`: this sale's share of `realizedProfitPLN`. */
+  profitPLN: number
+}
+
+/**
+ * The same walk as {@link walkPosition}, reporting each sale on its own, keyed
+ * by transaction `id`. The profits add up to the position's
+ * `realizedProfitPLN` exactly, so a figure shown for one sale (the Closed
+ * positions row) can never disagree with the realized total on Overview.
+ * Takes the same input, narrowed to one account and one ticker.
+ */
+export function walkSales(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): Map<string, SaleResult> {
+  const sales = new Map<string, SaleResult>()
+  walk(transactions, tradeFees, (id, result) => sales.set(id, result))
+  return sales
+}
+
+function walk(
+  transactions: Transaction[],
+  tradeFees: TradeFees,
+  onSale?: (id: string, result: SaleResult) => void,
+): Position {
   let quantity = 0
   let costPLN = 0
   let realizedProfitPLN = 0
@@ -139,7 +172,9 @@ export function walkPosition(transactions: Transaction[], tradeFees: TradeFees =
 
       if (t.type === 'sell') {
         const explainedShare = (leaving - unexplained) / leaving
-        realizedProfitPLN += (t.amountPLN - feePLN) * explainedShare - removedCostPLN
+        const proceedsPLN = (t.amountPLN - feePLN) * explainedShare
+        realizedProfitPLN += proceedsPLN - removedCostPLN
+        onSale?.(t.id, { proceedsPLN, costPLN: removedCostPLN, profitPLN: proceedsPLN - removedCostPLN })
       }
 
       costPLN -= removedCostPLN
