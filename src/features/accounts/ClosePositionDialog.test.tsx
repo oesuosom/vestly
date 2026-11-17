@@ -99,6 +99,17 @@ describe('ClosePositionDialog', () => {
     expect(screen.getByText(/after the 19% tax where it applies/)).toBeTruthy()
   })
 
+  it('lets one of two lots of the same bond series be closed', () => {
+    const lotA = { ...bond, id: 'lot-a', ticker: 'EDO0535' }
+    const lotB = { ...bond, id: 'lot-b', ticker: 'EDO0535', purchaseDate: '2025-06-15' }
+    setAccount('ike', [lotA, lotB], [])
+    render(<ClosePositionDialog holding={lotA} isOpen onClose={() => {}} />)
+
+    expect(screen.queryByText(/has the same ticker/)).toBeNull()
+    expect(screen.getByLabelText('Amount received (PLN)')).toBeTruthy()
+    expect((confirm() as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('blocks the close while another open holding shares the ticker', () => {
     const second = { ...apple, id: 'aapl-2', name: 'Apple (2nd lot)' }
     setAccount('brokerage', [apple, second])

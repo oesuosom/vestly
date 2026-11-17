@@ -133,8 +133,9 @@ avgCost(account, ticker) = cost / qty
 
 // Realized profit, whole portfolio (getRealizedPnL)
 realizedPnL = Σ position.realizedProfitPLN over every account and ticker (getPositions)
-// Positions are keyed by positionKey(t): the resolved ticker, or `#relatedHoldingId` for a
-// ticker-less trade linked to a holding (a bond entered without a ticker).
+// Positions are keyed by positionKey(t): `#relatedHoldingId` for a bond lot's own rows
+// (source 'bond_holding' — each lot is costed on its own, even when lots share a ticker);
+// otherwise the resolved ticker; otherwise `#relatedHoldingId` for a trade linked to a holding.
 
 // Close position (domain/closePosition.ts) — whole holding, one sale
 sale.amountPLN = saleAmount − fee          // fee also kept in sale.feePLN, for display only
@@ -176,9 +177,9 @@ Details worth knowing that aren't obvious from reading the type alone:
 - **`Holding.closedAt`** — optional `yyyy-MM-dd`, set on every holding in `closedHoldings` and removed by Reopen.
 - **`Transaction.feePLN`** — optional, positive. The fee on a sale recorded by Close position, already taken out of `amountPLN`; Activity shows it, and nothing subtracts it again (`walkPosition` reads only `pairTradeFees`).
 - **`Transaction.affectsCash`** — optional. Set on the rows Close position creates, saying whether they move Cash (see the calculation reference). Absent on every other row, where the source decides.
-- **Close position rows** — `source: 'manual'`, `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids.
+- **Close position rows** — `source: 'manual'` (`'bond_holding'` for a bond lot, so the lot stays its own position), `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids.
 - **`Transaction.externalId`** — the deduplication key. On import, any row whose `externalId` already exists is skipped. XTB supplies its own ID column; Revolut and eMakler rows get one generated.
-- **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
+- **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. `bond_holding` marks the rows the app makes for one bond lot: its buy, and its sale once closed. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
 - **`send` / `receive`** — crypto transfers. `send` carries `amountPLN: 0` (no fiat proceeds); `receive` carries the cost basis in PLN, or 0 when unknown.
 - **`sell`** — `amountPLN` is the proceeds after fees, positive. Realized profit uses the average-cost method (see the calculation reference); there is no FIFO logic.
 - **`fee`** — Revolut crypto imports store each trade's fee as its own `fee` row with no ticker. Its `externalId` is the only link to the trade; `pairTradeFees` ([`domain/tradeFees.ts`](../src/domain/tradeFees.ts)) documents the id scheme.

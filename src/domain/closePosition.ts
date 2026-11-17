@@ -48,11 +48,23 @@ const buyExternalId = (holdingId: string) => `close-buy-${holdingId}`
 
 /**
  * The position a holding's trades belong to within its account — the same
- * `positionKey` its transactions get: its ticker, or its name when that reads
- * as one, or the holding itself when it has neither.
+ * `positionKey` its transactions get. A bond lot is always its own position
+ * (its rows are `bond_holding`, linked to it). Anything else goes by its
+ * ticker, or its name when that reads as one, or the holding itself when it
+ * has neither.
  */
 export function holdingPositionKey(holding: Holding): string {
+  if (holding.category === 'bond') return `#${holding.id}`
   return resolveTransactionTicker({ ticker: holding.ticker, instrument: holding.name }) ?? `#${holding.id}`
+}
+
+/**
+ * The source of the rows a close adds. A bond lot's rows are `bond_holding`,
+ * like its buy, so the walk and the chart keep each lot separate from other
+ * lots of the series; everything else is `manual`.
+ */
+function closeSource(holding: Holding): Transaction['source'] {
+  return holding.category === 'bond' ? 'bond_holding' : 'manual'
 }
 
 /** The account's transactions in the holding's position, in any order. */
@@ -65,7 +77,8 @@ function positionRows(transactions: Transaction[], accountId: string, key: strin
  * any. Realized profit is worked out per account and ticker, not per holding,
  * so with two such holdings a sale can't be pinned on one of them. Closing is
  * blocked until they are one holding, and so is reopening a closed one while an
- * open one exists (the issue's rule for rebuys).
+ * open one exists (the issue's rule for rebuys). Never true for a bond lot:
+ * each is its own position.
  */
 export function findSharedPositionHolding(holding: Holding, account: Account): Holding | undefined {
   const key = holdingPositionKey(holding)
@@ -139,7 +152,7 @@ export function planClose(
           pricePerUnitPLN: holding.purchasePrice,
           relatedHoldingId: holding.id,
           externalId: buyExternalId(holding.id),
-          source: 'manual',
+          source: closeSource(holding),
           affectsCash: false,
           createdAt: now,
         }
@@ -166,7 +179,7 @@ export function planClose(
     ...(input.feePLN > 0 && { feePLN: input.feePLN }),
     relatedHoldingId: holding.id,
     externalId: saleExternalId(holding.id),
-    source: 'manual',
+    source: closeSource(holding),
     affectsCash: addsToCash,
     createdAt: now,
   }

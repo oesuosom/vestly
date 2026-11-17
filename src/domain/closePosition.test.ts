@@ -11,6 +11,7 @@ import {
   removeCloseTransactions,
 } from './closePosition'
 import { buildBondBuyTransaction } from './transactions'
+import { quantityAtDate } from './historicalQuantity'
 import { pairTradeFees } from './tradeFees'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ describe('Close position — PKO bond', () => {
     // Amount received 2 232.50, early-redemption fee 2 PLN × 20 = 40 → proceeds 2 192.50.
     const { plan, after } = close(bond, acc, log, 2232.5, 40)
     expect(plan.filledInBuy).toBeNull()
+    expect(plan.sale).toMatchObject({ source: 'bond_holding', relatedHoldingId: 'bond' })
     expect(plan.addsToCash).toBe(false)
     expect(plan.sale.amountPLN).toBeCloseTo(2192.5, 9)
     expect(computeAccountCashBalance(after, 'acc')).toBe(0)
@@ -111,6 +113,31 @@ describe('Close position — PKO bond', () => {
     expect(row.result.profitPLN).toBeCloseTo(192.5, 9)
     expect(row.profitPercent).toBeCloseTo(9.625, 9)
     expect(getRealizedPnL(after)).toBeCloseTo(192.5, 9)
+  })
+})
+
+describe('Close position — two lots of the same bond series', () => {
+  // Same series and ticker, bought a month apart; lot B came in at 99.90 per bond.
+  const lotA = holding({ id: 'lot-a', name: 'EDO0535', ticker: 'EDO0535', category: 'bond', quantity: 10, purchasePrice: 100, purchaseDate: '2025-05-15' })
+  const lotB = holding({ id: 'lot-b', name: 'EDO0535', ticker: 'EDO0535', category: 'bond', quantity: 10, purchasePrice: 99.9, purchaseDate: '2025-06-15' })
+  const log = [buildBondBuyTransaction(lotA), buildBondBuyTransaction(lotB)]
+  const acc = account('ike', [lotA, lotB])
+
+  it('closes one lot at its own cost, as its own position', () => {
+    const { plan, after, closedHolding } = close(lotA, acc, log, 1100, 0)
+    // Lot A cost 10 × 100 = 1 000 → +100. Pooled with lot B (1 999 / 20 = 99.95) it would read +100.50.
+    expect(plan.sale.source).toBe('bond_holding')
+    expect(plan.filledInBuy).toBeNull()
+    expect(plan.result).toEqual({ proceedsPLN: 1100, costPLN: 1000, profitPLN: 100 })
+    expect(closedPositionResult(closedHolding, after)!.result.profitPLN).toBe(100)
+    expect(getRealizedPnL(after)).toBe(100)
+  })
+
+  it('leaves the other lot untouched, on the chart too', () => {
+    const { after } = close(lotA, acc, log, 1100, 0)
+    expect(quantityAtDate(lotB, 'acc', after, '2026-04-01')).toBe(10)
+    expect(quantityAtDate(lotA, 'acc', after, '2026-03-09')).toBe(10)
+    expect(quantityAtDate(lotA, 'acc', after, '2026-03-10')).toBe(0)
   })
 })
 
@@ -243,12 +270,17 @@ describe('findSharedPositionHolding', () => {
     expect(findSharedPositionHolding(a, account('brokerage', [a, b, cash]))).toBe(b)
   })
 
-  it('is undefined for a holding alone in its position, or one without a ticker', () => {
+  it('is undefined for a holding alone in its position', () => {
     expect(findSharedPositionHolding(a, account('brokerage', [a, cash]))).toBeUndefined()
-    const bondA = holding({ id: 'ba', name: 'Obligacje EDO0535', quantity: 1, purchasePrice: 1 })
-    const bondB = holding({ id: 'bb', name: 'Obligacje EDO0535', quantity: 1, purchasePrice: 1 })
-    // Same long name, no ticker: each is its own position (`#holdingId`).
-    expect(findSharedPositionHolding(bondA, account('ike', [bondA, bondB]))).toBeUndefined()
+  })
+
+  it('never matches bond lots of the same series, with a ticker or by a short name', () => {
+    const lot = (id: string, fields: Partial<Holding>) =>
+      holding({ id, name: 'EDO0535', category: 'bond', quantity: 10, purchasePrice: 100, ...fields })
+    const withTicker = [lot('ba', { ticker: 'EDO0535' }), lot('bb', { ticker: 'EDO0535' })]
+    const byName = [lot('ca', {}), lot('cb', {})]
+    expect(findSharedPositionHolding(withTicker[0], account('ike', withTicker))).toBeUndefined()
+    expect(findSharedPositionHolding(byName[0], account('ike', byName))).toBeUndefined()
   })
 })
 

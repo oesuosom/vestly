@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   holding drops out of totals, allocation, price refresh, imports and the Portfolio page, but
   the chart still shows it up to the day you sold it. Open one from Closed positions to see its
   sale and transactions, or Reopen it if you closed it by mistake. Delete is still there, for
-  holdings that should never have existed.
+  holdings that should never have existed. Each bond lot closes on its own, at its own cost,
+  even when you hold several lots of one series. And an XTB import no longer offers to create
+  a holding for an instrument you have sold: a closed or sold-out one isn't proposed, and a
+  partly sold one is proposed at the units you still hold and their average cost.
 
 ### Changed
 

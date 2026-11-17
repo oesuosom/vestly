@@ -104,7 +104,8 @@ export function needsRebalancing(
  * Cash counts the money that went through the account: deposits, dividends and
  * interest in; buys, taxes and fees out. Some rows record a trade whose money
  * never passed through it, so they don't count:
- * - `bond_holding` — the buy behind a bond holding, created by the app.
+ * - `bond_holding` — the buy behind a bond holding, created by the app (and
+ *   its sale, when the lot is closed).
  * - `emakler_import` — eMakler trades, paid from a bank account outside Vestly.
  * - Rows Close position creates carry `affectsCash` and say for themselves: a
  *   sale counts only when the holding's purchases were taken out of cash (see
@@ -283,12 +284,19 @@ export function getIncomeSummary(
 const TRADE_TYPES: ReadonlySet<TransactionType> = new Set(['buy', 'sell', 'send', 'receive'])
 
 /**
- * Which position a transaction belongs to within its account: its ticker
- * (`resolveTransactionTicker`), or — for a trade that has none but is linked
- * to a holding, such as the buy and sale of a bond entered without a ticker —
- * `#` followed by that holding's id. Rows with neither belong to no position.
+ * Which position a transaction belongs to within its account.
+ *
+ * - A bond lot's own rows (`bond_holding`: its buy, and its sale once closed)
+ *   form that holding's position, `#` followed by its id. Lots of the same
+ *   series share a ticker but were bought on different dates at different
+ *   accrued values, so each is costed and sold on its own.
+ * - Otherwise the ticker (`resolveTransactionTicker`).
+ * - Failing that, a trade linked to a holding forms that holding's position.
+ *
+ * Rows with none of these belong to no position.
  */
 export function positionKey(t: Transaction): string | undefined {
+  if (t.source === 'bond_holding' && t.relatedHoldingId && TRADE_TYPES.has(t.type)) return `#${t.relatedHoldingId}`
   const ticker = resolveTransactionTicker(t)
   if (ticker) return ticker
   if (t.relatedHoldingId && TRADE_TYPES.has(t.type)) return `#${t.relatedHoldingId}`

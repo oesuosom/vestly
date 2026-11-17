@@ -734,3 +734,15 @@ describe('computeAccountCashBalance', () => {
     expect(computeAccountCashBalance(txs, 'acc1', '2026-03-10')).toBe(2490)
   })
 })
+
+describe('getPositions — bond lots', () => {
+  it('keeps each lot of a series as its own position, even with a shared ticker', () => {
+    const buy = (id: string, holdingId: string, amountPLN: number) =>
+      makeTx({ id, ticker: 'EDO0535', quantity: 10, amountPLN, source: 'bond_holding', relatedHoldingId: holdingId })
+    const positions = getPositions([buy('a', 'lot-a', -1000), buy('b', 'lot-b', -999)])
+    expect(positions.map((p) => [p.ticker, p.position.quantity, p.position.costPLN])).toEqual([
+      ['#lot-a', 10, 1000],
+      ['#lot-b', 10, 999],
+    ])
+  })
+})

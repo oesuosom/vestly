@@ -1,6 +1,8 @@
 import { calculateAverageCostBasis } from '@/domain/calculations'
-import type { Account, AssetCategory, InstrumentAlias, Transaction } from '@/types'
+import type { Account, AssetCategory, InstrumentAlias, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { walkPosition } from '@/domain/position'
+import { pairTradeFees, type TradeFees } from '@/domain/tradeFees'
 
 // ─────────────────────────────────────────
 // Cost-basis diff computation
@@ -60,22 +62,51 @@ export type UnmatchedRow = {
   instrument: string          // XTB instrument name
   ticker: string              // resolved ticker
   exchange?: string           // resolved exchange (e.g. 'US', 'PL') from transaction data
-  totalQuantity: number       // sum of all buy quantities
-  avgCostPLN: number          // weighted average cost per unit in PLN
-  earliestDate: string        // YYYY-MM-DD of the earliest buy transaction
+  totalQuantity: number       // units still held, per the position walk
+  avgCostPLN: number          // average cost per unit of those units, in PLN
+  earliestDate: string        // YYYY-MM-DD of the first buy of the units still held
   suggestedCategory?: AssetCategory  // from static lookup or user aliases
 }
 
 export type UnresolvedRow = {
   instrument: string          // XTB instrument name (no ticker could be determined)
-  totalQuantity: number
+  totalQuantity: number       // units still held, per the position walk
   avgCostPLN: number
-  earliestDate: string        // YYYY-MM-DD of the earliest buy transaction
+  earliestDate: string        // YYYY-MM-DD of the first buy of the units still held
 }
 
 type UnmatchedResult = {
-  matched: UnmatchedRow[]     // buy txns with a resolved ticker, no existing holding
-  unresolved: UnresolvedRow[] // buy txns where ticker is unknown entirely
+  matched: UnmatchedRow[]     // still-held instruments with a resolved ticker, no existing holding
+  unresolved: UnresolvedRow[] // still-held instruments whose ticker is unknown entirely
+}
+
+/** Rows that move units, and so make up a position. */
+const TRADE_TYPES: ReadonlySet<TransactionType> = new Set(['buy', 'sell', 'send', 'receive'])
+
+/**
+ * What is still held of one instrument's trades: the position walk's quantity
+ * and average cost (see `walkPosition`), and the day of the first buy since
+ * the position last went to zero — the purchase date of the units left.
+ * Null when nothing is held, e.g. everything was sold or the holding was closed.
+ */
+function stillHeld(
+  rows: Transaction[],
+  tradeFees: TradeFees,
+): { quantity: number; averageCostPLN: number; earliestDate: string } | null {
+  const { quantity, averageCostPLN } = walkPosition(rows, tradeFees)
+  if (quantity === 0) return null
+
+  // The latest day the position stood at zero; the units held now were bought after it.
+  const days = [...new Set(rows.map((t) => t.date.slice(0, 10)))].sort()
+  let resetDay = ''
+  for (const day of days) {
+    if (walkPosition(rows.filter((t) => t.date.slice(0, 10) <= day), tradeFees).quantity === 0) resetDay = day
+  }
+  const inflowDays = rows
+    .filter((t) => (t.type === 'buy' || t.type === 'receive') && t.date.slice(0, 10) > resetDay)
+    .map((t) => t.date.slice(0, 10))
+    .sort()
+  return { quantity, averageCostPLN, earliestDate: inflowDays[0] ?? days[0] }
 }
 
 /** Resolve an instrument name via user aliases then static lookup. */
@@ -92,12 +123,15 @@ function resolveInstrumentName(
 }
 
 /**
- * From the merged buy transactions for a given account, find instruments
- * whose ticker does NOT already have a matching holding in the account.
- * Groups by ticker (matched) or by instrument name (unresolved, no ticker).
- * Sums quantities and computes weighted average cost for each group.
+ * From the merged transactions for a given account, find instruments that are
+ * still held according to the log but have no matching holding in the account.
+ * Groups by ticker (matched) or by instrument name (unresolved, no ticker),
+ * and walks each group's buys, sales and transfers as one position, so an
+ * instrument sold out — or a holding marked as sold with Close position — is
+ * not proposed again, and a partly sold one is proposed at the units left and
+ * their average cost.
  *
- * When a buy transaction has no ticker, the instrument name is checked against
+ * When a transaction has no ticker, the instrument name is checked against
  * user-defined aliases and the built-in static lookup so that previously
  * imported transactions are resolved retroactively.
  */
@@ -122,22 +156,20 @@ export function computeUnmatchedInstruments(
     }
   }
 
-  type Agg = {
+  type Group = {
     instrument: string
-    totalCost: number
-    totalQty: number
+    rows: Transaction[]
     exchange?: string
-    earliestDate: string
     suggestedCategory?: AssetCategory
   }
 
-  // Ticker-resolved buys with no existing holding
-  const byTicker = new Map<string, Agg>()
-  // Buys where no ticker was resolved at all
-  const byInstrument = new Map<string, Agg>()
+  // Ticker-resolved trades with no existing holding
+  const byTicker = new Map<string, Group>()
+  // Trades where no ticker was resolved at all
+  const byInstrument = new Map<string, Group>()
 
   for (const t of transactions) {
-    if (t.type !== 'buy') continue
+    if (!TRADE_TYPES.has(t.type)) continue
     if (t.accountId !== accountId) continue
 
     // Determine effective ticker: from transaction, or via alias/static lookup on instrument name.
@@ -172,18 +204,8 @@ export function computeUnmatchedInstruments(
       const key = t.instrument ?? ''
       if (!key) continue
       const prev = byInstrument.get(key)
-      if (prev) {
-        prev.totalCost += Math.abs(t.amountPLN)
-        prev.totalQty  += t.quantity ?? 0
-        if (t.date < prev.earliestDate) prev.earliestDate = t.date
-      } else {
-        byInstrument.set(key, {
-          instrument: key,
-          totalCost: Math.abs(t.amountPLN),
-          totalQty:  t.quantity ?? 0,
-          earliestDate: t.date,
-        })
-      }
+      if (prev) prev.rows.push(t)
+      else byInstrument.set(key, { instrument: key, rows: [t] })
       continue
     }
 
@@ -192,42 +214,47 @@ export function computeUnmatchedInstruments(
 
     const prev = byTicker.get(key)
     if (prev) {
-      prev.totalCost += Math.abs(t.amountPLN)
-      prev.totalQty  += t.quantity ?? 0
-      if (t.date < prev.earliestDate) prev.earliestDate = t.date
+      prev.rows.push(t)
       if (!prev.suggestedCategory && suggestedCategory) prev.suggestedCategory = suggestedCategory
+      if (!prev.exchange && effectiveExchange) prev.exchange = effectiveExchange
     } else {
       byTicker.set(key, {
         instrument: canonicalName ?? t.instrument ?? effectiveTicker,
-        totalCost: Math.abs(t.amountPLN),
-        totalQty:  t.quantity ?? 0,
+        rows: [t],
         exchange:  effectiveExchange,
-        earliestDate: t.date,
         suggestedCategory,
       })
     }
   }
 
-  const matched: UnmatchedRow[] = [...byTicker.entries()]
-    .filter(([, agg]) => agg.totalQty > 0)
-    .map(([ticker, agg]) => ({
-      instrument: agg.instrument,
-      ticker,
-      exchange: agg.exchange,
-      totalQuantity: agg.totalQty,
-      avgCostPLN: agg.totalCost / agg.totalQty,
-      earliestDate: agg.earliestDate.slice(0, 10),
-      suggestedCategory: agg.suggestedCategory,
-    }))
+  const tradeFees = pairTradeFees(transactions.filter(t => t.accountId === accountId))
 
-  const unresolved: UnresolvedRow[] = [...byInstrument.values()]
-    .filter(agg => agg.totalQty > 0)
-    .map(agg => ({
-      instrument: agg.instrument,
-      totalQuantity: agg.totalQty,
-      avgCostPLN: agg.totalCost / agg.totalQty,
-      earliestDate: agg.earliestDate.slice(0, 10),
-    }))
+  const matched: UnmatchedRow[] = []
+  for (const [ticker, group] of byTicker) {
+    const held = stillHeld(group.rows, tradeFees)
+    if (!held) continue
+    matched.push({
+      instrument: group.instrument,
+      ticker,
+      exchange: group.exchange,
+      totalQuantity: held.quantity,
+      avgCostPLN: held.averageCostPLN,
+      earliestDate: held.earliestDate,
+      suggestedCategory: group.suggestedCategory,
+    })
+  }
+
+  const unresolved: UnresolvedRow[] = []
+  for (const group of byInstrument.values()) {
+    const held = stillHeld(group.rows, tradeFees)
+    if (!held) continue
+    unresolved.push({
+      instrument: group.instrument,
+      totalQuantity: held.quantity,
+      avgCostPLN: held.averageCostPLN,
+      earliestDate: held.earliestDate,
+    })
+  }
 
   return { matched, unresolved }
 }
