@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { TriangleRightBold, Check, ChevronDownSmall, MagnifyingGlass } from '@/generated/icons'
 import { Checkbox } from './Checkbox'
@@ -152,6 +152,105 @@ export function DropdownMenu({ children, className = '' }: DropdownMenuProps) {
     <div className={`bg-surface border border-borderLight rounded-xl shadow-sm flex flex-col w-44 ${className}`}>
       {children}
     </div>
+  )
+}
+
+// ─────────────────────────────────────────
+// DropdownPopover
+// ─────────────────────────────────────────
+
+/** Gap between the anchor and the panel, and the panel's minimum distance from the viewport edge. */
+const POPOVER_GAP = 4
+const VIEWPORT_MARGIN = 8
+
+type DropdownPopoverProps = {
+  open: boolean
+  onClose: () => void
+  /** The trigger. The panel lines up with its right edge, and focus returns to it on close. */
+  anchorRef: RefObject<HTMLElement | null>
+  children: ReactNode
+}
+
+/**
+ * A menu panel anchored to a trigger and rendered in a portal on <body>, so an
+ * `overflow: hidden` ancestor (a rounded table container, say) can't clip it.
+ *
+ * - Opens below the trigger, right-aligned to it; flips above only when there
+ *   isn't room below and there is above. Kept inside the viewport sideways.
+ * - Follows the trigger when any ancestor scrolls or the window resizes.
+ * - Escape closes it (topmost layer only) and focus returns to the trigger;
+ *   a pointer press outside both closes it without moving focus.
+ * - Tab is trapped in the panel while it is open, as in the other portalled popovers.
+ *
+ * React events still bubble from the portal to the trigger's ancestors, so a
+ * click inside reaches e.g. a row's onClick unless something stops it.
+ */
+export function DropdownPopover({ open, onClose, anchorRef, children }: DropdownPopoverProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) return
+    function place() {
+      const anchor = anchorRef.current
+      const panel = panelRef.current
+      if (!anchor || !panel) return
+      const a = anchor.getBoundingClientRect()
+      const { width, height } = panel.getBoundingClientRect()
+      const vw = document.documentElement.clientWidth || window.innerWidth
+      const vh = window.innerHeight
+
+      const below = a.bottom + POPOVER_GAP
+      const above = a.top - POPOVER_GAP - height
+      const fitsBelow = below + height <= vh - VIEWPORT_MARGIN
+      const fitsAbove = above >= VIEWPORT_MARGIN
+      const top = !fitsBelow && fitsAbove ? above : below
+
+      const maxLeft = vw - VIEWPORT_MARGIN - width
+      const left = Math.max(VIEWPORT_MARGIN, Math.min(a.right - width, maxLeft))
+      setPos({ top, left })
+    }
+    place()
+    // Capture phase: catches scrolling in any ancestor, not just the window.
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open, anchorRef])
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: PointerEvent) {
+      const target = e.target as Node
+      if (!anchorRef.current?.contains(target) && !panelRef.current?.contains(target)) onClose()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [open, anchorRef, onClose])
+
+  useEscapeKey(open, onClose)
+  useFocusTrap(panelRef, open, { returnFocusTo: anchorRef })
+
+  if (!open) return null
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      data-dropdown-popover=""
+      style={{
+        position: 'fixed',
+        top: pos?.top ?? 0,
+        left: pos?.left ?? 0,
+        zIndex: z.popover,
+        // Measured before it is shown: the first layout pass places it at 0,0.
+        visibility: pos ? undefined : 'hidden',
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
   )
 }
 
