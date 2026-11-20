@@ -337,9 +337,9 @@ export function accountForUploadSales(
 
 /** How an import closes a holding whose sales arrived in the same upload. */
 export type SaleClosePlan = {
-  /** Day of the last sale, `yyyy-MM-dd`: the holding's close date. */
+  /** Day of the last sale or transfer out, `yyyy-MM-dd`: the holding's close date. */
   date: string
-  /** The upload's sales of the holding, oldest first. */
+  /** The upload's sales (and crypto sends) of the holding, oldest first. */
   sales: Transaction[]
   /** See {@link UploadSales.filledInBuy}. */
   filledInBuy: Transaction | null
@@ -351,6 +351,8 @@ export type SaleClosePlan = {
  * nothing is left after them. Sales of more than the holding close it too;
  * the excess stays unexplained in the walk, so it adds no profit. Null when
  * units are left: mark the rest as sold with {@link planClose} and `priorSales`.
+ * A holding emptied by a crypto send closes with no sale, so Closed positions
+ * shows no profit for it: nothing was received.
  */
 export function planCloseFromSales(
   holding: Holding,

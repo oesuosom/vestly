@@ -173,6 +173,10 @@ It runs after every import, on app mount (a holding may not have existed when th
 
 ---
 
+## Trades update their holdings
+
+[`domain/holdingSync.ts`](../src/domain/holdingSync.ts). After an import that brings trades — XTB Cash Operations, XTB confirmations, Revolut BTC, eMakler order history on its own — every open holding the file traded is walked again (`walkPosition`) with the new rows. Where the quantity differs from the holding's, a shared step (`HoldingSyncStep`) proposes the change before anything is written: "10 → 15 shares" (new quantity and average cost), or "Sold out → close" when nothing is left, which closes the holding with the file's own sales (`planCloseFromSales`: closed on the last sale's or send's day, no extra sale added). A holding is touched only when the log explained its quantity *before* the import; otherwise (bought before the first import, entered by hand, edited since) it is listed as left alone. Two open holdings with one ticker are left alone too. For XTB the step runs between "create holdings for new instruments" and the purchase-price step; for Revolut BTC it replaces the flow's own update of an existing BTC holding; for eMakler it follows an orders-only import, for the holdings shown as Kept (with a portfolio file, the portfolio sets the quantities). Quantities are rounded to 8 decimals.
+
 ## Cost basis recalculation
 
 After an XTB transaction import, `XTBTransactionFlow` offers to rebuild holding cost bases from the log: a diff table of current versus calculated average, then a single confirm that writes `holding.purchasePrice` from the average cost of the units still held (`walkPosition`: sales remove units at the running average, and a sold-out position starts again from the next buy). Both the diff and the confirm are scoped to the importing account — the same ticker in another account keeps its own cost. Holdings that are synthetic or have no open position in the log are skipped. Applied through `replaceAccounts()` as one atomic update.

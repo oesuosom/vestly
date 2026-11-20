@@ -300,3 +300,42 @@ describe('eMakler import — a holding the upload sold part of', () => {
     expect((screen.getByRole('button', { name: 'Confirm Import' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('eMakler import — order history updates the holdings it kept (#30 cases 1–2)', () => {
+  const alphaBuy = {
+    id: 'a0', externalId: 'a0', accountId: 'mb', type: 'buy', date: '2025-06-01T09:00:00.000Z', amountPLN: -500, quantity: 10,
+    instrument: 'ALPHA', ticker: 'ALPHA', exchange: 'PL', source: 'emakler_import', createdAt: NOW,
+  }
+  const SELL_ALL_ALPHA = 'Zrealizowane;ALPHA;WWA-GPW;S;10;10;80,00;PLN;;07.03.2026 10:00:00'
+
+  it('proposes the new quantity from the position walk, and confirming applies it', async () => {
+    localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify([alphaBuy]))
+    renderEMakler([{ file: ordersFile(BUY_ONE_ALPHA), type: 'order_history' }])
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Import' }))
+
+    expect(screen.getByRole('row', { name: /ALPHA\s*10\s*→\s*11 shares/ })).toBeTruthy()
+    expect(account('mb').holdings.find((h) => h.id === 'alpha')!.quantity).toBe(10)
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    expect(account('mb').holdings.find((h) => h.id === 'alpha')).toMatchObject({ quantity: 11, purchasePrice: 555 / 11 })
+  })
+
+  it('a full sale closes the holding on the sale’s day', async () => {
+    localStorage.setItem(KEYS.TRANSACTIONS, JSON.stringify([alphaBuy]))
+    renderEMakler([{ file: ordersFile(SELL_ALL_ALPHA), type: 'order_history' }])
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Import' }))
+
+    expect(screen.getByRole('row', { name: /ALPHA\s*Sold out\s*→\s*close on 7 Mar 2026\s*·\s*800 PLN/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    expect(closed('mb')).toEqual(['ALPHA 2026-03-07'])
+  })
+
+  it('a holding whose orders don’t explain it is left alone and flagged', async () => {
+    renderEMakler([{ file: ordersFile(BUY_ONE_ALPHA), type: 'order_history' }])
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Import' }))
+
+    expect(screen.getByText(/don’t explain the 10 shares you hold/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    expect(account('mb').holdings.find((h) => h.id === 'alpha')).toMatchObject({ quantity: 10, purchasePrice: 50 })
+  })
+})

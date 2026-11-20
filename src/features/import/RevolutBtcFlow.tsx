@@ -1,21 +1,26 @@
 /**
- * RevolutBtcFlow — parse → preview → [receive_cost] → importing → create_holding → done
+ * RevolutBtcFlow — parse → preview → [receive_cost] → importing → [sync | create_holding] → done
  *
  * Handles Revolut BTC transaction PDFs:
  *   - transaction-statement_*.pdf  (buys and sells)
  *   - p2p-transaction-confirmation-report_*.pdf  (sends and receives)
  */
 import { useEffect, useMemo, useState } from 'react'
+import type { Transaction } from '@/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { formatPLN } from '@/utils/formatters'
 import { parseRevolutBtcPDFs, type BtcParseResult } from '@/importers/revolutBtcParser'
-import { calculateNetCryptoQuantity } from '@/domain/calculations'
+import { planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
+import { walkPosition } from '@/domain/position'
+import { pairTradeFees } from '@/domain/tradeFees'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { CircleCheck, CircleCross, Skip } from '@/generated/icons'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { buildImportSummary, joinDoneParts } from './doneSummary'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
+import { HoldingSyncStep } from './HoldingSyncStep'
+import { useApplyHoldingSync } from './useApplyHoldingSync'
 import type { DevSeed } from './devSeed'
 
 /** Footer source label shown on every step (left slot). */
@@ -36,14 +41,14 @@ export type RevolutBtcFlowProps = {
   devSeed?: DevSeed<Step, RevolutBtcFlowDevState>
 }
 
-type Step = 'parsing' | 'preview' | 'receive_cost' | 'importing' | 'create_holding' | 'done'
+type Step = 'parsing' | 'preview' | 'receive_cost' | 'importing' | 'sync' | 'create_holding' | 'done'
 
+/** A new BTC holding, for an account that has none. An existing one goes through the sync step. */
 type BtcProposedHolding = {
   netQty: number
   avgCostPLN: number
   totalCostPLN: number
   earliestDate: string
-  existingHoldingId: string | null
 }
 
 /** Dev-only seedable state for the `/dev` showcase. */
@@ -88,7 +93,8 @@ export function RevolutBtcFlow({
   onDoneChange,
   devSeed,
 }: RevolutBtcFlowProps) {
-  const { transactions, accounts, importTransactions, replaceAccounts } = usePortfolio()
+  const { transactions, accounts, importTransactions, replaceAccounts, updateHolding } = usePortfolio()
+  const applyHoldingSync = useApplyHoldingSync()
 
   /** True when the existing BTC holding is missing its exchange field (needs CC patch). */
   const needsExchangePatch = useMemo(() => {
@@ -105,6 +111,8 @@ export function RevolutBtcFlow({
   const [proposed, setProposed] = useState<BtcProposedHolding | null>(devSeed?.state?.proposed ?? null)
   const [doneParts, setDoneParts] = useState<string[]>(devSeed?.state?.doneParts ?? [])
   const [doneDetail, setDoneDetail] = useState<string>(devSeed?.state?.doneDetail ?? '')
+  const [syncRows, setSyncRows] = useState<HoldingSyncRow[]>([])
+  const [syncTransactions, setSyncTransactions] = useState<Transaction[]>([])
 
   // receive_cost step state
   const [receiveCostInput, setReceiveCostInput] = useState('')
@@ -182,8 +190,6 @@ export function RevolutBtcFlow({
 
     const { added, mergedTransactions, nextAccounts } = importTransactions(txnsToImport, accountId)
 
-    const accountTxns = mergedTransactions.filter((t) => t.accountId === accountId)
-
     const { lead, detail } = buildImportSummary({
       buy: parseResult.transactions.filter((t) => t.type === 'buy').length,
       sell: parseResult.transactions.filter((t) => t.type === 'sell').length,
@@ -194,36 +200,48 @@ export function RevolutBtcFlow({
     setDoneParts(parts)
     setDoneDetail(detail)
 
-    // Check if existing BTC holding needs exchange patch
     const currentAccount = nextAccounts.find((a) => a.id === accountId)
     const existingBtc = currentAccount?.holdings.find(
       (h) => h.ticker?.toUpperCase() === 'BTC' && h.category === 'crypto',
     )
-    const patchNeeded = !!(existingBtc && !existingBtc.exchange)
 
-    if (added > 0 || patchNeeded) {
-      const netQty = calculateNetCryptoQuantity(accountTxns, 'BTC')
+    if (existingBtc && currentAccount) {
+      // Holdings made before 'exchange: CC' support need it for price refresh.
+      if (!existingBtc.exchange) {
+        updateHolding(existingBtc.id, { exchange: 'CC' })
+        setDoneParts((prev) => [...prev, 'BTC holding updated'])
+      }
+      // The shared step: the new quantity and cost from the position walk, or
+      // close when everything was sold or sent. Nothing changes until confirmed.
+      const rows = planHoldingSync(currentAccount, mergedTransactions, txnsToImport)
+      if (rows.length > 0) {
+        setSyncRows(rows)
+        setSyncTransactions(mergedTransactions)
+        setStep('sync')
+        return
+      }
+      setStep('done')
+      return
+    }
+
+    if (added > 0) {
+      // No BTC holding yet: offer to create one from the walk — the units still
+      // held and what they cost, after any sales and sends.
+      const btcRows = mergedTransactions.filter((t) => t.accountId === accountId && t.ticker === 'BTC')
+      const position = walkPosition(btcRows, pairTradeFees(mergedTransactions))
+      const netQty = round8(position.quantity)
 
       if (netQty > 0) {
-        // Compute total cost from buys + receives (abs amountPLN)
-        const totalCostPLN = accountTxns
-          .filter((t) => (t.type === 'buy' || t.type === 'receive') && t.ticker === 'BTC')
-          .reduce((sum, t) => sum + Math.abs(t.amountPLN), 0)
-
-        const avgCostPLN = totalCostPLN / netQty
-
-        // Earliest date from buys and receives
-        const inflows = accountTxns
-          .filter((t) => (t.type === 'buy' || t.type === 'receive') && t.ticker === 'BTC')
+        const inflows = btcRows
+          .filter((t) => t.type === 'buy' || t.type === 'receive')
           .sort((a, b) => a.date.localeCompare(b.date))
         const earliestDate = inflows[0]?.date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
 
         setProposed({
           netQty,
-          avgCostPLN,
-          totalCostPLN,
+          avgCostPLN: position.averageCostPLN,
+          totalCostPLN: position.costPLN,
           earliestDate,
-          existingHoldingId: existingBtc?.id ?? null,
         })
         setStep('create_holding')
         return
@@ -233,7 +251,7 @@ export function RevolutBtcFlow({
     setStep('done')
   }
 
-  // ── Holding create/update confirm ──────
+  // ── Holding create confirm ─────────────
   function handleConfirmHolding() {
     if (!proposed) {
       setStep('done')
@@ -247,46 +265,40 @@ export function RevolutBtcFlow({
       return
     }
 
-    let nextHoldings = account.holdings
-
-    if (proposed.existingHoldingId) {
-      nextHoldings = account.holdings.map((h) =>
-        h.id === proposed.existingHoldingId
-          ? {
-              ...h,
-              quantity: proposed.netQty,
-              purchasePrice: proposed.avgCostPLN,
-              exchange: 'CC',
-              updatedAt: now,
-            }
-          : h,
-      )
-      setDoneParts((prev) => [...prev, 'BTC holding updated'])
-    } else {
-      nextHoldings = [
-        ...account.holdings,
-        {
-          id: crypto.randomUUID(),
-          accountId,
-          name: 'Bitcoin',
-          ticker: 'BTC',
-          exchange: 'CC',
-          category: 'crypto' as const,
-          quantity: proposed.netQty,
-          purchasePrice: proposed.avgCostPLN,
-          currentPrice: proposed.avgCostPLN,
-          purchaseDate: proposed.earliestDate,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ]
-      setDoneParts((prev) => [...prev, 'BTC holding created'])
-    }
+    const nextHoldings = [
+      ...account.holdings,
+      {
+        id: crypto.randomUUID(),
+        accountId,
+        name: 'Bitcoin',
+        ticker: 'BTC',
+        exchange: 'CC',
+        category: 'crypto' as const,
+        quantity: proposed.netQty,
+        purchasePrice: proposed.avgCostPLN,
+        currentPrice: proposed.avgCostPLN,
+        purchaseDate: proposed.earliestDate,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]
+    setDoneParts((prev) => [...prev, 'BTC holding created'])
 
     const nextAccounts = accounts.map((a) =>
       a.id === accountId ? { ...a, holdings: nextHoldings, lastUpdated: now } : a,
     )
     replaceAccounts(nextAccounts)
+    setStep('done')
+  }
+
+  // ── Existing holding: apply the sync step ──
+  function handleConfirmSync() {
+    const { updated, closed } = applyHoldingSync(accountId, syncRows, syncTransactions)
+    setDoneParts((prev) => [
+      ...prev,
+      ...(updated > 0 ? ['BTC holding updated'] : []),
+      ...(closed > 0 ? ['BTC holding closed'] : []),
+    ])
     setStep('done')
   }
 
@@ -344,6 +356,17 @@ export function RevolutBtcFlow({
         onSkip={handleReceiveCostSkip}
         index={receiveIndex}
         total={receiveTxns.length}
+      />
+    )
+  }
+
+  if (step === 'sync') {
+    return (
+      <HoldingSyncStep
+        rows={syncRows}
+        onConfirm={handleConfirmSync}
+        onSkip={() => setStep('done')}
+        footerLabel={FOOTER_LABEL}
       />
     )
   }
@@ -594,22 +617,18 @@ function CreateHoldingStep({
   onConfirm: () => void
   onSkip: () => void
 }) {
-  const isUpdate = proposed.existingHoldingId !== null
-
   const fields: { label: string; value: string }[] = [
     { label: 'Net Quantity', value: `${formatQty(round8(proposed.netQty))} BTC` },
     { label: 'Avg Cost (per BTC)', value: formatPLN(proposed.avgCostPLN) },
     { label: 'Total Cost Basis', value: formatPLN(proposed.totalCostPLN) },
-    ...(!isUpdate ? [{ label: 'Purchase Date', value: proposed.earliestDate }] : []),
+    { label: 'Purchase Date', value: proposed.earliestDate },
   ]
 
   return (
     <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
       <div className="p-5 flex flex-col gap-5">
         <p className="text-sm text-foregroundMuted tracking-[-0.35px]">
-          {isUpdate
-            ? 'A BTC holding already exists in this account. Update it with the net quantity and weighted-average cost basis?'
-            : 'Create a BTC holding using the net quantity and weighted-average cost basis from all transactions?'}
+          Create a BTC holding with the BTC you still hold and what it cost, from all transactions?
         </p>
 
         <div className="border border-border rounded-lg overflow-hidden">
@@ -648,7 +667,7 @@ function CreateHoldingStep({
         <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{FOOTER_LABEL}</p>
         <Button variant="secondary" onClick={onSkip} className="w-20">Skip</Button>
         <Button variant="primary" onClick={onConfirm}>
-          {isUpdate ? 'Update holding' : 'Create holding'}
+          Create holding
         </Button>
       </div>
     </div>

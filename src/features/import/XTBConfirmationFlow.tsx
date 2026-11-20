@@ -182,7 +182,7 @@ export function XTBConfirmationFlow({
     setDoneParts(added > 0 ? [lead] : [])
     setDoneDetail(detail)
 
-    if (added === 0 || !reconcile.begin(mergedTransactions, nextAccounts)) {
+    if (added === 0 || !reconcile.begin(mergedTransactions, nextAccounts, toImport)) {
       setStep('done')
     }
   }

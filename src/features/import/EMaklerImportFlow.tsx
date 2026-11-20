@@ -25,11 +25,14 @@ import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
-import type { Settings } from '@/types'
+import type { Settings, Transaction } from '@/types'
 import { CircleInfo } from '@/generated/icons'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { MissingHolding } from '@/domain/missingHoldings'
+import { planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
 import { buildSyncSummary, type SyncStats } from './doneSummary'
+import { HoldingSyncStep } from './HoldingSyncStep'
+import { useApplyHoldingSync } from './useApplyHoldingSync'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import { NotInFile, WrongAccountNote } from './NotInFile'
 import { soldChoiceCloses, soldChoiceErrors, type SoldChoices } from './soldChoices'
@@ -63,7 +66,7 @@ export type EMaklerImportFlowProps = {
   devSeed?: DevSeed<Step, EMaklerImportFlowDevState>
 }
 
-type Step = 'processing' | 'preview' | 'done'
+type Step = 'processing' | 'preview' | 'sync' | 'done'
 
 /** Dev-only seedable state for the `/dev` showcase. */
 export type EMaklerImportFlowDevState = {
@@ -177,6 +180,11 @@ export function EMaklerImportFlow({
 
   // Done
   const [doneStats, setDoneStats] = useState<SyncStats>(devSeed?.state?.doneStats ?? { updated: 0, added: 0, closed: 0 })
+
+  // Order history alone: what its trades change in the holdings it kept.
+  const applyHoldingSync = useApplyHoldingSync()
+  const [syncRows, setSyncRows] = useState<HoldingSyncRow[]>([])
+  const [syncLog, setSyncLog] = useState<Transaction[]>([])
 
   // Tell the parent modal when we're on the full-bleed success card (no header).
   useEffect(() => {
@@ -342,6 +350,21 @@ export function EMaklerImportFlow({
     }
     saveEMaklerOrderKeys(stored)
 
+    // Order history alone kept the holdings it has orders for; offer the
+    // changes its trades imply, the same step as the XTB and Revolut imports.
+    const rows = ordersOnlyMode && account ? planHoldingSync(account, log, txns) : []
+    if (rows.length > 0) {
+      setSyncRows(rows)
+      setSyncLog(log)
+      setStep('sync')
+      return
+    }
+    setStep('done')
+  }
+
+  function handleConfirmSync() {
+    const result = applyHoldingSync(accountId, syncRows, syncLog)
+    setDoneStats((prev) => ({ ...prev, updated: prev.updated + result.updated, closed: prev.closed + result.closed }))
     setStep('done')
   }
 
@@ -594,6 +617,11 @@ export function EMaklerImportFlow({
         </div>
       </div>
     )
+  }
+
+  // Step: Done
+  if (step === 'sync') {
+    return <HoldingSyncStep rows={syncRows} onConfirm={handleConfirmSync} onSkip={() => setStep('done')} />
   }
 
   // Step: Done
