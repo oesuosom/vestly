@@ -36,6 +36,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Imports no longer delete holdings missing from a file** — an eMakler order-history upload
+  removed every holding it had no buy order for: upload one order for one stock and the others
+  disappeared, and upload the same file twice and the whole account was emptied. A holding it
+  did have orders for was overwritten with just those orders (10 units became 1 unit at 0 PLN).
+  A PKO IKE
+  (or other holdings CSV) import listed holdings missing from the file as "Remove", ticked by
+  default, so a matured bond was deleted with its history instead of closed. Now no import
+  deletes a holding. Order history alone keeps the holdings you have as they are and records
+  their orders; it only adds holdings for instruments you don't have yet. A full
+  holdings file (eMakler portfolio, PKO IKE) lists what it lacks under "Not in this file",
+  each set to Keep, so importing as usual changes nothing. Pick Mark as sold to close one: the
+  amount starts at its last known value and the date at today, and both can be changed. It
+  then moves to Closed positions. Upload an eMakler portfolio with an order history that sells
+  a holding the portfolio lacks, and that sale closes it on its own date, with its proceeds.
+  If the sale covered only part of it, the rest is listed with what is left (for example 7 of
+  10), and Mark as sold sells just those.
+  A file that shares no holdings with the account shows a warning that it may be the wrong
+  account, and lists nothing as missing.
 - **The recovery screen's backup restores, without your API keys** — the file saved by
   Download backup on the "Something went wrong" and "couldn't be read" screens now restores
   through Settings → Data Management → Restore Backup, with the same checks as a normal backup.

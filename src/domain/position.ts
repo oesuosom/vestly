@@ -146,10 +146,39 @@ export function walkSales(transactions: Transaction[], tradeFees: TradeFees = NO
   return sales
 }
 
+/**
+ * The same walk again, reporting each sale that empties the position, keyed by
+ * its `id`, with the results of every sale since the position last opened
+ * added together (that sale included). A position sold in three parts reads
+ * as one close: the three proceeds, costs and profits summed.
+ */
+export function walkClosingSales(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): Map<string, SaleResult> {
+  const closes = new Map<string, SaleResult>()
+  let cycle: SaleResult | null = null
+  walk(
+    transactions,
+    tradeFees,
+    (_id, result) => {
+      cycle = {
+        proceedsPLN: (cycle?.proceedsPLN ?? 0) + result.proceedsPLN,
+        costPLN: (cycle?.costPLN ?? 0) + result.costPLN,
+        profitPLN: (cycle?.profitPLN ?? 0) + result.profitPLN,
+      }
+    },
+    (t) => {
+      if (cycle && t.type === 'sell') closes.set(t.id, cycle)
+      cycle = null
+    },
+  )
+  return closes
+}
+
 function walk(
   transactions: Transaction[],
   tradeFees: TradeFees,
   onSale?: (id: string, result: SaleResult) => void,
+  /** Called after an outflow that leaves nothing held. */
+  onEmptied?: (t: Transaction) => void,
 ): Position {
   let quantity = 0
   let costPLN = 0
@@ -182,6 +211,7 @@ function walk(
       if (quantity < QUANTITY_EPSILON) {
         quantity = 0
         costPLN = 0
+        onEmptied?.(t)
       }
     }
   }

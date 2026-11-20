@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { Account, Holding, Transaction } from '@/types'
 import { affectsCash, positionKey, resolveTransactionTicker } from './calculations'
-import { walkPosition, walkSales, type SaleResult } from './position'
+import { walkClosingSales, walkPosition, walkSales, type SaleResult } from './position'
 import { pairTradeFees } from './tradeFees'
 
 /**
@@ -142,6 +142,10 @@ export function closeAddsToCash(account: Account, positionInflows: Transaction[]
  * {@link findSharedPositionHolding}, a date from {@link earliestCloseDate} to
  * today, and — except for a bond, whose fee is only recorded — a fee no larger
  * than the sale amount.
+ *
+ * `priorSales`: the rows of an import that sold part of the holding just
+ * before (Mark as sold in an import preview). The close then sells only the
+ * units left after them, on or after the last of them.
  */
 export function planClose(
   holding: Holding,
@@ -149,37 +153,27 @@ export function planClose(
   transactions: Transaction[],
   input: CloseInput,
   now: string = new Date().toISOString(),
+  priorSales: Transaction[] = [],
 ): ClosePlan {
   const key = holdingPositionKey(holding)
   const rows = positionRows(transactions, account.id, key)
   const tradeFees = pairTradeFees(transactions)
-  const upToSale = rows.filter((t) => t.date.slice(0, 10) <= input.date)
-  const held = walkPosition(upToSale, tradeFees).quantity
-  const missing = holding.quantity - held
 
-  const filledInBuy: Transaction | null =
-    missing > QUANTITY_EPSILON
-      ? {
-          id: uuidv4(),
-          accountId: account.id,
-          type: 'buy',
-          // Date-only, like XTB rows: the walk runs it before any same-day sale.
-          date: holding.purchaseDate,
-          amountPLN: -(holding.purchasePrice * missing),
-          instrument: holding.name,
-          ticker: holding.ticker,
-          exchange: holding.exchange,
-          quantity: missing,
-          pricePerUnitPLN: holding.purchasePrice,
-          relatedHoldingId: holding.id,
-          externalId: buyExternalId(holding.id),
-          source: closeSource(holding),
-          affectsCash: false,
-          createdAt: now,
-        }
-      : null
+  // An import that also sold part of the holding: sell only what is left,
+  // after the buy those sales needed (see accountForUploadSales).
+  const accounted = priorSales.length > 0 ? accountForUploadSales(holding, account, transactions, priorSales, now) : null
+  let filledInBuy: Transaction | null
+  let quantity = holding.quantity
+  if (accounted) {
+    filledInBuy = accounted.filledInBuy
+    quantity = accounted.remaining
+  } else {
+    const upToSale = rows.filter((t) => t.date.slice(0, 10) <= input.date)
+    const missing = holding.quantity - walkPosition(upToSale, tradeFees).quantity
+    filledInBuy = missing > QUANTITY_EPSILON ? filledInBuyRow(holding, account.id, missing, holding.purchaseDate, now) : null
+  }
 
-  const inflows = upToSale.filter((t) => t.type === 'buy' || t.type === 'receive')
+  const inflows = rows.filter((t) => t.date.slice(0, 10) <= input.date && (t.type === 'buy' || t.type === 'receive'))
   const addsToCash = closeAddsToCash(account, inflows, filledInBuy !== null)
   const proceedsPLN = closeProceeds(holding, input)
 
@@ -195,8 +189,8 @@ export function planClose(
     instrument: holding.name,
     ticker: holding.ticker,
     exchange: holding.exchange,
-    quantity: holding.quantity,
-    pricePerUnitPLN: holding.quantity > 0 ? proceedsPLN / holding.quantity : 0,
+    quantity,
+    pricePerUnitPLN: quantity > 0 ? proceedsPLN / quantity : 0,
     ...(input.feePLN > 0 && { feePLN: input.feePLN }),
     relatedHoldingId: holding.id,
     externalId: saleExternalId(holding.id),
@@ -210,16 +204,32 @@ export function planClose(
   return { transactions: added, sale, filledInBuy, addsToCash, result }
 }
 
-/** The sale Close position recorded for a closed holding, if it is still in the log. */
+/**
+ * The sale that closed a closed holding, if it is still in the log: the one
+ * Close position recorded, or else — for a holding an import closed (see
+ * {@link planCloseFromSales}) — the position's last sale on or before the
+ * close date.
+ */
 export function findCloseSale(holding: Holding, transactions: Transaction[]): Transaction | undefined {
   const externalId = saleExternalId(holding.id)
-  return transactions.find((t) => t.externalId === externalId && t.accountId === holding.accountId)
+  const recorded = transactions.find((t) => t.externalId === externalId && t.accountId === holding.accountId)
+  if (recorded || !holding.closedAt) return recorded
+  const closedAt = holding.closedAt
+  const rows = positionRows(transactions, holding.accountId, holdingPositionKey(holding))
+    .filter((t) => t.date.slice(0, 10) <= closedAt)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const last = rows.filter((t) => t.type === 'sell').at(-1)
+  // A buy after it means that sale closed an earlier round, not this holding.
+  if (!last || rows.some((t) => (t.type === 'buy' || t.type === 'receive') && t.date.slice(0, 10) > last.date.slice(0, 10))) return undefined
+  return last
 }
 
 /**
  * What a closed holding's sale realized: its own entry in the position walk,
  * so it adds up with every other sale to the realized total on Overview.
- * `null` when the sale is no longer in the log (deleted in Activity).
+ * When an import closed the holding over several sales, their results are
+ * added together (see `walkClosingSales`). `null` when the sale is no longer
+ * in the log (deleted in Activity).
  */
 export function closedPositionResult(
   holding: Holding,
@@ -229,10 +239,129 @@ export function closedPositionResult(
   if (!sale) return null
   const key = positionKey(sale)
   if (!key) return null
-  const result = walkSales(positionRows(transactions, sale.accountId, key), pairTradeFees(transactions)).get(sale.id)
+  const rows = positionRows(transactions, sale.accountId, key)
+  const fees = pairTradeFees(transactions)
+  // An import's close counts every sale since the position opened; a sale
+  // that left units held didn't close it.
+  const result = sale.externalId === saleExternalId(holding.id)
+    ? walkSales(rows, fees).get(sale.id)
+    : walkClosingSales(rows, fees).get(sale.id)
   if (!result) return null
   const profitPercent = result.costPLN > 0 ? (result.profitPLN / result.costPLN) * 100 : 0
   return { sale, result, profitPercent }
+}
+
+/**
+ * What an upload's sales (or crypto sends) of a holding account for, with the
+ * log they were imported into. Shared by closing on those sales
+ * ({@link planCloseFromSales}) and marking the rest as sold ({@link planClose}
+ * with `priorSales`).
+ */
+export type UploadSales = {
+  /** The upload's sales and sends of the holding, oldest first. */
+  sales: Transaction[]
+  /** Day of the last of them, `yyyy-MM-dd`. */
+  lastDay: string
+  /**
+   * A buy for units the log never recorded coming in, dated no later than the
+   * first upload sale: enough that the holding's quantity was held before the
+   * sales, and that the walk can explain every unit they sold (up to the
+   * holding's quantity).
+   */
+  filledInBuy: Transaction | null
+  /** Units still held after the sales, with the filled-in buy. */
+  remaining: number
+}
+
+function filledInBuyRow(holding: Holding, accountId: string, quantity: number, date: string, now: string): Transaction {
+  return {
+    id: uuidv4(),
+    accountId,
+    type: 'buy',
+    // Date-only, like XTB rows: the walk runs it before any same-day sale.
+    date,
+    amountPLN: -(holding.purchasePrice * quantity),
+    instrument: holding.name,
+    ticker: holding.ticker,
+    exchange: holding.exchange,
+    quantity,
+    pricePerUnitPLN: holding.purchasePrice,
+    relatedHoldingId: holding.id,
+    externalId: buyExternalId(holding.id),
+    source: closeSource(holding),
+    affectsCash: false,
+    createdAt: now,
+  }
+}
+
+/**
+ * Account for an upload's sales of a holding (already in `transactions`).
+ * Null when the upload has none for it. Rows of `sales` outside the holding's
+ * position are ignored.
+ */
+export function accountForUploadSales(
+  holding: Holding,
+  account: Account,
+  transactions: Transaction[],
+  sales: Transaction[],
+  now: string = new Date().toISOString(),
+): UploadSales | null {
+  const key = holdingPositionKey(holding)
+  const own = sales
+    .filter((t) => (t.type === 'sell' || t.type === 'send') && t.accountId === account.id && positionKey(t) === key)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (own.length === 0) return null
+
+  const rows = positionRows(transactions, account.id, key)
+  const tradeFees = pairTradeFees(transactions)
+  const firstDay = own[0].date.slice(0, 10)
+  const isInflow = (t: Transaction) => t.type === 'buy' || t.type === 'receive'
+  const beforeSales = rows.filter((t) => t.date.slice(0, 10) < firstDay || (t.date.slice(0, 10) === firstDay && isInflow(t)))
+  // Short of the holding before the sales, or of what the sales sold: the
+  // holding was there all along, so fill in the larger gap — never more than it.
+  const shortBefore = holding.quantity - walkPosition(beforeSales, tradeFees).quantity
+  const unexplained = walkPosition(rows, tradeFees).unexplainedQuantity
+  const missing = Math.min(holding.quantity, Math.max(shortBefore, unexplained))
+
+  const filledInBuy = missing > QUANTITY_EPSILON
+    ? filledInBuyRow(holding, account.id, missing, holding.purchaseDate < firstDay ? holding.purchaseDate : firstDay, now)
+    : null
+  const remaining = walkPosition(filledInBuy ? [...rows, filledInBuy] : rows, tradeFees).quantity
+  return {
+    sales: own,
+    lastDay: own.at(-1)!.date.slice(0, 10),
+    filledInBuy,
+    remaining: remaining < QUANTITY_EPSILON ? 0 : remaining,
+  }
+}
+
+/** How an import closes a holding whose sales arrived in the same upload. */
+export type SaleClosePlan = {
+  /** Day of the last sale, `yyyy-MM-dd`: the holding's close date. */
+  date: string
+  /** The upload's sales of the holding, oldest first. */
+  sales: Transaction[]
+  /** See {@link UploadSales.filledInBuy}. */
+  filledInBuy: Transaction | null
+}
+
+/**
+ * Close a holding with sales an import brought (already in `transactions`),
+ * instead of recording a sale of its own: when, with any filled-in buy,
+ * nothing is left after them. Sales of more than the holding close it too;
+ * the excess stays unexplained in the walk, so it adds no profit. Null when
+ * units are left: mark the rest as sold with {@link planClose} and `priorSales`.
+ */
+export function planCloseFromSales(
+  holding: Holding,
+  account: Account,
+  transactions: Transaction[],
+  sales: Transaction[],
+  now: string = new Date().toISOString(),
+): SaleClosePlan | null {
+  const accounted = accountForUploadSales(holding, account, transactions, sales, now)
+  if (!accounted || accounted.remaining > 0) return null
+  return { date: accounted.lastDay, sales: accounted.sales, filledInBuy: accounted.filledInBuy }
 }
 
 /** The log after reopening: exactly the sale, and any buy, that closing added. */

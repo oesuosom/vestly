@@ -6,6 +6,7 @@
  * inside the modal's `card` chrome; the done step is a full-bleed success card.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { format } from 'date-fns'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 import { exchangeOptions } from '@/domain/exchanges'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
@@ -19,10 +20,14 @@ import { formatPLN, formatPLNDetail } from '@/utils/formatters'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { findMissingHoldings, wholeHolding, type MissingHolding } from '@/domain/missingHoldings'
 import type { AccountType, AssetCategory, Holding } from '@/types'
 import { AlertTriangle, CircleInfo } from '@/generated/icons'
-import { buildSyncSummary } from './doneSummary'
+import { buildSyncSummary, type SyncStats } from './doneSummary'
 import { ImportDoneCard } from './ImportCards'
+import { NotInFile, WrongAccountNote } from './NotInFile'
+import { soldChoiceCloses, soldChoiceErrors, type SoldChoices } from './soldChoices'
 import type { DevSeed } from './devSeed'
 
 // ─────────────────────────────────────────
@@ -49,8 +54,9 @@ export type CSVImportFlowProps = {
 export type CSVImportFlowDevState = {
   category: AssetCategory
   previewRows: CSVPreviewRow[]
+  missingHoldings: MissingHolding[]
   parseErrors: { row: number; reason: string }[]
-  doneStats: { updated: number; added: number; removed: number }
+  doneStats: SyncStats
 }
 
 // ─────────────────────────────────────────
@@ -107,7 +113,7 @@ const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({
   XETRA: 'XETRA',
 })
 
-type RowAction = 'update' | 'new' | 'remove'
+type RowAction = 'update' | 'new'
 type PreviewRow = {
   action: RowAction
   holding: Holding
@@ -141,7 +147,9 @@ export function CSVImportFlow({
   onDoneChange,
   devSeed,
 }: CSVImportFlowProps) {
-  const { accounts, importHoldings } = usePortfolio()
+  const { accounts, transactions, importHoldings, closeImportedHoldings } = usePortfolio()
+  const account = accounts.find((a) => a.id === accountId)
+  const [today] = useState(() => format(new Date(), 'yyyy-MM-dd'))
 
   const [step, setStep] = useState<Step>(devSeed?.step ?? 'mapping')
 
@@ -158,9 +166,13 @@ export function CSVImportFlow({
   const [parseErrors, setParseErrors] = useState<{ row: number; reason: string }[]>(devSeed?.state?.parseErrors ?? [])
   const [selected, setSelected] = useState<Set<number>>(() => new Set((devSeed?.state?.previewRows ?? []).map((_, i) => i)))
   const [exchangeOverrides, setExchangeOverrides] = useState<Record<number, string>>({})
+  // Holdings the file doesn't list. Kept unless marked as sold; never deleted.
+  const [missingHoldings, setMissingHoldings] = useState<MissingHolding[]>(devSeed?.state?.missingHoldings ?? [])
+  const [noOverlap, setNoOverlap] = useState(false)
+  const [soldChoices, setSoldChoices] = useState<SoldChoices>({})
 
   // Done state
-  const [doneStats, setDoneStats] = useState(devSeed?.state?.doneStats ?? { updated: 0, added: 0, removed: 0 })
+  const [doneStats, setDoneStats] = useState<SyncStats>(devSeed?.state?.doneStats ?? { updated: 0, added: 0, closed: 0 })
 
   // Tell the parent modal when we're on the full-bleed success card (no header).
   useEffect(() => {
@@ -194,18 +206,26 @@ export function CSVImportFlow({
     const { holdings, errors } = applyMapping(rawRows, userMapping, transforms, category, accountId)
     setParseErrors(errors)
 
-    const account = accounts.find((a) => a.id === accountId)
     // Synthetic holdings (e.g. the derived Cash row) are managed from the
-    // transaction log and must never appear as import removals.
+    // transaction log and are never listed as missing.
     const existingHoldings = (account?.holdings ?? []).filter((h) => !h.isSynthetic)
     const result = matchHoldings(existingHoldings, holdings)
+    // A holdings CSV lists everything held, so what it lacks may be sold. It
+    // has no statement date, so nothing is ruled out by purchase date.
+    const missing = findMissingHoldings(
+      existingHoldings,
+      new Set(result.toUpdate.map(({ existing }) => existing.id)),
+      holdings.length > 0,
+    )
 
     const rows: PreviewRow[] = [
       ...result.toUpdate.map(({ existing, parsed }) => ({ action: 'update' as const, holding: parsed, existing })),
       ...result.toAdd.map((h) => ({ action: 'new' as const, holding: h })),
-      ...result.toRemove.map((h) => ({ action: 'remove' as const, holding: h })),
     ]
     setPreviewRows(rows)
+    setMissingHoldings(missing.missing.map(wholeHolding))
+    setNoOverlap(missing.noOverlap)
+    setSoldChoices({})
     setSelected(new Set(rows.map((_, i) => i)))
     setStep('preview')
   }
@@ -222,35 +242,37 @@ export function CSVImportFlow({
   }
 
   const selectedCount = selected.size
+  const closeCount = Object.keys(soldChoices).length
 
   const showExchangeColumn = category !== 'bond'
 
+  const soldErrors = useMemo(
+    () => soldChoiceErrors(soldChoices, missingHoldings, account, transactions, today),
+    [soldChoices, missingHoldings, account, transactions, today],
+  )
+  const soldInvalid = Object.values(soldErrors).some((e) => e.date || e.amount || e.sharedWith)
+
   const selectedCounts = useMemo(() => {
-    let updates = 0, adds = 0, removes = 0
+    let updates = 0, adds = 0
     previewRows.forEach((row, i) => {
       if (!selected.has(i)) return
       if (row.action === 'update') updates++
       else if (row.action === 'new') adds++
-      else if (row.action === 'remove') removes++
     })
-    return { updates, adds, removes }
+    return { updates, adds }
   }, [previewRows, selected])
 
   const footerCounter = useMemo(() => {
     const parts: string[] = []
     if (selectedCounts.updates > 0) parts.push(`${selectedCounts.updates} update${selectedCounts.updates !== 1 ? 's' : ''}`)
     if (selectedCounts.adds > 0) parts.push(`${selectedCounts.adds} new`)
-    if (selectedCounts.removes > 0) parts.push(`${selectedCounts.removes} removal${selectedCounts.removes !== 1 ? 's' : ''}`)
-    return `${parts.join(', ')} — ${selectedCount} selected`
-  }, [selectedCounts, selectedCount])
+    if (closeCount > 0) parts.push(`${closeCount} to close`)
+    return previewRows.length > 0 ? `${parts.join(', ')} — ${selectedCount} selected` : parts.join(', ')
+  }, [selectedCounts, selectedCount, closeCount, previewRows.length])
 
   function handleImport() {
     const actions: ImportAction[] = []
 
-    previewRows.forEach((row, i) => {
-      if (!selected.has(i) || row.action !== 'remove') return
-      actions.push({ type: 'remove', holdingId: row.holding.id })
-    })
     previewRows.forEach((row, i) => {
       if (!selected.has(i) || row.action !== 'update' || !row.existing) return
       actions.push({ type: 'update', existingId: row.existing.id, quantity: row.holding.quantity, currentPrice: row.holding.currentPrice })
@@ -276,8 +298,9 @@ export function CSVImportFlow({
       })
     })
 
-    const stats = importHoldings(accountId, actions)
-    setDoneStats(stats)
+    const stats = actions.length > 0 ? importHoldings(accountId, actions) : { updated: 0, added: 0 }
+    const closed = closeImportedHoldings(accountId, soldChoiceCloses(soldChoices, missingHoldings), transactions)
+    setDoneStats({ ...stats, closed: closed.length })
     setStep('done')
   }
 
@@ -377,9 +400,13 @@ export function CSVImportFlow({
         <div className="p-5 flex flex-col gap-3">
           {parseErrors.length > 0 && <ParseErrorAlert errors={parseErrors} />}
 
-          {previewRows.length === 0 ? (
+          {noOverlap && (
+            <InlineAlert variant="warning"><WrongAccountNote accountName={accountName} /></InlineAlert>
+          )}
+
+          {previewRows.length === 0 && missingHoldings.length === 0 ? (
             <p className="text-sm text-accent text-center py-6">No changes detected. Your holdings are already up to date.</p>
-          ) : (
+          ) : previewRows.length > 0 && (
             <div className="border border-border rounded-lg overflow-hidden">
               {/* Scrolls horizontally; the Details column hugs its widest cell
                   rather than wrapping. Fixed-width leading columns; the cell
@@ -450,12 +477,26 @@ export function CSVImportFlow({
               </div>
             </div>
           )}
+
+          <NotInFile
+            missing={missingHoldings}
+            choices={soldChoices}
+            onChange={setSoldChoices}
+            errors={soldErrors}
+            today={today}
+          />
         </div>
 
         <div className="border-t border-borderLight p-5 flex items-center gap-2">
           <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{footerCounter}</p>
           <Button variant="secondary" onClick={() => setStep('mapping')} className="w-20">Back</Button>
-          <Button variant="primary" onClick={handleImport} disabled={selectedCount === 0}>Import {selectedCount} Selected</Button>
+          <Button
+            variant="primary"
+            onClick={handleImport}
+            disabled={(selectedCount === 0 && closeCount === 0) || soldInvalid}
+          >
+            {selectedCount > 0 ? `Import ${selectedCount} Selected` : 'Import'}
+          </Button>
         </div>
       </div>
     )
@@ -521,8 +562,6 @@ function StatusBadge({ action }: { action: RowAction }) {
       return <Badge variant="blue">Update</Badge>
     case 'new':
       return <Badge variant="positive">New</Badge>
-    case 'remove':
-      return <Badge variant="negative">Remove</Badge>
   }
 }
 
@@ -532,14 +571,6 @@ function RowDetails({ row }: { row: PreviewRow }) {
   if (action === 'new') {
     return (
       <span className="text-xs text-foregroundMuted tracking-[-0.35px]">
-        {holding.quantity} units × {formatPLNDetail(holding.currentPrice)}
-      </span>
-    )
-  }
-
-  if (action === 'remove') {
-    return (
-      <span className="text-xs text-accent tracking-[-0.35px]">
         {holding.quantity} units × {formatPLNDetail(holding.currentPrice)}
       </span>
     )

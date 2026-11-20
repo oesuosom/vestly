@@ -233,7 +233,6 @@ export type ContributionTracking = {
 export type ImportUndoData = {
   updates: { holdingId: string; oldQuantity: number; oldCurrentPrice: number }[]
   adds: string[] // holding IDs that were added
-  removes: Holding[] // complete holding objects that were removed
   accountId: string
 }
 
