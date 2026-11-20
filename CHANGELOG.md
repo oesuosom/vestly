@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sale's date and proceeds. Confirm, and the quantity and average cost are updated, or the
   holding moves to Closed positions. A holding whose transactions don't add up to what you
   hold (for example, bought before your first import) is listed and left as it is. Revolut BTC
-  uses the same step. Selling or sending all your BTC now closes the holding instead of leaving
+  and eMakler order history (uploaded without the portfolio file) use the same step. Selling or sending all your BTC now closes the holding instead of leaving
   the old quantity. After a partial sale the cost per BTC stays the same: buy 2 BTC for
   200,000 PLN and sell 1, and the holding keeps 100,000 PLN per BTC, not 200,000. A new BTC
   holding's cost now includes buy fees, as ETH's already did.
