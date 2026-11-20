@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getStore } from '@/storage/portfolioStore'
 import {
@@ -28,7 +28,7 @@ import { DATE_RANGES } from '@/types'
 import type { DateRange } from '@/types'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { DropdownMenu, DropdownMenuGroup, DropdownItem } from '@/components/ui/Dropdown'
+import { DropdownMenu, DropdownMenuGroup, DropdownItem, DropdownPopover } from '@/components/ui/Dropdown'
 import { PortfolioAreaChart } from '@/components/charts/PortfolioAreaChart'
 import { AccountFormModal } from '@/features/accounts/AccountFormModal'
 import { HoldingForm } from '@/features/accounts/HoldingForm'
@@ -120,43 +120,45 @@ function HoldingMenuCell({
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => setOpen(false), [])
   return (
-    <div className="relative flex items-center justify-center">
+    <div className="flex items-center justify-center">
       <button
+        ref={buttonRef}
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
         className="flex items-center justify-center size-7 rounded-md text-accent hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
         onClick={() => setOpen((v) => !v)}
       >
         <MoreHorizontal size={16} />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-8 z-20">
-            <DropdownMenu>
-              <DropdownMenuGroup>
-                <DropdownItem
-                  type="default"
-                  icon={<EditSmall size={16} />}
-                  label="Edit"
-                  onClick={() => { setOpen(false); onEdit() }}
-                />
-                <DropdownItem
-                  type="default"
-                  icon={<BanknoteStack size={16} />}
-                  label="Close position"
-                  onClick={() => { setOpen(false); onClosePosition() }}
-                />
-                <DropdownItem
-                  type="default"
-                  icon={<Trash size={16} className="text-negative" />}
-                  label="Delete"
-                  onClick={() => { setOpen(false); onDelete() }}
-                />
-              </DropdownMenuGroup>
-            </DropdownMenu>
-          </div>
-        </>
-      )}
+      {/* Portalled: the table's rounded container clips its overflow, which hid the bottom row's menu. */}
+      <DropdownPopover open={open} onClose={close} anchorRef={buttonRef}>
+        <DropdownMenu>
+          <DropdownMenuGroup>
+            <DropdownItem
+              type="default"
+              icon={<EditSmall size={16} />}
+              label="Edit"
+              onClick={() => { setOpen(false); onEdit() }}
+            />
+            <DropdownItem
+              type="default"
+              icon={<BanknoteStack size={16} />}
+              label="Close position"
+              onClick={() => { setOpen(false); onClosePosition() }}
+            />
+            <DropdownItem
+              type="default"
+              icon={<Trash size={16} className="text-negative" />}
+              label="Delete"
+              onClick={() => { setOpen(false); onDelete() }}
+            />
+          </DropdownMenuGroup>
+        </DropdownMenu>
+      </DropdownPopover>
     </div>
   )
 }

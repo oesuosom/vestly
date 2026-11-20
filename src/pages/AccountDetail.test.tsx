@@ -69,10 +69,27 @@ describe('AccountDetail — row actions', () => {
     const stockRow = row('Example Corp')
     fireEvent.click(within(stockRow).getByRole('button'))
 
-    // The menu opens inside the row's actions cell.
-    expect(within(stockRow).getByText('Edit')).toBeTruthy()
-    expect(within(stockRow).getByText('Close position')).toBeTruthy()
-    expect(within(stockRow).getByText('Delete')).toBeTruthy()
+    // The menu is portalled out of the table: its rounded container clips
+    // overflow, which used to hide the bottom row's menu (#43).
+    const menu = document.querySelector<HTMLElement>('[data-dropdown-popover]')!
+    expect(menu.parentElement).toBe(document.body)
+    expect(stockRow.closest('table')!.parentElement!.contains(menu)).toBe(false)
+    expect(within(menu).getByText('Edit')).toBeTruthy()
+    expect(within(menu).getByText('Close position')).toBeTruthy()
+    expect(within(menu).getByText('Delete')).toBeTruthy()
+  })
+
+  it("doesn't open the holding panel when a menu item is picked", () => {
+    renderPage()
+    fireEvent.click(within(row('Example Corp')).getByRole('button'))
+    const menu = document.querySelector<HTMLElement>('[data-dropdown-popover]')!
+    fireEvent.click(within(menu).getByText('Delete'))
+    // React events bubble out of the portal to the row; the actions cell stops them.
+    expect(document.querySelector('[data-dropdown-popover]')).toBeNull()
+    expect(screen.getByText(/Are you sure you want to delete/)).toBeTruthy()
+    // The holding panel stays closed: not mounted, or inert.
+    const panel = document.querySelector('.t-panel-slide')
+    expect(panel === null || panel.hasAttribute('inert')).toBe(true)
   })
 
   it('gives the Cash row no actions', () => {

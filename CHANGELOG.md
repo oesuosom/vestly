@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The last holding's ⋯ menu is no longer cut off** — on an account page, the menu of the
+  bottom row in the holdings table opened inside the table's rounded border, which hid Edit,
+  Close position and Delete for that holding. The menu now opens on top of the page, below the
+  ⋯ button, or above it when there isn't room below, and stays next to the button as the page
+  scrolls. Escape closes it and puts focus back on the ⋯ button.
+
 - **The Cash row can't be edited or deleted** — an account's Cash row is calculated from its
   transactions, but the holdings table and the holding panel still offered Edit and Delete. Both
   changed the account total until the next reload, and the day's snapshot was saved with the
