@@ -30,6 +30,9 @@ import { useEscapeKey } from '@/hooks/useEscapeKey'
 // Types
 // ─────────────────────────────────────────
 
+/** Cash is the sum of the account's cash-moving transactions (see `computeAccountCashBalance`). */
+const CASH_NOTE = 'Calculated from this account’s deposits, withdrawals, trades, income, taxes and fees.'
+
 type HoldingSlidePanelProps = {
   holding: Holding | null
   isOpen: boolean
@@ -698,6 +701,11 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
               </Button>
             </div>
           </div>
+        ) : holding.isSynthetic ? (
+          // Cash is rebuilt from the log on every load: nothing to edit, close or delete.
+          <p className="px-6 py-6 shrink-0 text-xs text-accent leading-normal">
+            {CASH_NOTE}
+          </p>
         ) : (
         <div className="px-6 py-6 flex items-center gap-2 shrink-0">
           <Button variant="secondary" onClick={() => setEditOpen(true)}>
@@ -712,11 +720,9 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
               Refresh Price
             </Button>
           )}
-          {!holding.isSynthetic && (
-            <Button variant="secondary" onClick={() => setCloseOpen(true)}>
-              Close Position
-            </Button>
-          )}
+          <Button variant="secondary" onClick={() => setCloseOpen(true)}>
+            Close Position
+          </Button>
           <Button variant="destructive" onClick={() => setDeleteConfirmOpen(true)}>
             Delete
           </Button>

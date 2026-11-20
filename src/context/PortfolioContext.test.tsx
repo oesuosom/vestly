@@ -271,6 +271,60 @@ describe('PortfolioProvider — deleting holdings and transactions', () => {
     expect(ctx.accounts[0].holdings.map((h) => h.id)).toEqual(['apple-2'])
     expect(txIds()).toEqual(['deposit', 'buy-1'])
   })
+
+  describe('the Cash row (#34)', () => {
+    // Cash: 2000 − 1200 − 400 + 55 = 455. Total: 1200 + 400 + 455 = 2055.
+    function expectUnchanged(before: { accounts: Account[]; transactions: Transaction[]; stored: string }) {
+      expect(ctx.accounts).toBe(before.accounts)
+      expect(ctx.transactions).toBe(before.transactions)
+      expect(localStorage.getItem(KEYS.ACCOUNTS)).toBe(before.stored)
+      expect(cashOf(ctx.accounts)).toBe(455)
+      expect(ctx.snapshots.at(-1)!.totalValue).toBe(2055)
+    }
+    const snapshot = () => ({ accounts: ctx.accounts, transactions: ctx.transactions, stored: localStorage.getItem(KEYS.ACCOUNTS)! })
+
+    it('ignores updateHolding', () => {
+      seedTwoApples()
+      renderStrict()
+      const before = snapshot()
+
+      act(() => ctx.updateHolding('cash_acc', { currentPrice: 5000 }))
+
+      expectUnchanged(before)
+    })
+
+    it('ignores deleteHolding', () => {
+      seedTwoApples()
+      renderStrict()
+      const before = snapshot()
+
+      act(() => ctx.deleteHolding('cash_acc'))
+
+      expectUnchanged(before)
+    })
+
+    it('ignores closePosition', () => {
+      seedTwoApples()
+      renderStrict()
+      const before = snapshot()
+
+      let plan: ReturnType<Ctx['closePosition']> | undefined
+      act(() => { plan = ctx.closePosition('cash_acc', { date: '2026-03-10', saleAmountPLN: 455, feePLN: 0 }) })
+
+      expect(plan).toBeNull()
+      expectUnchanged(before)
+    })
+
+    it('still edits a real holding', () => {
+      seedTwoApples()
+      renderStrict()
+
+      act(() => ctx.updateHolding('apple-1', { currentPrice: 1500 }))
+
+      expect(ctx.accounts[0].holdings.find((h) => h.id === 'apple-1')!.currentPrice).toBe(1500)
+      expect(ctx.snapshots.at(-1)!.totalValue).toBe(2355)
+    })
+  })
 })
 
 describe('PortfolioProvider — closing and reopening positions', () => {

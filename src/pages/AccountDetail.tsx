@@ -116,8 +116,7 @@ function HoldingMenuCell({
   onDelete,
 }: {
   onEdit: () => void
-  /** Absent for the Cash row, which can't be sold. */
-  onClosePosition?: () => void
+  onClosePosition: () => void
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -141,14 +140,12 @@ function HoldingMenuCell({
                   label="Edit"
                   onClick={() => { setOpen(false); onEdit() }}
                 />
-                {onClosePosition && (
-                  <DropdownItem
-                    type="default"
-                    icon={<BanknoteStack size={16} />}
-                    label="Close position"
-                    onClick={() => { setOpen(false); onClosePosition() }}
-                  />
-                )}
+                <DropdownItem
+                  type="default"
+                  icon={<BanknoteStack size={16} />}
+                  label="Close position"
+                  onClick={() => { setOpen(false); onClosePosition() }}
+                />
                 <DropdownItem
                   type="default"
                   icon={<Trash size={16} className="text-negative" />}
@@ -394,10 +391,12 @@ export function AccountDetail() {
         header: () => null,
         cell: (info) => {
           const h = info.row.original
+          // Cash is calculated from transactions: nothing here to edit, close or delete.
+          if (h.isSynthetic) return null
           return (
             <HoldingMenuCell
               onEdit={() => setEditingHolding(h)}
-              onClosePosition={h.isSynthetic ? undefined : () => setClosingHolding(h)}
+              onClosePosition={() => setClosingHolding(h)}
               onDelete={() => setDeletingHolding(h)}
             />
           )

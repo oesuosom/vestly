@@ -112,3 +112,23 @@ describe('HoldingSlidePanel — a closed holding', () => {
     expect(screen.getByRole('button', { name: 'Close Position' })).toBeTruthy()
   })
 })
+
+describe('HoldingSlidePanel — the Cash row', () => {
+  const cash: Holding = {
+    ...holding, id: 'cash_a1', name: 'Cash', category: 'cash', quantity: 1,
+    purchasePrice: 1000, currentPrice: 1000, isSynthetic: true,
+  }
+  const actions = () => screen.getAllByRole('button').map((b) => b.textContent).filter(Boolean)
+
+  it('says where the number comes from instead of offering Edit, Close Position or Delete', () => {
+    render(<HoldingSlidePanel holding={cash} isOpen onClose={() => {}} />)
+
+    expect(screen.getByText('Calculated from this account’s deposits, withdrawals, trades, income, taxes and fees.')).toBeTruthy()
+    expect(actions()).toEqual([])
+  })
+
+  it('leaves a real holding its actions', () => {
+    render(<HoldingSlidePanel holding={holding} isOpen onClose={() => {}} />)
+    expect(actions()).toEqual(['Edit', 'Close Position', 'Delete'])
+  })
+})

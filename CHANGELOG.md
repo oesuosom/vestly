@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Cash row can't be edited or deleted** — an account's Cash row is calculated from its
+  transactions, but the holdings table and the holding panel still offered Edit and Delete. Both
+  changed the account total until the next reload, and the day's snapshot was saved with the
+  wrong value in between. The row no longer has a menu, and its panel says where the number
+  comes from instead.
+
 - **Imported trades now update or close their holdings** — after an XTB import (Cash
   Operations or daily confirmations) a later buy or sale of something you already held was
   recorded in Activity, but the holding kept its old quantity. Now the import shows what the

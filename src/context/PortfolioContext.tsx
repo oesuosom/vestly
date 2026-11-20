@@ -159,6 +159,13 @@ function readStoredArray<T>(key: string): T[] {
   return parsed as T[]
 }
 
+/** An open or closed holding by id. */
+function findHolding(accounts: Account[], holdingId: string): Holding | undefined {
+  return accounts
+    .flatMap((a) => [...a.holdings, ...(a.closedHoldings ?? [])])
+    .find((h) => h.id === holdingId)
+}
+
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
@@ -455,6 +462,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const updateHolding = useCallback(
     (holdingId: string, data: Partial<Omit<Holding, 'id' | 'accountId' | 'createdAt'>>) => {
+      // Cash is recalculated from the log; an edit would only last until reload.
+      if (findHolding(accountsRef.current, holdingId)?.isSynthetic) return
       invalidateUndo()
       const now = new Date().toISOString()
       // flushSync: see addHolding — guarantees nextAccountsRef is populated below.
@@ -487,12 +496,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
   const deleteHolding = useCallback(
     (holdingId: string) => {
+      const holding = findHolding(accountsRef.current, holdingId)
+      // Cash is rebuilt from the log on every load, so it can't be deleted.
+      if (holding?.isSynthetic) return
       invalidateUndo()
       const now = new Date().toISOString()
-
-      const holding = accountsRef.current
-        .flatMap(a => [...a.holdings, ...(a.closedHoldings ?? [])])
-        .find(h => h.id === holdingId)
 
       // Remove the transactions that belong to the holding (counted by the
       // confirm dialog with the same matching) and re-link the dividends that
@@ -500,7 +508,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       // latest log (including a delete queued earlier in the same handler, as
       // Activity does), so the cash recalculation below sees exactly what was kept.
       const nextTransactionsRef = { current: null as Transaction[] | null }
-      if (holding && !holding.isSynthetic) {
+      if (holding) {
         flushSync(() => setTransactionsState((prev) => {
           const next = deleteHoldingFromLog(holding, accountsRef.current, prev)
           nextTransactionsRef.current = next
