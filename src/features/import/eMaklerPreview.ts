@@ -2,16 +2,19 @@
  * eMakler preview rules: how an upload compares with the account. Kept apart
  * from the flow component so the rules can be tested on their own.
  */
-import { planCloseFromSales } from '@/domain/closePosition'
-import { findMissingHoldings } from '@/domain/missingHoldings'
+import { accountForUploadSales } from '@/domain/closePosition'
+import { findMissingHoldings, type MissingHolding } from '@/domain/missingHoldings'
 import type { EMaklerHoldingResult, EMaklerImportResult } from '@/importers/eMaklerImport'
 import type { Account, Holding, Transaction } from '@/types'
 
 /**
- * `sold`: a holding the portfolio file no longer lists whose sale is in the
- * uploaded order history, so the import closes it with that sale.
+ * `sold`: a holding the portfolio file no longer lists whose sales in the
+ * uploaded order history leave nothing, so the import closes it with them.
+ * `kept`: an existing holding order history alone has orders for. Order
+ * history says nothing about what else is held, so it never overwrites a
+ * holding; its orders are still recorded.
  */
-export type RowAction = 'update' | 'add' | 'sold'
+export type RowAction = 'update' | 'add' | 'sold' | 'kept'
 
 export type PreviewRow = {
   action: RowAction
@@ -22,8 +25,8 @@ export type PreviewRow = {
 /** What the preview compares the files against, worked out once per upload. */
 export type PreviewPlan = {
   rows: PreviewRow[]
-  /** Holdings the portfolio file doesn't list and no upload sale explains. */
-  missing: Holding[]
+  /** Holdings the portfolio file doesn't list and upload sales don't close, with what is left of each. */
+  missing: MissingHolding[]
   /** The portfolio file shares no holding with the account. */
   noOverlap: boolean
 }
@@ -84,24 +87,37 @@ export function planEMaklerPreview(
 
   const rows: PreviewRow[] = result.holdings.map((h) => {
     const existingHolding = byKey.get(holdingKey(h.name, h.exchange))
-    return { action: existingHolding ? 'update' : 'add', importHolding: h, existingHolding }
+    const action = existingHolding ? (ordersOnlyMode ? 'kept' : 'update') : 'add'
+    return { action, importHolding: h, existingHolding }
   })
+  if (ordersOnlyMode) {
+    // An instrument fully sold in the history builds no import row; it is
+    // still an existing holding the file has orders for.
+    const listed = new Set(rows.flatMap((r) => (r.existingHolding ? [r.existingHolding.id] : [])))
+    const traded = new Set(result.transactions.map((t) => holdingKey(t.name, t.exchange)))
+    for (const h of existing) {
+      if (!listed.has(h.id) && traded.has(holdingKey(h.name, h.exchange))) rows.push({ action: 'kept', existingHolding: h })
+    }
+  }
   if (ordersOnlyMode || !account) return { rows, missing: [], noOverlap: false }
 
   const matched = new Set(rows.flatMap((r) => (r.existingHolding ? [r.existingHolding.id] : [])))
   const { missing, noOverlap } = findMissingHoldings(existing, matched, result.holdings.length > 0)
-  if (missing.length === 0) return { rows, missing, noOverlap }
+  if (missing.length === 0) return { rows, missing: [], noOverlap }
 
-  // Which missing holdings an upload sale closes: try it against the log as
-  // the import would leave it.
-  // Rows already in the log (Reimport All) are skipped, as importTransactions does.
+  // What the upload's sales do to each missing holding, tried against the log
+  // as the import would leave it. Rows already in the log (Reimport All) are
+  // skipped, as importTransactions does.
   const known = new Set(transactions.map((t) => t.externalId))
   const uploaded = eMaklerTransactions(result, account.id, (name, exchange) => byKey.get(holdingKey(name, exchange))?.ticker, '')
   const log = [...transactions, ...uploaded.filter((t) => !known.has(t.externalId))]
-  const stillMissing: Holding[] = []
+  const stillMissing: MissingHolding[] = []
   for (const holding of missing) {
-    if (planCloseFromSales(holding, account, log, uploaded)) rows.push({ action: 'sold', existingHolding: holding })
-    else stillMissing.push(holding)
+    const accounted = accountForUploadSales(holding, account, log, uploaded)
+    if (!accounted) stillMissing.push({ holding, quantity: holding.quantity, priorSales: [] })
+    else if (accounted.remaining === 0) rows.push({ action: 'sold', existingHolding: holding })
+    // Partly sold: what is left can be marked as sold, on top of those sales.
+    else stillMissing.push({ holding, quantity: accounted.remaining, priorSales: accounted.sales })
   }
   return { rows, missing: stillMissing, noOverlap }
 }

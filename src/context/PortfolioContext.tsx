@@ -49,7 +49,7 @@ export type ImportAction =
  * same upload brought.
  */
 export type ImportClose =
-  | { holdingId: string; input: CloseInput }
+  | { holdingId: string; input: CloseInput; priorSales?: Transaction[] }
   | { holdingId: string; sales: Transaction[] }
 
 // ─────────────────────────────────────────
@@ -752,7 +752,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         let rows: Transaction[]
         let date: string
         if ('input' in close) {
-          const plan = planClose(holding, account, log, close.input, now)
+          const plan = planClose(holding, account, log, close.input, now, close.priorSales)
           rows = plan.transactions
           date = close.input.date
         } else {

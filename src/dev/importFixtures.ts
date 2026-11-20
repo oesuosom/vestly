@@ -5,6 +5,7 @@
  * can be frozen at a given step with realistic content. Consumed only by
  * [DevShowcase.tsx] via the flows' dev-only `devSeed` prop (see devSeed.ts).
  */
+import { wholeHolding } from '@/domain/missingHoldings'
 import type { Holding, Transaction } from '@/types'
 import type {
   CSVImportFlowDevState,
@@ -94,7 +95,7 @@ const csvPreviewRows: CSVPreviewRow[] = [
 ]
 
 const csvMissingHoldings = [
-  holding({ name: 'Orlen', ticker: 'PKN', exchange: 'PL', category: 'stock', quantity: 120, purchasePrice: 61.2, currentPrice: 58.9 }),
+  wholeHolding(holding({ name: 'Orlen', ticker: 'PKN', exchange: 'PL', category: 'stock', quantity: 120, purchasePrice: 61.2, currentPrice: 58.9 })),
 ]
 
 export const csvSeed = {
@@ -152,7 +153,7 @@ const eMaklerPreviewRows: EMaklerPreviewRow[] = [
 ]
 
 const eMaklerMissingHoldings = [
-  holding({ name: 'Tesla Inc.', ticker: 'TSLA', exchange: 'US', category: 'stock', quantity: 5, purchasePrice: 900, currentPrice: 1010 }),
+  wholeHolding(holding({ name: 'Tesla Inc.', ticker: 'TSLA', exchange: 'US', category: 'stock', quantity: 5, purchasePrice: 900, currentPrice: 1010 })),
 ]
 
 export const eMaklerSeed = {

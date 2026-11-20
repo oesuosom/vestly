@@ -380,14 +380,53 @@ describe('planCloseFromSales', () => {
     expect(planCloseFromSales(beta, acc, [sale], [sale], NOW)).toBeNull()
   })
 
-  it('closes nothing when the sales sell more than the holding had', () => {
+  it('closes the holding when the sales sell more than it had; the excess adds no profit', () => {
     const sale = emakler({ type: 'sell', date: '2026-03-01', amountPLN: 840, quantity: 12 })
-    expect(planCloseFromSales(beta, acc, [sale], [sale], NOW)).toBeNull()
+    const plan = planCloseFromSales(beta, acc, [sale], [sale], NOW)!
+    expect(plan.date).toBe('2026-03-01')
+    expect(plan.filledInBuy).toMatchObject({ quantity: 10, amountPLN: -500 })
+    // 10 of the 12 units are explained: 10/12 of 840 = 700 in, 500 cost.
+    expect(getRealizedPnL([sale, plan.filledInBuy!])).toBeCloseTo(200, 9)
   })
 
   it('ignores sales of other instruments', () => {
     const other = tx({ type: 'sell', date: '2026-03-01', amountPLN: 700, quantity: 10, ticker: 'ALPHA', source: 'emakler_import' })
     expect(planCloseFromSales(beta, acc, [other], [other], NOW)).toBeNull()
+  })
+})
+
+describe('planClose with an import’s partial sale (Mark as sold the rest)', () => {
+  const emakler = (fields: Partial<Transaction> & Pick<Transaction, 'type' | 'date' | 'amountPLN' | 'quantity'>) =>
+    tx({ ticker: 'BETA', instrument: 'BETA', source: 'emakler_import', ...fields })
+  const beta = holding({ id: 'beta', name: 'BETA', ticker: 'BETA', quantity: 10, purchasePrice: 50, purchaseDate: '2025-06-01' })
+  const acc = account('brokerage', [beta])
+
+  it('sells only the units left after the upload’s sale, and fills in only one buy', () => {
+    const upload = emakler({ type: 'sell', date: '2026-03-01T11:00:00.000Z', amountPLN: 210, quantity: 3 })
+    const log = [upload]
+    const plan = planClose(beta, acc, log, { date: '2026-03-05', saleAmountPLN: 420, feePLN: 0 }, NOW, [upload])
+
+    expect(plan.filledInBuy).toMatchObject({ quantity: 10, date: '2025-06-01' })
+    expect(plan.sale).toMatchObject({ quantity: 7, amountPLN: 420, date: '2026-03-05' })
+    const after = [...log, ...plan.transactions]
+    // 10 units in, 3 + 7 out: nothing oversold. 210 + 420 − 500.
+    expect(getRealizedPnL(after)).toBeCloseTo(130, 9)
+    expect(after.filter((t) => t.type === 'sell').reduce((q, t) => q + t.quantity!, 0)).toBe(10)
+  })
+
+  it('dates the filled-in buy no later than the first upload sale', () => {
+    const late = { ...beta, purchaseDate: '2026-04-01' }
+    const upload = emakler({ type: 'sell', date: '2026-03-01', amountPLN: 210, quantity: 3 })
+    const plan = planClose(late, account('brokerage', [late]), [upload], { date: '2026-05-01', saleAmountPLN: 420, feePLN: 0 }, NOW, [upload])
+    expect(plan.filledInBuy).toMatchObject({ date: '2026-03-01', quantity: 10 })
+  })
+
+  it('counts upload buys before the sales: only the gap is filled in', () => {
+    const buy = emakler({ type: 'buy', date: '2026-02-01T09:00:00.000Z', amountPLN: -240, quantity: 4 })
+    const upload = emakler({ type: 'sell', date: '2026-03-01T09:00:00.000Z', amountPLN: 210, quantity: 3 })
+    const plan = planClose(beta, acc, [buy, upload], { date: '2026-03-05', saleAmountPLN: 420, feePLN: 0 }, NOW, [upload])
+    expect(plan.filledInBuy).toMatchObject({ quantity: 6 })
+    expect(plan.sale.quantity).toBe(7)
   })
 })
 

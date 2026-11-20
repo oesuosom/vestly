@@ -12,6 +12,21 @@ import { earliestCloseDate, findSharedPositionHolding } from './closePosition'
  * missing holdings at all.
  */
 
+/**
+ * A holding listed under "Not in this file". `quantity` is what is left to
+ * mark as sold: the whole holding, or — when the same upload sold part of it
+ * (`priorSales`) — the units left after those sales.
+ */
+export type MissingHolding = {
+  holding: Holding
+  quantity: number
+  /** The upload's rows that sold part of it, for `planClose`'s `priorSales`. */
+  priorSales: Transaction[]
+}
+
+/** A missing holding with nothing sold in the upload. */
+export const wholeHolding = (holding: Holding): MissingHolding => ({ holding, quantity: holding.quantity, priorSales: [] })
+
 export type MissingHoldings = {
   /** Open holdings the file doesn't list, oldest first as in the account. */
   missing: Holding[]
@@ -47,13 +62,13 @@ export function findMissingHoldings(
   return { missing, noOverlap: false }
 }
 
-/** What "Mark as sold" fills in: the last known value, on the statement date or today. */
+/** What "Mark as sold" fills in: the last known value of what is left, on the statement date or today. */
 export function markAsSoldDefaults(
-  holding: Holding,
+  missing: MissingHolding,
   today: string,
   statementDate?: string,
 ): { date: string; amount: string } {
-  const value = Math.round(holding.quantity * holding.currentPrice * 100) / 100
+  const value = Math.round(missing.quantity * missing.holding.currentPrice * 100) / 100
   return { date: statementDate ?? today, amount: String(value) }
 }
 
@@ -68,23 +83,27 @@ export type MarkAsSoldErrors = {
   amount?: 'required' | 'negative'
   /** Another open holding in the account shares the ticker (see `findSharedPositionHolding`). */
   sharedWith?: Holding
-  /** The earliest valid date, for the `beforePurchase` message. */
+  /** The earliest valid date, for the `beforePurchase` message: the last purchase or upload sale. */
   earliest: string
 }
 
 /**
  * Why a "Mark as sold" row can't be closed as entered, with the rules of the
- * Close position dialog: a date from the last purchase to today, an amount of
- * 0 or more, and no other open holding with the same ticker. Empty when valid.
+ * Close position dialog: a date from the last purchase (or the upload's last
+ * sale of it) to today, an amount of 0 or more, and no other open holding
+ * with the same ticker. Empty when valid.
  */
 export function markAsSoldErrors(
-  holding: Holding,
+  missing: MissingHolding,
   account: Account,
   transactions: Transaction[],
   input: { date: string; amount: string },
   today: string,
 ): MarkAsSoldErrors {
-  const earliest = earliestCloseDate(holding, account, transactions)
+  const { holding } = missing
+  const lastSale = missing.priorSales.map((t) => t.date.slice(0, 10)).sort().at(-1)
+  const lastBuy = earliestCloseDate(holding, account, transactions)
+  const earliest = lastSale && lastSale > lastBuy ? lastSale : lastBuy
   const errors: MarkAsSoldErrors = { earliest }
   const shared = findSharedPositionHolding(holding, account)
   if (shared) errors.sharedWith = shared

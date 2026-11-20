@@ -2,8 +2,8 @@ import { useId } from 'react'
 import { DateField } from '@/components/ui/DateField'
 import { Input } from '@/components/ui/Input'
 import { RadioButton } from '@/components/ui/RadioButton'
-import { markAsSoldDefaults, type MarkAsSoldErrors } from '@/domain/missingHoldings'
-import { formatDate, formatPLN } from '@/utils/formatters'
+import { markAsSoldDefaults, type MarkAsSoldErrors, type MissingHolding } from '@/domain/missingHoldings'
+import { formatDate, formatPLN, formatQuantity } from '@/utils/formatters'
 import type { Holding } from '@/types'
 import type { SoldChoice, SoldChoices } from './soldChoices'
 
@@ -15,7 +15,7 @@ import type { SoldChoice, SoldChoices } from './soldChoices'
  */
 
 type NotInFileProps = {
-  holdings: Holding[]
+  missing: MissingHolding[]
   choices: SoldChoices
   onChange: (next: SoldChoices) => void
   errors: Record<string, MarkAsSoldErrors>
@@ -24,13 +24,14 @@ type NotInFileProps = {
   statementDate?: string
 }
 
-export function NotInFile({ holdings, choices, onChange, errors, today, statementDate }: NotInFileProps) {
+export function NotInFile({ missing, choices, onChange, errors, today, statementDate }: NotInFileProps) {
   const headingId = useId()
-  if (holdings.length === 0) return null
+  if (missing.length === 0) return null
 
-  function setSold(holding: Holding, sold: boolean) {
+  function setSold(row: MissingHolding, sold: boolean) {
+    const { holding } = row
     const next = { ...choices }
-    if (sold) next[holding.id] = markAsSoldDefaults(holding, today, statementDate)
+    if (sold) next[holding.id] = markAsSoldDefaults(row, today, statementDate)
     else delete next[holding.id]
     onChange(next)
   }
@@ -50,7 +51,9 @@ export function NotInFile({ holdings, choices, onChange, errors, today, statemen
         </p>
       </div>
       <ul className="border border-border rounded-lg divide-y divide-borderLight">
-        {holdings.map((holding) => {
+        {missing.map((row) => {
+          const { holding } = row
+          const isBond = holding.category === 'bond'
           const choice = choices[holding.id]
           const rowErrors = errors[holding.id]
           const shared = rowErrors?.sharedWith
@@ -60,21 +63,26 @@ export function NotInFile({ holdings, choices, onChange, errors, today, statemen
                 <div className="min-w-0">
                   <p className="text-sm text-foreground truncate tracking-[-0.35px]">{holding.name}</p>
                   <p className="text-xs text-accent tabular-nums">
-                    {holding.quantity} units · {formatPLN(holding.quantity * holding.currentPrice)}
+                    {formatQuantity(row.quantity, holding.category === 'crypto' ? 8 : 4)} units · {formatPLN(row.quantity * holding.currentPrice)}
                   </p>
+                  {row.priorSales.length > 0 && (
+                    <p className="text-xs text-accent">
+                      {formatQuantity(holding.quantity - row.quantity)} sold in this upload
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-4" role="radiogroup" aria-label={`${holding.name}`}>
                   <RadioButton
                     name={`missing-${holding.id}`}
                     label="Keep"
                     checked={!choice}
-                    onChange={() => setSold(holding, false)}
+                    onChange={() => setSold(row, false)}
                   />
                   <RadioButton
                     name={`missing-${holding.id}`}
                     label="Mark as sold"
                     checked={!!choice}
-                    onChange={() => setSold(holding, true)}
+                    onChange={() => setSold(row, true)}
                   />
                 </div>
               </div>
@@ -97,12 +105,17 @@ export function NotInFile({ holdings, choices, onChange, errors, today, statemen
                     />
                     <Input
                       id={`missing-amount-${holding.id}`}
-                      label="Sale amount (PLN)"
+                      label={isBond ? 'Amount received (PLN)' : 'Sale amount (PLN)'}
                       inputMode="decimal"
                       value={choice.amount}
                       onChange={(e) => edit(holding, { amount: e.target.value.replace(/[^0-9.,]/g, '') })}
                       error={rowErrors?.amount === 'required' ? 'Required' : rowErrors?.amount === 'negative' ? 'Min 0' : undefined}
                     />
+                    {isBond && (
+                      <p className="sm:col-span-2 -mt-1 text-xs text-accent leading-normal">
+                        What PKO paid out, after any tax and early-redemption fee.
+                      </p>
+                    )}
                   </div>
                 )
               )}
@@ -121,7 +134,7 @@ function dateError(errors: MarkAsSoldErrors | undefined): string | undefined {
     case 'future':
       return 'The sale can’t be in the future'
     case 'beforePurchase':
-      return `Pick ${formatDate(errors.earliest)} or later: the last purchase was then`
+      return `Pick ${formatDate(errors.earliest)} or later`
     default:
       return undefined
   }

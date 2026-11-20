@@ -25,9 +25,10 @@ import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
-import type { Holding, Settings } from '@/types'
+import type { Settings } from '@/types'
 import { CircleInfo } from '@/generated/icons'
 import { InlineAlert } from '@/components/ui/InlineAlert'
+import type { MissingHolding } from '@/domain/missingHoldings'
 import { buildSyncSummary, type SyncStats } from './doneSummary'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import { NotInFile, WrongAccountNote } from './NotInFile'
@@ -68,7 +69,7 @@ type Step = 'processing' | 'preview' | 'done'
 export type EMaklerImportFlowDevState = {
   importResult: EMaklerImportResult
   previewRows: EMaklerPreviewRow[]
-  missingHoldings: Holding[]
+  missingHoldings: MissingHolding[]
   ordersOnlyMode: boolean
   doneStats: SyncStats
 }
@@ -241,14 +242,15 @@ export function EMaklerImportFlow({
   const soldInvalid = Object.values(soldErrors).some((e) => e.date || e.amount || e.sharedWith)
 
   const counts = useMemo(() => {
-    let updates = 0; let adds = 0; let sold = 0; let missingCostBasis = 0
+    let updates = 0; let adds = 0; let sold = 0; let kept = 0; let missingCostBasis = 0
     for (const row of previewRows) {
       if (row.action === 'update') updates++
       else if (row.action === 'add') adds++
       else if (row.action === 'sold') sold++
-      if (row.importHolding?.status === 'missing_cost_basis') missingCostBasis++
+      else if (row.action === 'kept') kept++
+      if (row.action !== 'kept' && row.importHolding?.status === 'missing_cost_basis') missingCostBasis++
     }
-    return { updates, adds, sold, missingCostBasis }
+    return { updates, adds, sold, kept, missingCostBasis }
   }, [previewRows])
 
   const footerCounter = useMemo(() => {
@@ -256,6 +258,7 @@ export function EMaklerImportFlow({
     if (counts.updates > 0) parts.push(`${counts.updates} update${counts.updates !== 1 ? 's' : ''}`)
     if (counts.adds > 0) parts.push(`${counts.adds} new`)
     if (counts.sold + closeCount > 0) parts.push(`${counts.sold + closeCount} to close`)
+    if (counts.kept > 0) parts.push(`${counts.kept} kept`)
     if (counts.missingCostBasis > 0) parts.push(`${counts.missingCostBasis} missing cost basis`)
     if (importResult && importResult.duplicatesSkipped > 0) {
       parts.push(`${importResult.duplicatesSkipped} duplicate order${importResult.duplicatesSkipped !== 1 ? 's' : ''} skipped`)
@@ -272,7 +275,8 @@ export function EMaklerImportFlow({
 
     for (let i = 0; i < previewRows.length; i++) {
       const row = previewRows[i]
-      if (!row.importHolding) continue
+      // Kept rows change nothing: their orders are recorded below.
+      if (!row.importHolding || row.action === 'kept') continue
 
       const h = row.importHolding
       const category = categoryOverrides[i] ?? h.category
@@ -327,7 +331,7 @@ export function EMaklerImportFlow({
     // Close what an upload sale sold, and what was marked as sold. Nothing is deleted.
     const closed = closeImportedHoldings(accountId, [
       ...previewRows.flatMap((row) => (row.action === 'sold' && row.existingHolding ? [{ holdingId: row.existingHolding.id, sales: txns }] : [])),
-      ...soldChoiceCloses(soldChoices, missingHoldings),
+      ...soldChoiceCloses(soldChoices, missingHoldings, txns),
     ], log)
     setDoneStats({ ...stats, closed: closed.length })
 
@@ -375,11 +379,17 @@ export function EMaklerImportFlow({
       <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
         <div className="p-5 flex flex-col gap-5">
           {/* Orders-only banner */}
-          {ordersOnlyMode && (
+          {ordersOnlyMode && counts.adds > 0 && (
             <InlineAlert variant="warning">
               Only order history was provided — current prices are unknown and will be set to 0.
               Use the price refresh on Home after import to populate them.
             </InlineAlert>
+          )}
+          {counts.kept > 0 && (
+            <p className="text-sm text-accent tracking-[-0.35px]">
+              Order history alone doesn’t change holdings you already have. Kept ones stay as they
+              are; their orders are recorded as transactions.
+            </p>
           )}
 
           {/* Warnings */}
@@ -426,8 +436,10 @@ export function EMaklerImportFlow({
                         h && h.priceCurrency !== 'PLN' && h.nbpRateUsed > 0
                           ? `${h.originalPurchasePrice.toFixed(2).replace('.', ',')} ${h.priceCurrency} @ NBP ${h.nbpRateUsed.toFixed(4).replace('.', ',')} (${h.purchaseDate})`
                           : undefined
-                      // Sold rows read as disabled: dim every cell but the status badge.
-                      const dim = row.action === 'sold' ? 'opacity-50' : ''
+                      // Sold and kept rows show the holding as it stands, read as
+                      // disabled: dim every cell but the status badge.
+                      const fromExisting = row.action === 'sold' || row.action === 'kept'
+                      const dim = fromExisting ? 'opacity-50' : ''
                       return (
                         <tr key={i} className="border-b border-borderLight last:border-b-0">
                           {/* Status */}
@@ -438,14 +450,14 @@ export function EMaklerImportFlow({
                           {/* Name */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <div className="truncate text-xs text-foreground">
-                              {row.action === 'sold' ? row.existingHolding?.name : h?.name}
+                              {fromExisting ? row.existingHolding?.name : h?.name}
                             </div>
                           </td>
 
                           {/* Exchange */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
-                            <span className={`block truncate text-xs ${row.action === 'sold' ? 'text-foreground' : 'text-accent'}`}>
-                              {(row.action === 'sold' ? row.existingHolding?.exchange : h?.exchange) ?? '—'}
+                            <span className={`block truncate text-xs ${fromExisting ? 'text-foreground' : 'text-accent'}`}>
+                              {(fromExisting ? row.existingHolding?.exchange : h?.exchange) ?? '—'}
                             </span>
                           </td>
 
@@ -463,19 +475,19 @@ export function EMaklerImportFlow({
                             </td>
                           ) : (
                             <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
-                              <span className={`block truncate text-xs ${row.action === 'sold' ? 'text-foreground' : 'text-accent'}`}>{row.existingHolding?.ticker ?? '—'}</span>
+                              <span className={`block truncate text-xs ${fromExisting ? 'text-foreground' : 'text-accent'}`}>{row.existingHolding?.ticker ?? '—'}</span>
                             </td>
                           )}
 
                           {/* Qty */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <span className="block truncate text-xs text-foreground">
-                              {row.action === 'sold' ? row.existingHolding?.quantity ?? '—' : h?.quantity}
+                              {fromExisting ? row.existingHolding?.quantity ?? '—' : h?.quantity}
                             </span>
                           </td>
 
                           {/* Purchase price */}
-                          {row.action === 'sold' ? (
+                          {fromExisting ? (
                             <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                               <span className="block truncate text-xs text-foreground text-right">
                                 {row.existingHolding ? formatPLN(row.existingHolding.purchasePrice) : '—'}
@@ -516,14 +528,14 @@ export function EMaklerImportFlow({
                           {/* Current price */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <span className="block truncate text-xs text-foreground text-right">
-                              {row.action === 'sold'
+                              {fromExisting
                                 ? row.existingHolding ? formatPLN(row.existingHolding.currentPrice) : '—'
                                 : ordersOnlyMode ? '—' : h ? formatPLN(h.currentPrice) : '—'}
                             </span>
                           </td>
 
                           {/* Category */}
-                          {row.action === 'sold' ? (
+                          {fromExisting ? (
                             <td className={`h-11 px-3 align-middle ${dim}`}>
                               <span className="block truncate text-xs text-foreground capitalize">{row.existingHolding?.category ?? '—'}</span>
                             </td>
@@ -550,7 +562,7 @@ export function EMaklerImportFlow({
           )}
 
           <NotInFile
-            holdings={missingHoldings}
+            missing={missingHoldings}
             choices={soldChoices}
             onChange={setSoldChoices}
             errors={soldErrors}
@@ -629,5 +641,7 @@ function StatusBadge({ action }: { action: RowAction }) {
       return <Badge variant="positive">New</Badge>
     case 'sold':
       return <Badge variant="neutral">Sold</Badge>
+    case 'kept':
+      return <Badge variant="neutral">Kept</Badge>
   }
 }

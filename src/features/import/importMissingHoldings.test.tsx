@@ -127,7 +127,8 @@ describe('PKO IKE import — holdings missing from the file', () => {
     renderIke()
     fireEvent.click(screen.getByRole('radio', { name: 'Mark as sold' }))
     // Prefilled from the last known value (3 × 101).
-    const amount = screen.getByLabelText('Sale amount (PLN)') as HTMLInputElement
+    // A bond's amount is what PKO paid out, labelled as in Close position.
+    const amount = screen.getByLabelText('Amount received (PLN)') as HTMLInputElement
     expect(amount.value).toBe('303')
     fireEvent.change(amount, { target: { value: '310,50' } })
     fireEvent.change(screen.getByLabelText('Date sold'), { target: { value: '2026-06-30' } })
@@ -145,7 +146,7 @@ describe('PKO IKE import — holdings missing from the file', () => {
   it('blocks the import while a Mark as sold row is invalid', () => {
     renderIke()
     fireEvent.click(screen.getByRole('radio', { name: 'Mark as sold' }))
-    fireEvent.change(screen.getByLabelText('Sale amount (PLN)'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Amount received (PLN)'), { target: { value: '' } })
     expect((screen.getByRole('button', { name: 'Import 2 Selected' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('Required')).toBeTruthy()
   })
@@ -169,6 +170,8 @@ const ORDER_HEADER = 'Stan;Papier;Giełda;K/S;Liczba zlecona;Liczba zrealizowana
 const ordersFile = (...rows: string[]) => cp1250File('orders.csv', ['Historia', '', ORDER_HEADER, ...rows, ''])
 const BUY_ALPHA = 'Zrealizowane;ALPHA;WWA-GPW;K;10;10;50,00;PLN;;03.02.2026 10:00:00'
 const SELL_BETA = 'Zrealizowane;BETA;WWA-GPW;S;10;10;70,00;PLN;;01.03.2026 11:00:00'
+const SELL_SOME_BETA = 'Zrealizowane;BETA;WWA-GPW;S;3;3;70,00;PLN;;01.03.2026 11:00:00'
+const BUY_ONE_ALPHA = 'Zrealizowane;ALPHA;WWA-GPW;K;1;1;55,00;PLN;;05.03.2026 10:00:00'
 const portfolioFile = () => cp1250File('portfolio.csv', [
   'Portfel', '',
   'Papier;Giełda;Liczba dostępna (Blokady);Kurs;Waluta;Wartość;Waluta',
@@ -243,5 +246,57 @@ describe('eMakler import — holdings missing from the files', () => {
     const sales = portfolio.transactions.filter((t) => t.type === 'sell')
     expect(sales).toHaveLength(1)
     expect(sales[0]).toMatchObject({ amountPLN: 700, quantity: 10, ticker: 'BETA' })
+  })
+})
+
+describe('eMakler import — order history and existing holdings', () => {
+  it('order history alone keeps an existing holding as it is, and records its orders', async () => {
+    renderEMakler([{ file: ordersFile(BUY_ONE_ALPHA), type: 'order_history' }])
+    await screen.findByText('Kept')
+    expect(screen.getByText(/Order history alone doesn’t change holdings you already have/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm Import' }))
+
+    expect(account('mb').holdings.find((h) => h.id === 'alpha')).toMatchObject({ quantity: 10, purchasePrice: 50, currentPrice: 60 })
+    expect(portfolio.transactions.filter((t) => t.accountId === 'mb' && t.type === 'buy')).toMatchObject([{ quantity: 1, amountPLN: -55, ticker: 'ALPHA' }])
+  })
+})
+
+describe('eMakler import — a holding the upload sold part of', () => {
+  it('Mark as sold closes only what is left after the upload’s sale', async () => {
+    renderEMakler([
+      { file: portfolioFile(), type: 'portfolio' },
+      { file: ordersFile(SELL_SOME_BETA), type: 'order_history' },
+    ])
+    await screen.findByRole('heading', { name: 'Not in this file' })
+    expect(screen.getByText(/^7 units · 420/)).toBeTruthy()
+    expect(screen.getByText('3 sold in this upload')).toBeTruthy()
+
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Mark as sold' })[0])
+    const amount = screen.getByLabelText('Sale amount (PLN)') as HTMLInputElement
+    expect(amount.value).toBe('420') // 7 left × 60
+    fireEvent.change(screen.getByLabelText('Date sold'), { target: { value: '2026-03-05' } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm Import' }))
+    })
+
+    await waitFor(() => expect(closed('mb')).toEqual(['BETA 2026-03-05']))
+    const beta = portfolio.transactions.filter((t) => t.ticker === 'BETA')
+    // One filled-in buy for the 10 held, the upload's sale of 3 and the close of the 7 left.
+    expect(beta.map((t) => `${t.type} ${t.quantity}`).sort()).toEqual(['buy 10', 'sell 3', 'sell 7'])
+    expect(beta.find((t) => t.type === 'buy')!.date <= '2026-03-01').toBe(true)
+  })
+
+  it('a date before the upload’s sale is refused', async () => {
+    renderEMakler([
+      { file: portfolioFile(), type: 'portfolio' },
+      { file: ordersFile(SELL_SOME_BETA), type: 'order_history' },
+    ])
+    await screen.findByRole('heading', { name: 'Not in this file' })
+    fireEvent.click(screen.getAllByRole('radio', { name: 'Mark as sold' })[0])
+    fireEvent.change(screen.getByLabelText('Date sold'), { target: { value: '2026-02-28' } })
+    expect(screen.getByText('Pick 1 Mar 2026 or later')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Confirm Import' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

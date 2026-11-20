@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { findMissingHoldings } from '@/domain/missingHoldings'
+import { findMissingHoldings, wholeHolding, type MissingHolding } from '@/domain/missingHoldings'
 import type { AccountType, AssetCategory, Holding } from '@/types'
 import { AlertTriangle, CircleInfo } from '@/generated/icons'
 import { buildSyncSummary, type SyncStats } from './doneSummary'
@@ -54,7 +54,7 @@ export type CSVImportFlowProps = {
 export type CSVImportFlowDevState = {
   category: AssetCategory
   previewRows: CSVPreviewRow[]
-  missingHoldings: Holding[]
+  missingHoldings: MissingHolding[]
   parseErrors: { row: number; reason: string }[]
   doneStats: SyncStats
 }
@@ -167,7 +167,7 @@ export function CSVImportFlow({
   const [selected, setSelected] = useState<Set<number>>(() => new Set((devSeed?.state?.previewRows ?? []).map((_, i) => i)))
   const [exchangeOverrides, setExchangeOverrides] = useState<Record<number, string>>({})
   // Holdings the file doesn't list. Kept unless marked as sold; never deleted.
-  const [missingHoldings, setMissingHoldings] = useState<Holding[]>(devSeed?.state?.missingHoldings ?? [])
+  const [missingHoldings, setMissingHoldings] = useState<MissingHolding[]>(devSeed?.state?.missingHoldings ?? [])
   const [noOverlap, setNoOverlap] = useState(false)
   const [soldChoices, setSoldChoices] = useState<SoldChoices>({})
 
@@ -223,7 +223,7 @@ export function CSVImportFlow({
       ...result.toAdd.map((h) => ({ action: 'new' as const, holding: h })),
     ]
     setPreviewRows(rows)
-    setMissingHoldings(missing.missing)
+    setMissingHoldings(missing.missing.map(wholeHolding))
     setNoOverlap(missing.noOverlap)
     setSoldChoices({})
     setSelected(new Set(rows.map((_, i) => i)))
@@ -479,7 +479,7 @@ export function CSVImportFlow({
           )}
 
           <NotInFile
-            holdings={missingHoldings}
+            missing={missingHoldings}
             choices={soldChoices}
             onChange={setSoldChoices}
             errors={soldErrors}

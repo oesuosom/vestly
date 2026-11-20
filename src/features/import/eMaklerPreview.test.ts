@@ -40,10 +40,15 @@ const account: Account = { id: 'mb', name: 'Broker', type: 'brokerage', createdA
 describe('planEMaklerPreview — order history alone', () => {
   const buyAlpha = order('ALPHA', 'buy', 10, 50, '2026-02-03T10:00:00.000Z')
 
-  it('changes only the instruments it has orders for, and lists nothing as missing', () => {
-    const plan = planEMaklerPreview(result([imported('ALPHA')], [buyAlpha]), true, account, [])
-    expect(plan.rows.map((r) => [r.action, r.existingHolding?.id])).toEqual([['update', 'alpha']])
+  it('keeps a holding it has orders for as it is, and lists nothing as missing', () => {
+    const plan = planEMaklerPreview(result([imported('ALPHA', 1)], [buyAlpha]), true, account, [])
+    expect(plan.rows.map((r) => [r.action, r.existingHolding?.id])).toEqual([['kept', 'alpha']])
     expect(plan).toMatchObject({ missing: [], noOverlap: false })
+  })
+
+  it('adds a holding for an instrument the account doesn’t have', () => {
+    const plan = planEMaklerPreview(result([imported('DELTA', 3)]), true, account, [])
+    expect(plan.rows.map((r) => r.action)).toEqual(['add'])
   })
 
   it('uploaded again (every order already imported) proposes nothing at all', () => {
@@ -51,10 +56,10 @@ describe('planEMaklerPreview — order history alone', () => {
     expect(plan).toEqual({ rows: [], missing: [], noOverlap: false })
   })
 
-  it('never closes a holding, even one it has a sale for', () => {
+  it('never closes a holding, even one it has a sale for: it is listed as kept', () => {
     const sellBeta = order('BETA', 'sell', 10, 70, '2026-03-01T11:00:00.000Z')
     const plan = planEMaklerPreview(result([], [sellBeta]), true, account, [])
-    expect(plan.rows).toEqual([])
+    expect(plan.rows.map((r) => [r.action, r.existingHolding?.id])).toEqual([['kept', 'beta']])
     expect(plan.missing).toEqual([])
   })
 })
@@ -63,21 +68,28 @@ describe('planEMaklerPreview — portfolio file', () => {
   it('lists holdings the file lacks under "Not in this file", never the Cash row', () => {
     const plan = planEMaklerPreview(result([imported('ALPHA')]), false, account, [])
     expect(plan.rows.map((r) => r.action)).toEqual(['update'])
-    expect(plan.missing.map((h) => h.id)).toEqual(['beta', 'gamma'])
+    expect(plan.missing.map((m) => m.holding.id)).toEqual(['beta', 'gamma'])
   })
 
   it('closes a missing holding with its sale from the same upload instead of listing it', () => {
     const sellBeta = order('BETA', 'sell', 10, 70, '2026-03-01T11:00:00.000Z')
     const plan = planEMaklerPreview(result([imported('ALPHA')], [sellBeta]), false, account, [])
     expect(plan.rows.map((r) => [r.action, r.existingHolding?.id])).toEqual([['update', 'alpha'], ['sold', 'beta']])
-    expect(plan.missing.map((h) => h.id)).toEqual(['gamma'])
+    expect(plan.missing.map((m) => m.holding.id)).toEqual(['gamma'])
   })
 
-  it('still lists a missing holding whose upload sale covers only part of it', () => {
-    const sellSome = order('BETA', 'sell', 4, 70, '2026-03-01T11:00:00.000Z')
+  it('lists a holding the upload sold only part of, with what is left to mark as sold', () => {
+    const sellSome = order('BETA', 'sell', 3, 70, '2026-03-01T11:00:00.000Z')
     const plan = planEMaklerPreview(result([imported('ALPHA')], [sellSome]), false, account, [])
     expect(plan.rows.map((r) => r.action)).toEqual(['update'])
-    expect(plan.missing.map((h) => h.id)).toEqual(['beta', 'gamma'])
+    expect(plan.missing.map((m) => [m.holding.id, m.quantity, m.priorSales.length])).toEqual([['beta', 7, 1], ['gamma', 10, 0]])
+  })
+
+  it('closes a holding the upload sold more of than it held', () => {
+    const sellMore = order('BETA', 'sell', 12, 70, '2026-03-01T11:00:00.000Z')
+    const plan = planEMaklerPreview(result([imported('ALPHA')], [sellMore]), false, account, [])
+    expect(plan.rows.map((r) => [r.action, r.existingHolding?.id])).toEqual([['update', 'alpha'], ['sold', 'beta']])
+    expect(plan.missing.map((m) => m.holding.id)).toEqual(['gamma'])
   })
 
   it('warns instead of listing missing holdings when the file shares none with the account', () => {
