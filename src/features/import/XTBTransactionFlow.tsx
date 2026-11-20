@@ -19,6 +19,7 @@ import { joinDoneParts } from './doneSummary'
 import { useXTBReconcile, type ReconcileStage } from './useXTBReconcile'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import type { DevSeed } from './devSeed'
+import type { HoldingSyncRow } from '@/domain/holdingSync'
 
 // ─────────────────────────────────────────
 // Types
@@ -41,6 +42,7 @@ type Step =
   | 'preview'
   | 'importing'
   | 'unmatched'
+  | 'sync'
   | 'cost_basis'
   | 'done'
 
@@ -49,6 +51,7 @@ export type XTBTransactionFlowDevState = {
   parseResult: ParseResult
   unmatchedRows: UnmatchedRow[]
   unresolvedRows: UnresolvedRow[]
+  syncRows: HoldingSyncRow[]
   costBasisRows: CostBasisDiffRow[]
   doneParts: string[]
 }
@@ -98,11 +101,12 @@ export function XTBTransactionFlow({
     },
     seed: devSeed
       ? {
-          stage: (devSeed.step === 'unmatched' || devSeed.step === 'cost_basis'
+          stage: (devSeed.step === 'unmatched' || devSeed.step === 'sync' || devSeed.step === 'cost_basis'
             ? devSeed.step
             : 'idle') as ReconcileStage,
           unmatchedRows: devSeed.state?.unmatchedRows,
           unresolvedRows: devSeed.state?.unresolvedRows,
+          syncRows: devSeed.state?.syncRows,
           costBasisRows: devSeed.state?.costBasisRows,
         }
       : undefined,
@@ -146,7 +150,7 @@ export function XTBTransactionFlow({
     setDoneParts(parts)
 
     // Nothing was added → nothing to reconcile.
-    if (added === 0 || !reconcile.begin(mergedTransactions, nextAccounts)) {
+    if (added === 0 || !reconcile.begin(mergedTransactions, nextAccounts, parseResult.transactions)) {
       setStep('done')
     }
   }

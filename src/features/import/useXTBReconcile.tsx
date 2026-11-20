@@ -2,12 +2,14 @@
  * useXTBReconcile — the post-import reconciliation state machine shared by the
  * XTB Cash Operations and daily-confirmation import flows.
  *
- * Sequences the two steps rendered by XTBReconcileSteps.tsx: create holdings for
- * unmatched instruments, then offer to recalculate cost bases. See that file for
- * why each step exists.
+ * Sequences three steps: create holdings for unmatched instruments
+ * (XTBReconcileSteps.tsx), apply the quantity changes and closes the trades
+ * imply for existing holdings (HoldingSyncStep.tsx), then offer to recalculate
+ * cost bases (XTBReconcileSteps.tsx).
  */
 import { useState, type ReactElement } from 'react'
 import { recalculateCostBases } from '@/domain/calculations'
+import { accountsAfterSync, planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
 import { resolveDividendLinks } from '@/domain/transactions'
 import {
   computeCostBasisDiff,
@@ -20,6 +22,8 @@ import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import type { Account, AssetCategory, Transaction } from '@/types'
 import { holdingClause } from './doneSummary'
+import { HoldingSyncStep } from './HoldingSyncStep'
+import { syncClause, useApplyHoldingSync } from './useApplyHoldingSync'
 import {
   CostBasisStep,
   UnmatchedStep,
@@ -31,13 +35,14 @@ import {
 // ─────────────────────────────────────────
 
 /** Which reconciliation step, if any, is currently showing. */
-export type ReconcileStage = 'idle' | 'unmatched' | 'cost_basis'
+export type ReconcileStage = 'idle' | 'unmatched' | 'sync' | 'cost_basis'
 
 /** Dev-only seed so the `/dev` showcase can freeze a reconciliation step. */
 export type ReconcileSeed = {
   stage: ReconcileStage
   unmatchedRows?: UnmatchedRow[]
   unresolvedRows?: UnresolvedRow[]
+  syncRows?: HoldingSyncRow[]
   costBasisRows?: CostBasisDiffRow[]
 }
 
@@ -47,13 +52,13 @@ export type UseXTBReconcile = {
    * step is now showing, false when there was nothing to reconcile (in which
    * case the caller should go straight to its done screen).
    */
-  begin: (mergedTransactions: Transaction[], nextAccounts: Account[]) => boolean
+  begin: (mergedTransactions: Transaction[], nextAccounts: Account[], imported: Transaction[]) => boolean
   /** The current step's UI, or null when {@link stage} is 'idle'. */
   render: () => ReactElement | null
 }
 
 /**
- * Drive the unmatched → cost-basis sequence.
+ * Drive the unmatched → holding changes → cost-basis sequence.
  *
  * @param onFinish Called once both steps are resolved (or skipped), with the
  *                 summary clauses they produced — e.g. ["KRU holding created"].
@@ -69,6 +74,7 @@ export function useXTBReconcile({
 }): UseXTBReconcile {
   const { replaceAccounts, setTransactions } = usePortfolio()
   const { instrumentAliases } = useSettings()
+  const applyHoldingSync = useApplyHoldingSync()
 
   const [stage, setStage] = useState<ReconcileStage>(seed?.stage ?? 'idle')
 
@@ -76,6 +82,12 @@ export function useXTBReconcile({
   const [unresolvedRows, setUnresolvedRows] = useState<UnresolvedRow[]>(seed?.unresolvedRows ?? [])
   const [accountsSnapshot, setAccountsSnapshot] = useState<Account[]>([])
   const [transactionsSnapshot, setTransactionsSnapshot] = useState<Transaction[]>([])
+  /** The rows this import added, for the holding-changes step. */
+  const [importedRows, setImportedRows] = useState<Transaction[]>([])
+
+  const [syncRows, setSyncRows] = useState<HoldingSyncRow[]>(seed?.syncRows ?? [])
+  const [syncAccountsSnapshot, setSyncAccountsSnapshot] = useState<Account[]>([])
+  const [syncTransactionsSnapshot, setSyncTransactionsSnapshot] = useState<Transaction[]>([])
 
   const [costBasisRows, setCostBasisRows] = useState<CostBasisDiffRow[]>(seed?.costBasisRows ?? [])
   const [cbAccountsSnapshot, setCbAccountsSnapshot] = useState<Account[]>([])
@@ -99,7 +111,26 @@ export function useXTBReconcile({
     return true
   }
 
-  function begin(mergedTransactions: Transaction[], nextAccounts: Account[]): boolean {
+  /** Show the holding-changes step when the trades change an existing holding, else move on. */
+  function beginSync(
+    accountsNow: Account[],
+    transactionsNow: Transaction[],
+    imported: Transaction[],
+    parts: string[],
+  ): boolean {
+    const account = accountsNow.find((a) => a.id === accountId)
+    const rows = account ? planHoldingSync(account, transactionsNow, imported) : []
+    if (rows.length === 0) return beginCostBasis(accountsNow, transactionsNow, parts)
+    setSyncRows(rows)
+    setSyncAccountsSnapshot(accountsNow)
+    setSyncTransactionsSnapshot(transactionsNow)
+    setExtraParts(parts)
+    setStage('sync')
+    return true
+  }
+
+  function begin(mergedTransactions: Transaction[], nextAccounts: Account[], imported: Transaction[]): boolean {
+    setImportedRows(imported)
     const { matched, unresolved } = computeUnmatchedInstruments(
       mergedTransactions,
       nextAccounts,
@@ -117,7 +148,7 @@ export function useXTBReconcile({
       return true
     }
 
-    return beginCostBasis(nextAccounts, mergedTransactions, [])
+    return beginSync(nextAccounts, mergedTransactions, imported, [])
   }
 
   function finish(parts: string[]) {
@@ -198,11 +229,22 @@ export function useXTBReconcile({
       parts.push(holdingClause(newHoldings.length, newHoldings[0]?.ticker))
     }
 
-    if (!beginCostBasis(nextAccounts, relinked, parts)) finish(parts)
+    if (!beginSync(nextAccounts, relinked, importedRows, parts)) finish(parts)
   }
 
   function handleSkipUnmatched() {
-    if (!beginCostBasis(accountsSnapshot, transactionsSnapshot, extraParts)) finish(extraParts)
+    if (!beginSync(accountsSnapshot, transactionsSnapshot, importedRows, extraParts)) finish(extraParts)
+  }
+
+  function handleConfirmSync() {
+    const result = applyHoldingSync(accountId, syncRows, syncTransactionsSnapshot)
+    const parts = [...extraParts, ...syncClause(result)]
+    const nextAccounts = accountsAfterSync(syncAccountsSnapshot, syncRows, new Date().toISOString())
+    if (!beginCostBasis(nextAccounts, syncTransactionsSnapshot, parts)) finish(parts)
+  }
+
+  function handleSkipSync() {
+    if (!beginCostBasis(syncAccountsSnapshot, syncTransactionsSnapshot, extraParts)) finish(extraParts)
   }
 
   function handleConfirmCostBasis() {
@@ -226,6 +268,9 @@ export function useXTBReconcile({
           onSkip={handleSkipUnmatched}
         />
       )
+    }
+    if (stage === 'sync') {
+      return <HoldingSyncStep rows={syncRows} onConfirm={handleConfirmSync} onSkip={handleSkipSync} />
     }
     if (stage === 'cost_basis') {
       return (

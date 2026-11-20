@@ -36,6 +36,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Imported trades now update or close their holdings** — after an XTB import (Cash
+  Operations or daily confirmations) a later buy or sale of something you already held was
+  recorded in Activity, but the holding kept its old quantity. Now the import shows what the
+  trades change before anything is saved: "10 → 15 shares", or "Sold out → close" with the
+  sale's date and proceeds. Confirm, and the quantity and average cost are updated, or the
+  holding moves to Closed positions. A holding whose transactions don't add up to what you
+  hold (for example, bought before your first import) is listed and left as it is. Revolut BTC
+  uses the same step. Selling or sending all your BTC now closes the holding instead of leaving
+  the old quantity. After a partial sale the cost per BTC stays the same: buy 2 BTC for
+  200,000 PLN and sell 1, and the holding keeps 100,000 PLN per BTC, not 200,000. A new BTC
+  holding's cost now includes buy fees, as ETH's already did.
 - **Imports no longer delete holdings missing from a file** — an eMakler order-history upload
   removed every holding it had no buy order for: upload one order for one stock and the others
   disappeared, and upload the same file twice and the whole account was emptied. A holding it

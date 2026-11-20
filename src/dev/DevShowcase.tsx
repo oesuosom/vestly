@@ -993,6 +993,9 @@ export function DevShowcase() {
         <CardFlowFrame label="Unmatched instruments">
           <XTBTransactionFlow accountId="dev" file={DEMO_FILE} onComplete={noop} onBack={noop} devSeed={xtbSeed.unmatched} />
         </CardFlowFrame>
+        <CardFlowFrame label="Holding changes (update / close / left alone)">
+          <XTBTransactionFlow accountId="dev" file={DEMO_FILE} onComplete={noop} onBack={noop} devSeed={xtbSeed.sync} />
+        </CardFlowFrame>
         <CardFlowFrame label="Cost-basis reconciliation">
           <XTBTransactionFlow accountId="dev" file={DEMO_FILE} onComplete={noop} onBack={noop} devSeed={xtbSeed.costBasis} />
         </CardFlowFrame>
@@ -1009,7 +1012,7 @@ export function DevShowcase() {
         <CardFlowFrame label="Receive cost basis">
           <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.receiveCost} />
         </CardFlowFrame>
-        <CardFlowFrame label="Create / update holding">
+        <CardFlowFrame label="Create holding">
           <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.createHolding} />
         </CardFlowFrame>
         <CardFlowFrame label="Done" header={false}>

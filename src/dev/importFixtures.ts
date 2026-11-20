@@ -205,6 +205,12 @@ const xtbCostBasisRows: XTBTransactionFlowDevState['costBasisRows'] = [
   { holdingId: 'h-cb-2', holdingName: 'AGNC Investment', ticker: 'AGNC', currentPricePLN: 14.5, calculatedPricePLN: 15.03, quantity: 60 },
 ]
 
+const xtbSyncRows: XTBTransactionFlowDevState['syncRows'] = [
+  { kind: 'update', holding: holding({ name: 'Fortinet', ticker: 'FTNT', exchange: 'US', category: 'stock', quantity: 4, purchasePrice: 344.6, currentPrice: 380 }), quantity: 6, averageCostPLN: 350.2 },
+  { kind: 'close', holding: holding({ name: 'AGNC Investment', ticker: 'AGNC', exchange: 'US', category: 'stock', quantity: 60, purchasePrice: 15.03, currentPrice: 15.4 }), date: '2025-03-18', proceedsPLN: 921.6, sales: [] },
+  { kind: 'unexplained', holding: holding({ name: 'CD Projekt', ticker: 'CDR', exchange: 'PL', category: 'stock', quantity: 12, purchasePrice: 98.4, currentPrice: 142.1 }), reason: 'history', quantity: 17 },
+]
+
 export const xtbSeed = {
   parsing: { step: 'parsing' } as const,
   preview: {
@@ -217,6 +223,10 @@ export const xtbSeed = {
       unmatchedRows: xtbUnmatchedRows,
       unresolvedRows: xtbUnresolvedRows,
     } satisfies Partial<XTBTransactionFlowDevState>,
+  } as const,
+  sync: {
+    step: 'sync',
+    state: { syncRows: xtbSyncRows } satisfies Partial<XTBTransactionFlowDevState>,
   } as const,
   costBasis: {
     step: 'cost_basis',
@@ -258,7 +268,7 @@ export const btcSeed = {
   createHolding: {
     step: 'create_holding',
     state: {
-      proposed: { netQty: 0.062, avgCostPLN: 145000, totalCostPLN: 8990, earliestDate: '2024-11-02', existingHoldingId: null },
+      proposed: { netQty: 0.062, avgCostPLN: 145000, totalCostPLN: 8990, earliestDate: '2024-11-02' },
     } satisfies Partial<RevolutBtcFlowDevState>,
   } as const,
   done: {
