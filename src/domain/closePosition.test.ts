@@ -8,6 +8,7 @@ import {
   moveToClosed,
   moveToOpen,
   planClose,
+  planCloseFromSales,
   removeCloseTransactions,
 } from './closePosition'
 import { buildBondBuyTransaction } from './transactions'
@@ -335,5 +336,70 @@ describe('Reopen', () => {
     const { after, closedHolding } = close(cdr, acc, [deposit], 1200, 0)
     const withoutSale = after.filter((t) => t.type !== 'sell')
     expect(closedPositionResult(closedHolding, withoutSale)).toBeNull()
+  })
+})
+
+// ─── Closing with sales an import brought (#30) ──────────────────────────────
+
+describe('planCloseFromSales', () => {
+  const emakler = (fields: Partial<Transaction> & Pick<Transaction, 'type' | 'date' | 'amountPLN' | 'quantity'>) =>
+    tx({ ticker: 'BETA', instrument: 'BETA', source: 'emakler_import', ...fields })
+  const beta = holding({ id: 'beta', name: 'BETA', ticker: 'BETA', quantity: 10, purchasePrice: 50, purchaseDate: '2025-06-01' })
+  const acc = account('brokerage', [beta])
+
+  it('closes on the last sale’s day, filling in the buys the log never saw', () => {
+    const sale = emakler({ type: 'sell', date: '2026-03-01T11:00:00.000Z', amountPLN: 700, quantity: 10 })
+    const plan = planCloseFromSales(beta, acc, [sale], [sale], NOW)!
+    expect(plan.date).toBe('2026-03-01')
+    expect(plan.filledInBuy).toMatchObject({ type: 'buy', date: '2025-06-01', quantity: 10, amountPLN: -500, affectsCash: false })
+
+    const after = [sale, plan.filledInBuy!]
+    const [closedAccount] = moveToClosed([acc], beta.id, plan.date, NOW)
+    const row = closedPositionResult(closedAccount.closedHoldings![0], after)!
+    expect(row.sale.id).toBe(sale.id)
+    expect(row.result).toEqual({ proceedsPLN: 700, costPLN: 500, profitPLN: 200 })
+    expect(getRealizedPnL(after)).toBe(200)
+  })
+
+  it('adds no buy when the log explains the units, and counts every sale of the round', () => {
+    const buy = emakler({ type: 'buy', date: '2025-06-01T09:00:00.000Z', amountPLN: -500, quantity: 10 })
+    const s1 = emakler({ type: 'sell', date: '2026-02-01T09:00:00.000Z', amountPLN: 240, quantity: 4 })
+    const s2 = emakler({ type: 'sell', date: '2026-03-01T09:00:00.000Z', amountPLN: 420, quantity: 6 })
+    const log = [buy, s1, s2]
+    const plan = planCloseFromSales(beta, acc, log, [s1, s2], NOW)!
+    expect(plan).toMatchObject({ date: '2026-03-01', filledInBuy: null })
+
+    const [closedAccount] = moveToClosed([acc], beta.id, plan.date, NOW)
+    expect(closedPositionResult(closedAccount.closedHoldings![0], log)!.result).toEqual({
+      proceedsPLN: 660, costPLN: 500, profitPLN: 160,
+    })
+  })
+
+  it('closes nothing when the sales leave units held', () => {
+    const sale = emakler({ type: 'sell', date: '2026-03-01', amountPLN: 210, quantity: 3 })
+    expect(planCloseFromSales(beta, acc, [sale], [sale], NOW)).toBeNull()
+  })
+
+  it('closes nothing when the sales sell more than the holding had', () => {
+    const sale = emakler({ type: 'sell', date: '2026-03-01', amountPLN: 840, quantity: 12 })
+    expect(planCloseFromSales(beta, acc, [sale], [sale], NOW)).toBeNull()
+  })
+
+  it('ignores sales of other instruments', () => {
+    const other = tx({ type: 'sell', date: '2026-03-01', amountPLN: 700, quantity: 10, ticker: 'ALPHA', source: 'emakler_import' })
+    expect(planCloseFromSales(beta, acc, [other], [other], NOW)).toBeNull()
+  })
+})
+
+describe('closedPositionResult — a closed holding whose sale is gone', () => {
+  it('does not pick up a sale from an earlier round', () => {
+    const apple = holding({ id: 'apple', name: 'Apple', ticker: 'AAPL', quantity: 5, purchasePrice: 100, purchaseDate: '2026-02-01' })
+    const oldBuy = tx({ type: 'buy', date: '2026-01-02', amountPLN: -100, quantity: 1, ticker: 'AAPL', source: 'xtb_import' })
+    const oldSale = tx({ type: 'sell', date: '2026-01-05', amountPLN: 120, quantity: 1, ticker: 'AAPL', source: 'xtb_import' })
+    const buy = tx({ type: 'buy', date: '2026-02-01', amountPLN: -500, quantity: 5, ticker: 'AAPL', source: 'xtb_import' })
+    const acc = account('brokerage', [apple])
+    const [closedAccount] = moveToClosed([acc], apple.id, '2026-03-10', NOW)
+    // The close's own sale was deleted in Activity.
+    expect(closedPositionResult(closedAccount.closedHoldings![0], [oldBuy, oldSale, buy])).toBeNull()
   })
 })

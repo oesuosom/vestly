@@ -961,7 +961,7 @@ export function DevShowcase() {
         <CardFlowFrame label="Mapping">
           <CSVImportFlow accountId="dev" accountName="XTB" accountType="ike" headers={csvHeaders} rawRows={csvRows} detectedFormat={csvDetectedFormat} onComplete={noop} onBack={noop} devSeed={csvSeed.mapping} />
         </CardFlowFrame>
-        <CardFlowFrame label="Preview (update / new / remove + parse error)">
+        <CardFlowFrame label="Preview (update / new / not in this file + parse error)">
           <CSVImportFlow accountId="dev" accountName="XTB" accountType="brokerage" headers={csvHeaders} rawRows={csvRows} detectedFormat={null} onComplete={noop} onBack={noop} devSeed={csvSeed.preview} />
         </CardFlowFrame>
         <CardFlowFrame label="Done" header={false}>
@@ -974,7 +974,7 @@ export function DevShowcase() {
         <CardFlowFrame label="Processing">
           <EMaklerImportFlow accountId="dev" accountName="eMakler" files={[]} onComplete={noop} onBack={noop} devSeed={eMaklerSeed.processing} />
         </CardFlowFrame>
-        <CardFlowFrame label="Preview (add / update / remove + missing cost basis)">
+        <CardFlowFrame label="Preview (add / update / not in this file + missing cost basis)">
           <EMaklerImportFlow accountId="dev" accountName="eMakler" files={[]} onComplete={noop} onBack={noop} devSeed={eMaklerSeed.preview} />
         </CardFlowFrame>
         <CardFlowFrame label="Done" header={false}>

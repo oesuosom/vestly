@@ -91,10 +91,10 @@ const csvPreviewRows: CSVPreviewRow[] = [
     action: 'new',
     holding: holding({ name: 'Dino Polska', ticker: 'DNP', exchange: 'PL', category: 'stock', quantity: 15, purchasePrice: 410, currentPrice: 455 }),
   },
-  {
-    action: 'remove',
-    holding: holding({ name: 'Orlen', ticker: 'PKN', exchange: 'PL', category: 'stock', quantity: 120, purchasePrice: 61.2, currentPrice: 58.9 }),
-  },
+]
+
+const csvMissingHoldings = [
+  holding({ name: 'Orlen', ticker: 'PKN', exchange: 'PL', category: 'stock', quantity: 120, purchasePrice: 61.2, currentPrice: 58.9 }),
 ]
 
 export const csvSeed = {
@@ -104,14 +104,15 @@ export const csvSeed = {
     state: {
       category: 'stock',
       previewRows: csvPreviewRows,
+      missingHoldings: csvMissingHoldings,
       parseErrors: [{ row: 7, reason: 'Invalid quantity "—"' }],
-      doneStats: { updated: 0, added: 0, removed: 0 },
+      doneStats: { updated: 0, added: 0, closed: 0 },
     } satisfies Partial<CSVImportFlowDevState>,
   } as const,
   done: {
     step: 'done',
     state: {
-      doneStats: { updated: 1, added: 1, removed: 1 },
+      doneStats: { updated: 1, added: 1, closed: 1 },
     } satisfies Partial<CSVImportFlowDevState>,
   } as const,
 }
@@ -148,7 +149,10 @@ const eMaklerPreviewRows: EMaklerPreviewRow[] = [
   { action: 'update', importHolding: eMaklerImportResult.holdings[0], existingHolding: holding({ name: 'Apple Inc.', ticker: 'AAPL', exchange: 'US', category: 'stock', quantity: 10, purchasePrice: 700, currentPrice: 800 }) },
   { action: 'add', importHolding: eMaklerImportResult.holdings[1] },
   { action: 'add', importHolding: eMaklerImportResult.holdings[2] },
-  { action: 'remove', existingHolding: holding({ name: 'Tesla Inc.', ticker: 'TSLA', exchange: 'US', category: 'stock', quantity: 5, purchasePrice: 900, currentPrice: 1010 }) },
+]
+
+const eMaklerMissingHoldings = [
+  holding({ name: 'Tesla Inc.', ticker: 'TSLA', exchange: 'US', category: 'stock', quantity: 5, purchasePrice: 900, currentPrice: 1010 }),
 ]
 
 export const eMaklerSeed = {
@@ -158,12 +162,13 @@ export const eMaklerSeed = {
     state: {
       importResult: eMaklerImportResult,
       previewRows: eMaklerPreviewRows,
+      missingHoldings: eMaklerMissingHoldings,
       ordersOnlyMode: false,
     } satisfies Partial<EMaklerImportFlowDevState>,
   } as const,
   done: {
     step: 'done',
-    state: { doneStats: { updated: 1, added: 2, removed: 1 } } satisfies Partial<EMaklerImportFlowDevState>,
+    state: { doneStats: { updated: 1, added: 2, closed: 1 } } satisfies Partial<EMaklerImportFlowDevState>,
   } as const,
 }
 

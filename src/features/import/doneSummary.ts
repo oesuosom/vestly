@@ -51,21 +51,21 @@ export function holdingClause(count: number, ticker?: string): string {
   return `${plural(count, 'holding')} created`
 }
 
+/** What a holdings sync changed. Syncs close holdings; they never delete one. */
+export type SyncStats = { updated: number; added: number; closed: number }
+
 /**
  * Lead line for holdings *syncs* (CSV, eMakler) that diff against existing
- * holdings, e.g. "Updated 1, Added 2, Removed 1 holdings in {account}".
+ * holdings, e.g. "Updated 1, Added 2, Closed 1 holdings in {account}".
  * Distinct from imports: a sync reports a net diff, not what was ingested.
  */
-export function buildSyncSummary(
-  stats: { updated: number; added: number; removed: number },
-  accountName: string,
-): string {
-  const total = stats.updated + stats.added + stats.removed
+export function buildSyncSummary(stats: SyncStats, accountName: string): string {
+  const total = stats.updated + stats.added + stats.closed
   if (total === 0) return 'No changes were made.'
   const parts = [
     stats.updated > 0 && `Updated ${stats.updated}`,
     stats.added > 0 && `Added ${stats.added}`,
-    stats.removed > 0 && `Removed ${stats.removed}`,
+    stats.closed > 0 && `Closed ${stats.closed}`,
   ].filter(Boolean)
   return `${parts.join(', ')} holding${total !== 1 ? 's' : ''} in ${accountName}`
 }

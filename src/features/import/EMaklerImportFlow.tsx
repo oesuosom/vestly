@@ -5,6 +5,7 @@
  * UnifiedImportModal.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { format } from 'date-fns'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import {
@@ -17,7 +18,6 @@ import {
   buildEMaklerImport,
   loadEMaklerOrderKeys,
   saveEMaklerOrderKeys,
-  type EMaklerHoldingResult,
   type EMaklerImportResult,
 } from '@/importers/eMaklerImport'
 import { formatPLN } from '@/utils/formatters'
@@ -25,12 +25,24 @@ import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown } from '@/components/ui/Dropdown'
-import type { Holding, Settings, Transaction } from '@/types'
+import type { Holding, Settings } from '@/types'
 import { CircleInfo } from '@/generated/icons'
 import { InlineAlert } from '@/components/ui/InlineAlert'
-import { buildSyncSummary } from './doneSummary'
+import { buildSyncSummary, type SyncStats } from './doneSummary'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
+import { NotInFile, WrongAccountNote } from './NotInFile'
+import { soldChoiceCloses, soldChoiceErrors, type SoldChoices } from './soldChoices'
+import {
+  eMaklerTransactions,
+  holdingKey,
+  planEMaklerPreview,
+  type EMaklerPreviewRow,
+  type PreviewPlan,
+  type RowAction,
+} from './eMaklerPreview'
 import type { DevSeed } from './devSeed'
+
+export type { EMaklerPreviewRow } from './eMaklerPreview'
 
 // ─────────────────────────────────────────
 // Types
@@ -52,23 +64,13 @@ export type EMaklerImportFlowProps = {
 
 type Step = 'processing' | 'preview' | 'done'
 
-type RowAction = 'update' | 'add' | 'remove'
-
-type PreviewRow = {
-  action: RowAction
-  importHolding?: EMaklerHoldingResult
-  existingHolding?: Holding
-}
-
-/** Exported for dev fixtures. */
-export type EMaklerPreviewRow = PreviewRow
-
 /** Dev-only seedable state for the `/dev` showcase. */
 export type EMaklerImportFlowDevState = {
   importResult: EMaklerImportResult
   previewRows: EMaklerPreviewRow[]
+  missingHoldings: Holding[]
   ordersOnlyMode: boolean
-  doneStats: { updated: number; added: number; removed: number }
+  doneStats: SyncStats
 }
 
 const CATEGORY_OPTIONS: { value: 'stock' | 'etf'; label: string }[] = [
@@ -149,7 +151,7 @@ export function EMaklerImportFlow({
   onDoneChange,
   devSeed,
 }: EMaklerImportFlowProps) {
-  const { accounts, importHoldings, importTransactions } = usePortfolio()
+  const { accounts, transactions, importHoldings, importTransactions, closeImportedHoldings } = usePortfolio()
   const settings = useSettings()
 
   // Wizard state
@@ -168,8 +170,12 @@ export function EMaklerImportFlow({
     devSeed?.state?.importResult ? initialTickerInputs(devSeed.state.importResult) : {},
   )
 
+  // Holdings missing from a portfolio file: kept unless marked as sold.
+  const [soldChoices, setSoldChoices] = useState<SoldChoices>({})
+  const [today] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+
   // Done
-  const [doneStats, setDoneStats] = useState(devSeed?.state?.doneStats ?? { updated: 0, added: 0, removed: 0 })
+  const [doneStats, setDoneStats] = useState<SyncStats>(devSeed?.state?.doneStats ?? { updated: 0, added: 0, closed: 0 })
 
   // Tell the parent modal when we're on the full-bleed success card (no header).
   useEffect(() => {
@@ -188,6 +194,7 @@ export function EMaklerImportFlow({
     setAllOrderRows(outcome.orderRows)
     setOrdersOnlyMode(outcome.ordersOnlyMode)
     setImportResult(outcome.result)
+    setSoldChoices({})
     setTickerInputs(initialTickerInputs(outcome.result))
     setStep('preview')
   }
@@ -206,69 +213,55 @@ export function EMaklerImportFlow({
 
   // ─── Preview rows (sync against existing) ─────────
 
-  const existingHoldings = useMemo(() => {
-    const account = accounts.find((a) => a.id === accountId)
-    return (account?.holdings ?? []).filter((h) => !h.isSynthetic)
-  }, [accounts, accountId])
+  const account = accounts.find((a) => a.id === accountId)
 
-  const computedPreviewRows = useMemo((): PreviewRow[] => {
-    if (!importResult) return []
+  // Worked out once per parsed upload, against the account as it was then,
+  // so the rows don't shift while the person fills them in (or once the
+  // import itself changes the account).
+  const [planned, setPlanned] = useState<{ for: EMaklerImportResult; plan: PreviewPlan } | null>(null)
+  if (importResult && planned?.for !== importResult && !devSeed) {
+    setPlanned({ for: importResult, plan: planEMaklerPreview(importResult, ordersOnlyMode, account, transactions) })
+  }
+  const plan = planned?.for === importResult ? planned.plan : null
+  const computedPreviewRows = plan?.rows ?? []
+  const missingHoldings = useMemo(
+    () => devSeed?.state?.missingHoldings ?? plan?.missing ?? [],
+    [devSeed, plan],
+  )
+  const noOverlap = plan?.noOverlap ?? false
 
-    const rows: PreviewRow[] = []
-    const importedKeys = new Set<string>()
-
-    for (const h of importResult.holdings) {
-      const key = `${h.name.toLowerCase()}|${h.exchange}`
-      importedKeys.add(key)
-
-      const existing = existingHoldings.find(
-        (e) =>
-          e.name.toLowerCase() === h.name.toLowerCase() &&
-          e.exchange === h.exchange,
-      )
-
-      rows.push({
-        action: existing ? 'update' : 'add',
-        importHolding: h,
-        existingHolding: existing,
-      })
-    }
-
-    for (const e of existingHoldings) {
-      const key = `${e.name.toLowerCase()}|${e.exchange}`
-      if (!importedKeys.has(key)) {
-        rows.push({ action: 'remove', existingHolding: e })
-      }
-    }
-
-    return rows
-  }, [importResult, existingHoldings])
-
-  // Dev showcase can inject a mixed add/update/remove preview directly.
+  // Dev showcase can inject a mixed add/update/sold preview directly.
   const previewRows = devSeed?.state?.previewRows ?? computedPreviewRows
 
+  const closeCount = Object.keys(soldChoices).length
+  const soldErrors = useMemo(
+    () => soldChoiceErrors(soldChoices, missingHoldings, account, transactions, today),
+    [soldChoices, missingHoldings, account, transactions, today],
+  )
+  const soldInvalid = Object.values(soldErrors).some((e) => e.date || e.amount || e.sharedWith)
+
   const counts = useMemo(() => {
-    let updates = 0; let adds = 0; let removes = 0; let missingCostBasis = 0
+    let updates = 0; let adds = 0; let sold = 0; let missingCostBasis = 0
     for (const row of previewRows) {
       if (row.action === 'update') updates++
       else if (row.action === 'add') adds++
-      else if (row.action === 'remove') removes++
+      else if (row.action === 'sold') sold++
       if (row.importHolding?.status === 'missing_cost_basis') missingCostBasis++
     }
-    return { updates, adds, removes, missingCostBasis }
+    return { updates, adds, sold, missingCostBasis }
   }, [previewRows])
 
   const footerCounter = useMemo(() => {
     const parts: string[] = []
     if (counts.updates > 0) parts.push(`${counts.updates} update${counts.updates !== 1 ? 's' : ''}`)
     if (counts.adds > 0) parts.push(`${counts.adds} new`)
-    if (counts.removes > 0) parts.push(`${counts.removes} removal${counts.removes !== 1 ? 's' : ''}`)
+    if (counts.sold + closeCount > 0) parts.push(`${counts.sold + closeCount} to close`)
     if (counts.missingCostBasis > 0) parts.push(`${counts.missingCostBasis} missing cost basis`)
     if (importResult && importResult.duplicatesSkipped > 0) {
       parts.push(`${importResult.duplicatesSkipped} duplicate order${importResult.duplicatesSkipped !== 1 ? 's' : ''} skipped`)
     }
     return parts.join(', ')
-  }, [counts, importResult])
+  }, [counts, closeCount, importResult])
 
   // ─── Confirm import ───────────────────
 
@@ -279,12 +272,6 @@ export function EMaklerImportFlow({
 
     for (let i = 0; i < previewRows.length; i++) {
       const row = previewRows[i]
-
-      if (row.action === 'remove' && row.existingHolding) {
-        actions.push({ type: 'remove', holdingId: row.existingHolding.id })
-        continue
-      }
-
       if (!row.importHolding) continue
 
       const h = row.importHolding
@@ -321,29 +308,28 @@ export function EMaklerImportFlow({
       }
     }
 
-    const stats = importHoldings(accountId, actions)
-    setDoneStats(stats)
+    const stats = actions.length > 0 ? importHoldings(accountId, actions) : { updated: 0, added: 0 }
 
-    // Create transaction records for executed orders (buys and sells)
-    if (importResult.transactions.length > 0) {
-      const txns: Transaction[] = importResult.transactions.map((t) => ({
-        id: crypto.randomUUID(),
-        accountId,
-        type: t.side,
-        date: t.date,
-        amountPLN: t.amountPLN,
-        instrument: t.name,
-        exchange: t.exchange,
-        quantity: t.quantity,
-        pricePerUnitPLN: t.pricePerUnitPLN,
-        originalCurrency: t.originalCurrency,
-        pricePerUnitOriginal: t.pricePerUnitOriginal,
-        externalId: t.deduplicationKey,
-        source: 'emakler_import' as const,
-        createdAt: new Date().toISOString(),
-      }))
-      importTransactions(txns, accountId)
+    // Record the executed orders (buys and sells), filed under the holding's
+    // ticker where the account holds the instrument or one was typed for it.
+    const tickers = new Map<string, string>()
+    for (const h of account?.holdings ?? []) {
+      if (h.ticker && !h.isSynthetic) tickers.set(holdingKey(h.name, h.exchange), h.ticker)
     }
+    previewRows.forEach((row, i) => {
+      const typed = row.action === 'add' ? tickerInputs[i]?.trim().toUpperCase() : undefined
+      if (row.importHolding && typed) tickers.set(holdingKey(row.importHolding.name, row.importHolding.exchange), typed)
+    })
+    const txns = eMaklerTransactions(importResult, accountId, (name, exchange) => tickers.get(holdingKey(name, exchange)), new Date().toISOString())
+    let log = transactions
+    if (txns.length > 0) log = importTransactions(txns, accountId).mergedTransactions
+
+    // Close what an upload sale sold, and what was marked as sold. Nothing is deleted.
+    const closed = closeImportedHoldings(accountId, [
+      ...previewRows.flatMap((row) => (row.action === 'sold' && row.existingHolding ? [{ holdingId: row.existingHolding.id, sales: txns }] : [])),
+      ...soldChoiceCloses(soldChoices, missingHoldings),
+    ], log)
+    setDoneStats({ ...stats, closed: closed.length })
 
     // Persist processed order deduplication keys
     const stored = loadEMaklerOrderKeys()
@@ -401,12 +387,16 @@ export function EMaklerImportFlow({
             <InlineAlert key={i} variant="warning">{w}</InlineAlert>
           ))}
 
+          {noOverlap && (
+            <InlineAlert variant="warning"><WrongAccountNote accountName={accountName} /></InlineAlert>
+          )}
+
           {/* Table */}
-          {previewRows.length === 0 ? (
+          {previewRows.length === 0 && missingHoldings.length === 0 ? (
             <p className="text-sm text-accent text-center py-6">
               No changes detected — your holdings are already up to date.
             </p>
-          ) : (
+          ) : previewRows.length > 0 && (
             <div className="border border-border rounded-lg overflow-hidden">
               {/* Fixed Figma column widths (via colgroup); the table is wider than
                   the modal, so it scrolls horizontally. Headers/labels never wrap. */}
@@ -436,8 +426,8 @@ export function EMaklerImportFlow({
                         h && h.priceCurrency !== 'PLN' && h.nbpRateUsed > 0
                           ? `${h.originalPurchasePrice.toFixed(2).replace('.', ',')} ${h.priceCurrency} @ NBP ${h.nbpRateUsed.toFixed(4).replace('.', ',')} (${h.purchaseDate})`
                           : undefined
-                      // Remove rows read as disabled: dim every cell but the status badge.
-                      const dim = row.action === 'remove' ? 'opacity-50' : ''
+                      // Sold rows read as disabled: dim every cell but the status badge.
+                      const dim = row.action === 'sold' ? 'opacity-50' : ''
                       return (
                         <tr key={i} className="border-b border-borderLight last:border-b-0">
                           {/* Status */}
@@ -448,14 +438,14 @@ export function EMaklerImportFlow({
                           {/* Name */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <div className="truncate text-xs text-foreground">
-                              {row.action === 'remove' ? row.existingHolding?.name : h?.name}
+                              {row.action === 'sold' ? row.existingHolding?.name : h?.name}
                             </div>
                           </td>
 
                           {/* Exchange */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
-                            <span className={`block truncate text-xs ${row.action === 'remove' ? 'text-foreground' : 'text-accent'}`}>
-                              {(row.action === 'remove' ? row.existingHolding?.exchange : h?.exchange) ?? '—'}
+                            <span className={`block truncate text-xs ${row.action === 'sold' ? 'text-foreground' : 'text-accent'}`}>
+                              {(row.action === 'sold' ? row.existingHolding?.exchange : h?.exchange) ?? '—'}
                             </span>
                           </td>
 
@@ -473,19 +463,19 @@ export function EMaklerImportFlow({
                             </td>
                           ) : (
                             <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
-                              <span className={`block truncate text-xs ${row.action === 'remove' ? 'text-foreground' : 'text-accent'}`}>{row.existingHolding?.ticker ?? '—'}</span>
+                              <span className={`block truncate text-xs ${row.action === 'sold' ? 'text-foreground' : 'text-accent'}`}>{row.existingHolding?.ticker ?? '—'}</span>
                             </td>
                           )}
 
                           {/* Qty */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <span className="block truncate text-xs text-foreground">
-                              {row.action === 'remove' ? row.existingHolding?.quantity ?? '—' : h?.quantity}
+                              {row.action === 'sold' ? row.existingHolding?.quantity ?? '—' : h?.quantity}
                             </span>
                           </td>
 
                           {/* Purchase price */}
-                          {row.action === 'remove' ? (
+                          {row.action === 'sold' ? (
                             <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                               <span className="block truncate text-xs text-foreground text-right">
                                 {row.existingHolding ? formatPLN(row.existingHolding.purchasePrice) : '—'}
@@ -526,14 +516,14 @@ export function EMaklerImportFlow({
                           {/* Current price */}
                           <td className={`h-11 px-3 align-middle border-r border-borderLight ${dim}`}>
                             <span className="block truncate text-xs text-foreground text-right">
-                              {row.action === 'remove'
+                              {row.action === 'sold'
                                 ? row.existingHolding ? formatPLN(row.existingHolding.currentPrice) : '—'
                                 : ordersOnlyMode ? '—' : h ? formatPLN(h.currentPrice) : '—'}
                             </span>
                           </td>
 
                           {/* Category */}
-                          {row.action === 'remove' ? (
+                          {row.action === 'sold' ? (
                             <td className={`h-11 px-3 align-middle ${dim}`}>
                               <span className="block truncate text-xs text-foreground capitalize">{row.existingHolding?.category ?? '—'}</span>
                             </td>
@@ -559,6 +549,14 @@ export function EMaklerImportFlow({
             </div>
           )}
 
+          <NotInFile
+            holdings={missingHoldings}
+            choices={soldChoices}
+            onChange={setSoldChoices}
+            errors={soldErrors}
+            today={today}
+          />
+
           {/* Missing cost basis note */}
           {counts.missingCostBasis > 0 && (
             <p className="text-sm text-accent tracking-[-0.35px]">
@@ -574,7 +572,11 @@ export function EMaklerImportFlow({
             <Button variant="secondary" onClick={handleReimport}>Reimport All</Button>
           )}
           <Button variant="secondary" onClick={onBack} className="w-20">Back</Button>
-          <Button variant="primary" onClick={handleConfirm} disabled={previewRows.length === 0}>
+          <Button
+            variant="primary"
+            onClick={handleConfirm}
+            disabled={(previewRows.length === 0 && closeCount === 0) || soldInvalid}
+          >
             Confirm Import
           </Button>
         </div>
@@ -625,7 +627,7 @@ function StatusBadge({ action }: { action: RowAction }) {
       return <Badge variant="blue">Update</Badge>
     case 'add':
       return <Badge variant="positive">New</Badge>
-    case 'remove':
-      return <Badge variant="negative">Remove</Badge>
+    case 'sold':
+      return <Badge variant="neutral">Sold</Badge>
   }
 }

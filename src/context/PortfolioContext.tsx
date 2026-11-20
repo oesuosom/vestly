@@ -27,6 +27,7 @@ import {
   moveToClosed,
   moveToOpen,
   planClose,
+  planCloseFromSales,
   removeCloseTransactions,
   type CloseInput,
   type ClosePlan,
@@ -37,10 +38,19 @@ import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 // Import action types (used by importHoldings)
 // ─────────────────────────────────────────
 
+// No action deletes a holding: an import closes holdings instead (see ImportClose).
 export type ImportAction =
   | { type: 'update'; existingId: string; quantity: number; currentPrice: number; purchasePrice?: number }
   | { type: 'add'; holding: Omit<Holding, 'id' | 'accountId' | 'createdAt' | 'updatedAt'> }
-  | { type: 'remove'; holdingId: string }
+
+/**
+ * A holding an import closes (see `closeImportedHoldings`): marked as sold in
+ * the preview, with the date and amount entered there, or sold by sales the
+ * same upload brought.
+ */
+export type ImportClose =
+  | { holdingId: string; input: CloseInput }
+  | { holdingId: string; sales: Transaction[] }
 
 // ─────────────────────────────────────────
 // Context types
@@ -87,7 +97,14 @@ type PortfolioActions = {
    */
   reopenPosition: (holdingId: string) => boolean
   importSnapshot: (snapshot: Snapshot) => void
-  importHoldings: (accountId: string, actions: ImportAction[]) => { updated: number; added: number; removed: number }
+  importHoldings: (accountId: string, actions: ImportAction[]) => { updated: number; added: number }
+  /**
+   * Close the holdings an import marked as sold or found sold in the upload,
+   * against `transactions` — the log as the import left it (pass what
+   * `importTransactions` returned when it ran in the same handler). Holdings
+   * that can't be closed are skipped. Returns the ids closed.
+   */
+  closeImportedHoldings: (accountId: string, closes: ImportClose[], transactions: Transaction[]) => string[]
   undoLastImport: () => void
   clearImportUndo: () => void
   /** Delete a single transaction by id. */
@@ -575,7 +592,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   )
 
   const importHoldings = useCallback(
-    (accountId: string, actions: ImportAction[]): { updated: number; added: number; removed: number } => {
+    (accountId: string, actions: ImportAction[]): { updated: number; added: number } => {
       importInProgressRef.current = true
 
       const now = new Date().toISOString()
@@ -591,20 +608,16 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const resultRef = {
         undoUpdates: [] as ImportUndoData['updates'],
         undoAdds: [] as string[],
-        undoRemoves: [] as Holding[],
         updated: 0,
         added: 0,
-        removed: 0,
       }
 
       flushSync(() => setAccounts((prev) => {
         // Reset — makes updater safe for StrictMode double-invocation
         const undoUpdates: ImportUndoData['updates'] = []
         const undoAdds: string[] = []
-        const undoRemoves: Holding[] = []
         let updated = 0
         let added = 0
-        let removed = 0
 
         const next = [...prev]
 
@@ -615,18 +628,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         const account = { ...next[accountIndex] }
         let holdings = [...account.holdings]
 
-        // 1. Process removes first
-        for (const action of actions) {
-          if (action.type !== 'remove') continue
-          const existing = holdings.find((h) => h.id === action.holdingId)
-          if (existing) {
-            undoRemoves.push({ ...existing })
-            holdings = holdings.filter((h) => h.id !== action.holdingId)
-            removed++
-          }
-        }
-
-        // 2. Then updates
+        // 1. Updates
         for (const action of actions) {
           if (action.type !== 'update') continue
           const existing = holdings.find((h) => h.id === action.existingId)
@@ -651,7 +653,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // 3. Then adds (using pre-generated stable IDs)
+        // 2. Then adds (using pre-generated stable IDs)
         let addIndex = 0
         for (const action of actions) {
           if (action.type !== 'add') continue
@@ -674,10 +676,8 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         // Write results to ref (last invocation wins, which is what React uses)
         resultRef.undoUpdates = undoUpdates
         resultRef.undoAdds = undoAdds
-        resultRef.undoRemoves = undoRemoves
         resultRef.updated = updated
         resultRef.added = added
-        resultRef.removed = removed
 
         refreshSnapshot(next)
         return next
@@ -685,7 +685,6 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
 
       // Sync bond buy transactions for any bond-related import actions
       {
-        const removedExternalIds = new Set<string>()
         let nextTxs = transactionsRef.current
         let addIdx = 0
 
@@ -714,13 +713,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
               }
               nextTxs = upsertBondBuyTransaction(nextTxs, updatedHolding)
             }
-          } else if (action.type === 'remove') {
-            removedExternalIds.add(`bond-buy-${action.holdingId}`)
           }
-        }
-
-        if (removedExternalIds.size > 0) {
-          nextTxs = nextTxs.filter(t => !removedExternalIds.has(t.externalId ?? ''))
         }
 
         if (nextTxs !== transactionsRef.current) {
@@ -732,13 +725,67 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       setLastImportUndo({
         updates: resultRef.undoUpdates,
         adds: resultRef.undoAdds,
-        removes: resultRef.undoRemoves,
         accountId,
       })
 
       importInProgressRef.current = false
 
-      return { updated: resultRef.updated, added: resultRef.added, removed: resultRef.removed }
+      return { updated: resultRef.updated, added: resultRef.added }
+    },
+    [refreshSnapshot]
+  )
+
+  const closeImportedHoldings = useCallback(
+    (accountId: string, closes: ImportClose[], transactions: Transaction[]): string[] => {
+      const account = accountsRef.current.find((a) => a.id === accountId)
+      if (!account || closes.length === 0) return []
+      const now = new Date().toISOString()
+
+      // Planned outside any updater, one after another against the log so far,
+      // so StrictMode's double-run can't mint two sets of ids.
+      let log = transactions
+      const added: Transaction[] = []
+      const closed: { id: string; date: string }[] = []
+      for (const close of closes) {
+        const holding = account.holdings.find((h) => h.id === close.holdingId)
+        if (!holding || holding.isSynthetic || findSharedPositionHolding(holding, account)) continue
+        let rows: Transaction[]
+        let date: string
+        if ('input' in close) {
+          const plan = planClose(holding, account, log, close.input, now)
+          rows = plan.transactions
+          date = close.input.date
+        } else {
+          const plan = planCloseFromSales(holding, account, log, close.sales, now)
+          if (!plan) continue
+          rows = plan.filledInBuy ? [plan.filledInBuy] : []
+          date = plan.date
+        }
+        log = [...log, ...rows]
+        added.push(...rows)
+        closed.push({ id: holding.id, date })
+      }
+      if (closed.length === 0) return []
+
+      // A partial undo would restore the import's updates but not reopen these.
+      setLastImportUndo(null)
+      // flushSync: see addHolding — Cash below is recalculated from exactly
+      // the log that was committed, including what the import queued before.
+      const nextTransactionsRef = { current: null as Transaction[] | null }
+      flushSync(() => setTransactionsState((prev) => {
+        const next = added.length > 0 ? [...prev, ...added] : prev
+        nextTransactionsRef.current = next
+        return next
+      }))
+      const nextTransactions = nextTransactionsRef.current ?? log
+
+      setAccounts((prev) => {
+        const moved = closed.reduce((acc, c) => moveToClosed(acc, c.id, c.date, now), prev)
+        const next = upsertSyntheticCashHolding(moved, nextTransactions, accountId)
+        refreshSnapshot(next)
+        return next
+      })
+      return closed.map((c) => c.id)
     },
     [refreshSnapshot]
   )
@@ -774,10 +821,6 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const addIds = new Set(undoData.adds)
       holdings = holdings.filter((h) => !addIds.has(h.id))
 
-      // 3. Undo removes — re-add them
-      for (const removed of undoData.removes) {
-        holdings = [...holdings, { ...removed, updatedAt: now }]
-      }
 
       account.holdings = holdings
       account.lastUpdated = now
@@ -904,6 +947,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         reopenPosition,
         importSnapshot,
         importHoldings,
+        closeImportedHoldings,
         undoLastImport,
         clearImportUndo,
         deleteTransaction,

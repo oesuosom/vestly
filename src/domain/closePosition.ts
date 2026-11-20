@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { Account, Holding, Transaction } from '@/types'
 import { affectsCash, positionKey, resolveTransactionTicker } from './calculations'
-import { walkPosition, walkSales, type SaleResult } from './position'
+import { walkClosingSales, walkPosition, walkSales, type SaleResult } from './position'
 import { pairTradeFees } from './tradeFees'
 
 /**
@@ -210,16 +210,32 @@ export function planClose(
   return { transactions: added, sale, filledInBuy, addsToCash, result }
 }
 
-/** The sale Close position recorded for a closed holding, if it is still in the log. */
+/**
+ * The sale that closed a closed holding, if it is still in the log: the one
+ * Close position recorded, or else — for a holding an import closed (see
+ * {@link planCloseFromSales}) — the position's last sale on or before the
+ * close date.
+ */
 export function findCloseSale(holding: Holding, transactions: Transaction[]): Transaction | undefined {
   const externalId = saleExternalId(holding.id)
-  return transactions.find((t) => t.externalId === externalId && t.accountId === holding.accountId)
+  const recorded = transactions.find((t) => t.externalId === externalId && t.accountId === holding.accountId)
+  if (recorded || !holding.closedAt) return recorded
+  const closedAt = holding.closedAt
+  const rows = positionRows(transactions, holding.accountId, holdingPositionKey(holding))
+    .filter((t) => t.date.slice(0, 10) <= closedAt)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const last = rows.filter((t) => t.type === 'sell').at(-1)
+  // A buy after it means that sale closed an earlier round, not this holding.
+  if (!last || rows.some((t) => (t.type === 'buy' || t.type === 'receive') && t.date.slice(0, 10) > last.date.slice(0, 10))) return undefined
+  return last
 }
 
 /**
  * What a closed holding's sale realized: its own entry in the position walk,
  * so it adds up with every other sale to the realized total on Overview.
- * `null` when the sale is no longer in the log (deleted in Activity).
+ * When an import closed the holding over several sales, their results are
+ * added together (see `walkClosingSales`). `null` when the sale is no longer
+ * in the log (deleted in Activity).
  */
 export function closedPositionResult(
   holding: Holding,
@@ -229,10 +245,88 @@ export function closedPositionResult(
   if (!sale) return null
   const key = positionKey(sale)
   if (!key) return null
-  const result = walkSales(positionRows(transactions, sale.accountId, key), pairTradeFees(transactions)).get(sale.id)
+  const rows = positionRows(transactions, sale.accountId, key)
+  const fees = pairTradeFees(transactions)
+  // An import's close counts every sale since the position opened; a sale
+  // that left units held didn't close it.
+  const result = sale.externalId === saleExternalId(holding.id)
+    ? walkSales(rows, fees).get(sale.id)
+    : walkClosingSales(rows, fees).get(sale.id)
   if (!result) return null
   const profitPercent = result.costPLN > 0 ? (result.profitPLN / result.costPLN) * 100 : 0
   return { sale, result, profitPercent }
+}
+
+/** How an import closes a holding whose sale arrived in the same upload. */
+export type SaleClosePlan = {
+  /** Day of the last sale, `yyyy-MM-dd`: the holding's close date. */
+  date: string
+  /** The upload's sales of the holding, oldest first. */
+  sales: Transaction[]
+  /**
+   * A buy for units the log never recorded coming in, as in {@link ClosePlan}:
+   * without it the walk can't explain the units sold.
+   */
+  filledInBuy: Transaction | null
+}
+
+/**
+ * Close a holding with sales an import brought (already in `transactions`),
+ * instead of recording a sale of its own. Returns null, closing nothing, unless
+ * those sales account for the whole holding: before the first of them the
+ * position held at least the holding's quantity (with any filled-in buy), and
+ * after them it holds nothing.
+ *
+ * `sales` are the upload's sale rows; those outside the holding's position are
+ * ignored.
+ */
+export function planCloseFromSales(
+  holding: Holding,
+  account: Account,
+  transactions: Transaction[],
+  sales: Transaction[],
+  now: string = new Date().toISOString(),
+): SaleClosePlan | null {
+  const key = holdingPositionKey(holding)
+  const own = sales
+    .filter((t) => t.type === 'sell' && t.accountId === account.id && positionKey(t) === key)
+    .sort((a, b) => a.date.localeCompare(b.date))
+  if (own.length === 0) return null
+
+  const rows = positionRows(transactions, account.id, key)
+  const tradeFees = pairTradeFees(transactions)
+  const firstDay = own[0].date.slice(0, 10)
+  const missing = walkPosition(rows, tradeFees).unexplainedQuantity
+  if (missing > holding.quantity + QUANTITY_EPSILON) return null
+
+  const filledInBuy: Transaction | null =
+    missing > QUANTITY_EPSILON
+      ? {
+          id: uuidv4(),
+          accountId: account.id,
+          type: 'buy',
+          date: holding.purchaseDate < firstDay ? holding.purchaseDate : firstDay,
+          amountPLN: -(holding.purchasePrice * missing),
+          instrument: holding.name,
+          ticker: holding.ticker,
+          exchange: holding.exchange,
+          quantity: missing,
+          pricePerUnitPLN: holding.purchasePrice,
+          relatedHoldingId: holding.id,
+          externalId: buyExternalId(holding.id),
+          source: closeSource(holding),
+          affectsCash: false,
+          createdAt: now,
+        }
+      : null
+
+  const withBuy = filledInBuy ? [...rows, filledInBuy] : rows
+  const isInflow = (t: Transaction) => t.type === 'buy' || t.type === 'receive'
+  const beforeSales = withBuy.filter((t) => t.date.slice(0, 10) < firstDay || (t.date.slice(0, 10) === firstDay && isInflow(t)))
+  if (walkPosition(beforeSales, tradeFees).quantity < holding.quantity - QUANTITY_EPSILON) return null
+  if (walkPosition(withBuy, tradeFees).quantity > QUANTITY_EPSILON) return null
+
+  return { date: own.at(-1)!.date.slice(0, 10), sales: own, filledInBuy }
 }
 
 /** The log after reopening: exactly the sale, and any buy, that closing added. */

@@ -138,7 +138,13 @@ XTB reports the same purchase through two documents that **share no identifier**
 
 ## eMakler
 
-[`eMaklerParser.ts`](../src/importers/eMaklerParser.ts) reads CP1250-encoded CSV; [`eMaklerImport.ts`](../src/importers/eMaklerImport.ts) diffs the parsed portfolio against existing holdings and converts order history into transactions, using NBP rates for historical PLN conversion. Order keys persist in `ft_emakler_order_keys` so re-imports dedup across files.
+[`eMaklerParser.ts`](../src/importers/eMaklerParser.ts) reads CP1250-encoded CSV; [`eMaklerImport.ts`](../src/importers/eMaklerImport.ts) diffs the parsed portfolio against existing holdings and converts order history into transactions, using NBP rates for historical PLN conversion. Order keys persist in `ft_emakler_order_keys` so re-imports dedup across files. A row for an instrument the account holds carries that holding's ticker, so it lands in the holding's position.
+
+### Holdings missing from a file
+
+No import deletes a holding ([`domain/missingHoldings.ts`](../src/domain/missingHoldings.ts)). Only a file that lists everything an account holds — the eMakler portfolio, PKO IKE and other holdings CSVs — can say a holding is gone, and even then the preview lists it under "Not in this file" with **Keep** selected. **Mark as sold** closes it through Close position (`planClose`) with an amount prefilled from quantity × current price and a date prefilled from the file's statement date. Neither format carries one today, so the date is today; with a statement date, holdings bought after it would not be listed. When the file shares no holding with the account, the preview warns that it may be the wrong account and lists none. Files that list only some instruments (eMakler order history, XTB and Revolut trade files) never list missing holdings.
+
+When an eMakler upload has both files and the order history sells a holding the portfolio lacks, that sale closes it (`planCloseFromSales`): closed on the last sale's day, with no sale of its own added, and a buy filled in only for units the log never recorded. It closes only when the sales account for the whole holding; otherwise the holding is listed as missing like any other.
 
 ---
 

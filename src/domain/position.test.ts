@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Transaction } from '@/types'
-import { walkPosition, walkSales } from './position'
+import { walkClosingSales, walkPosition, walkSales } from './position'
 import type { TradeFees } from './tradeFees'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -504,5 +504,24 @@ describe('walkSales', () => {
     const sell = { ...tx('sell', '2025-02-10', 1, 140), feePLN: 10 } // sold for 150, 10 fee
     expect(walkSales([buy, sell]).get(sell.id)!.profitPLN).toBe(40)
     expect(walkPosition([buy, sell]).realizedProfitPLN).toBe(40)
+  })
+})
+
+describe('walkClosingSales', () => {
+  it('reports the sale that empties the position with every sale since it opened added up', () => {
+    const buy = tx('buy', '2025-01-10', 10, -1000)          // 100 each
+    const part = tx('sell', '2025-02-10', 4, 600)           // +200
+    const rest = tx('sell', '2025-03-10', 6, 540)           // −60
+    const closes = walkClosingSales([rest, buy, part])
+    expect([...closes.keys()]).toEqual([rest.id])
+    expect(closes.get(rest.id)).toEqual({ proceedsPLN: 1140, costPLN: 1000, profitPLN: 140 })
+  })
+
+  it('starts a new round after a sell-out, and skips a sale that leaves units held', () => {
+    const first = [tx('buy', '2025-01-10', 2, -200), tx('sell', '2025-01-20', 2, 300)]
+    const second = [tx('buy', '2025-02-10', 5, -500), tx('sell', '2025-02-20', 1, 150)]
+    const closes = walkClosingSales([...first, ...second])
+    expect([...closes.keys()]).toEqual([first[1].id])
+    expect(closes.get(first[1].id)!.profitPLN).toBe(100)
   })
 })

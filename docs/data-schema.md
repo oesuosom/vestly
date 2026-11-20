@@ -147,6 +147,13 @@ sale.affectsCash = account is not crypto ∧ no buy was filled in
 closedRow.profit = the sale's own entry in the position walk (walkSales) — the same number
                    it adds to realizedPnL; closedRow.% = profit / cost of the units it removed
 
+// Closed by an import's sales (planCloseFromSales) — no sale of its own
+filledInBuy    = units the walk can't explain (unexplainedQuantity), at purchasePrice
+closes only if  units held before the first upload sale ≥ holding.quantity
+                ∧ nothing is held after the last one
+closedAt       = day of the last upload sale
+closedRow.profit = every sale since the position last opened, summed (walkClosingSales)
+
 // Chart, closed holdings
 value(h, d) counts only while d < h.closedAt; without cached prices it is interpolated
 from purchasePrice at purchaseDate to currentPrice at closedAt (crypto included).
@@ -178,7 +185,7 @@ Details worth knowing that aren't obvious from reading the type alone:
 - **`Holding.closedAt`** — optional `yyyy-MM-dd`, set on every holding in `closedHoldings` and removed by Reopen.
 - **`Transaction.feePLN`** — optional, positive. The fee on a sale recorded by Close position, already out of `amountPLN` (subtracted by the app for stocks, ETFs and crypto; for a bond, taken by PKO before paying out); Activity shows it, and nothing subtracts it again (`walkPosition` reads only `pairTradeFees`).
 - **`Transaction.affectsCash`** — optional. Set on the rows Close position creates, saying whether they move Cash (see the calculation reference). Absent on every other row, where the source decides.
-- **Close position rows** — `source: 'manual'` (`'bond_holding'` for a bond lot, so the lot stays its own position), `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids.
+- **Close position rows** — `source: 'manual'` (`'bond_holding'` for a bond lot, so the lot stays its own position), `relatedHoldingId` set, `externalId` `close-sell-<holdingId>` for the sale and `close-buy-<holdingId>` for a filled-in buy. Reopen removes exactly the rows with those ids. A holding an import closed with its own sales has no `close-sell` row: its Closed positions row reads the position's last sale on or before `closedAt`, and Reopen leaves those imported sales in place.
 - **`Transaction.externalId`** — the deduplication key. On import, any row whose `externalId` already exists is skipped. XTB supplies its own ID column; Revolut and eMakler rows get one generated.
 - **`Transaction.source`** — `'xtb_import' | 'xtb_confirmation' | 'manual' | 'revolut_crypto' | 'emakler_import' | 'bond_holding'`. `bond_holding` marks the rows the app makes for one bond lot: its buy, and its sale once closed. XTB has two distinct sources because the Cash Operations CSV and the daily-confirmation PDF overlap and must be deduped against each other.
 - **`send` / `receive`** — crypto transfers. `send` carries `amountPLN: 0` (no fiat proceeds); `receive` carries the cost basis in PLN, or 0 when unknown.
