@@ -23,16 +23,24 @@ type VariantConfig = {
   iconClass?: string
   shadow: string
   gradient?: string
+  /** Colour and hover opacity of the overlay that lightens or darkens the button. */
   overlayClass?: string
+  /** Extra dimming on the label and icon when disabled, on top of the button's own opacity-50. */
+  disabledContentClass?: string
 }
 
 const variantConfig: Record<ButtonVariant, VariantConfig> = {
   primary: {
     containerClass: 'bg-foreground gradient-border',
-    textClass: 'text-white',
+    // background is the counterpart of foreground, so the label flips with the theme.
+    textClass: 'text-background',
     shadow: '0 0 0 1px var(--color-foreground), 0 8px 16px -4px rgba(10,10,10,0.05)',
-    gradient: PRIMARY_GRADIENT,
-    overlayClass: 'group-hover:opacity-20',
+    // Themed in index.css: a white edge on the dark light-theme button, a dark one on the near-white dark-theme button.
+    gradient: 'var(--button-primary-sheen)',
+    // Lighten on hover in light mode, darken in dark mode (white over near-white would not show).
+    overlayClass: 'bg-white group-hover:opacity-20 dark:bg-black dark:group-hover:opacity-10',
+    // The button's opacity-50 is enough; dimming the label again made it unreadable.
+    disabledContentClass: '',
   },
   secondary: {
     containerClass: 'bg-background gradient-border hover:bg-muted',
@@ -51,7 +59,7 @@ const variantConfig: Record<ButtonVariant, VariantConfig> = {
     textClass: 'text-negative',
     shadow: '0 0 0 1px var(--color-negative), 0 8px 16px -4px rgba(10,10,10,0.05)',
     gradient: PRIMARY_GRADIENT,
-    overlayClass: 'group-hover:opacity-30',
+    overlayClass: 'bg-white group-hover:opacity-30',
   },
 }
 
@@ -97,6 +105,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   const h = heightClass[safeSize]
   const padding = paddingClass[safeSize][iconPosition] ?? paddingClass.md.none
   const gap = gapClass[iconPosition] ?? ''
+  const disabledContent = config.disabledContentClass ?? 'group-disabled:opacity-50'
 
   return (
     <button
@@ -110,23 +119,23 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       {...rest}
     >
       {config.overlayClass && (
-        <div className={`absolute inset-0 bg-white opacity-0 ${config.overlayClass} transition-opacity pointer-events-none`} />
+        <div className={`absolute inset-0 opacity-0 ${config.overlayClass} transition-opacity pointer-events-none`} />
       )}
 
       {(iconPosition === 'left' || iconPosition === 'only') && Icon && (
-        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 group-disabled:opacity-50`} />
+        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
       )}
 
       {iconPosition !== 'only' && (
         <span
-          className={`relative z-10 ${config.textClass} text-[14px] font-semibold tracking-[-0.35px] whitespace-nowrap group-disabled:opacity-50 [font-feature-settings:'lnum'_1,'tnum'_1]`}
+          className={`relative z-10 ${config.textClass} text-[14px] font-semibold tracking-[-0.35px] whitespace-nowrap ${disabledContent} [font-feature-settings:'lnum'_1,'tnum'_1]`}
         >
           {children}
         </span>
       )}
 
       {iconPosition === 'right' && Icon && (
-        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 group-disabled:opacity-50`} />
+        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
       )}
     </button>
   )

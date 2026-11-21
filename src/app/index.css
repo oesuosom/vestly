@@ -45,6 +45,10 @@
   --color-orange-foreground: #FFEDD4;
   --color-rose:              #E11D48;
   --color-rose-foreground:   #FFE4E6;
+
+  /* Components */
+  /* Glossy edge on the primary button. White on the dark light-theme button. */
+  --button-primary-sheen: linear-gradient(to bottom, rgba(255,255,255,.5) 0%, rgba(255,255,255,.1) 35%, rgba(255,255,255,.1) 50%, rgba(255,255,255,.25) 100%);
 }
 
 .dark {
@@ -86,6 +90,11 @@
   --color-orange-foreground: #441306;
   --color-rose:              #F43F5E;
   --color-rose-foreground:   #4C0519;
+
+  /* Components */
+  /* Glossy edge on the near-white dark-theme button, where a white edge would vanish.
+     Mirrors the light-mode edge: same 4-stop profile in the dark tint, half strength, flipped top/bottom. */
+  --button-primary-sheen: linear-gradient(to bottom, rgba(9,9,11,.125) 0%, rgba(9,9,11,.05) 50%, rgba(9,9,11,.05) 65%, rgba(9,9,11,.25) 100%);
 }
 
 body {

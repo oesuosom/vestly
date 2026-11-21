@@ -286,6 +286,13 @@ export function DevShowcase() {
           <Button variant="ghost" disabled>Ghost</Button>
           <Button variant="destructive" disabled>Danger</Button>
         </Row>
+        <Row label="Primary — sizes and icons">
+          <Button variant="primary" size="md">Medium</Button>
+          <Button variant="primary" size="lg">Large</Button>
+          <Button variant="primary" icon={Plus} iconPosition="left">Add</Button>
+          <Button variant="primary" icon={Plus} iconPosition="only" aria-label="Add" />
+          <Button variant="primary" icon={Plus} iconPosition="left" disabled>Add</Button>
+        </Row>
       </Section>
 
       {/* ------------------------------------------------------------------ */}
