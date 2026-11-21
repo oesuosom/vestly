@@ -45,6 +45,10 @@
   --color-orange-foreground: #FFEDD4;
   --color-rose:              #E11D48;
   --color-rose-foreground:   #FFE4E6;
+
+  /* Components */
+  /* Glossy edge on the primary button. White on the dark light-theme button. */
+  --button-primary-sheen: linear-gradient(to bottom, rgba(255,255,255,.5) 0%, rgba(255,255,255,.1) 35%, rgba(255,255,255,.1) 50%, rgba(255,255,255,.25) 100%);
 }
 
 .dark {
@@ -86,6 +90,10 @@
   --color-orange-foreground: #441306;
   --color-rose:              #F43F5E;
   --color-rose-foreground:   #4C0519;
+
+  /* Components */
+  /* The dark-theme primary button is near-white, so a white edge would vanish. */
+  --button-primary-sheen: linear-gradient(to bottom, rgba(9,9,11,0) 0%, rgba(9,9,11,.04) 50%, rgba(9,9,11,.16) 100%);
 }
 
 body {

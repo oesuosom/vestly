@@ -5,6 +5,7 @@ import * as CustomIcons from '@/generated/icons'
 import { LOGO_REGISTRY } from '@/generated/logos'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { PrimaryButtonComparison } from '@/dev/PrimaryButtonComparison'
 import { Card } from '@/components/ui/Card'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { DATE_RANGES } from '@/types'
@@ -269,6 +270,8 @@ export function DevShowcase() {
 
       {/* ------------------------------------------------------------------ */}
       <Section title="Button">
+        {/* TEMPORARY (#39 design review): remove before the PR. */}
+        <PrimaryButtonComparison />
         <Row label="Variants — md">
           <Button variant="primary">Primary</Button>
           <Button variant="secondary">Secondary</Button>
