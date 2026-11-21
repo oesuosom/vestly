@@ -92,8 +92,9 @@
   --color-rose-foreground:   #4C0519;
 
   /* Components */
-  /* The dark-theme primary button is near-white, so a white edge would vanish. */
-  --button-primary-sheen: linear-gradient(to bottom, rgba(9,9,11,0) 0%, rgba(9,9,11,.04) 50%, rgba(9,9,11,.16) 100%);
+  /* Glossy edge on the near-white dark-theme button, where a white edge would vanish.
+     Mirrors the light-mode edge: same 4-stop profile in the dark tint, half strength, flipped top/bottom. */
+  --button-primary-sheen: linear-gradient(to bottom, rgba(9,9,11,.125) 0%, rgba(9,9,11,.05) 50%, rgba(9,9,11,.05) 65%, rgba(9,9,11,.25) 100%);
 }
 
 body {
