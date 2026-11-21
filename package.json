@@ -1,7 +1,7 @@
 {
   "name": "vestly",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Client-only personal portfolio tracker for Polish investors — stocks, ETFs, treasury bonds, crypto and IKE/IKZE in one dashboard. All data stays in your browser.",
   "author": "Robert Marciniak",
   "license": "MIT",
