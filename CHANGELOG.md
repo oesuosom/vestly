@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Screen readers name the sidebar links and the Settings button** — the Overview, Portfolio
+  and Activity links and the Settings button held only an icon, so they were announced as an
+  unnamed "link" or "button". Each now carries its name and its keyboard shortcut, and the link
+  for the page you're on is announced as the current page. The hover label looks the same.
+
 ## [0.0.2] — 2026-11-21
 
 Recording sales, and safer data. You can mark a holding as sold, XTB imports now bring in sales
