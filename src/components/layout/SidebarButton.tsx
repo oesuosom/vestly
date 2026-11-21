@@ -55,6 +55,9 @@ export function SidebarButton({ to, onClick, icon: Icon, activeIcon: ActiveIcon,
         {to ? (
           <Link
             to={to}
+            aria-label={label}
+            aria-keyshortcuts={shortcutKey}
+            aria-current={isActive ? 'page' : undefined}
             className={`
               flex items-center justify-center size-9 rounded-full transition-colors duration-150
               ${isActive ? 'text-foreground' : 'text-foregroundMuted hover:text-foreground'}
@@ -65,6 +68,8 @@ export function SidebarButton({ to, onClick, icon: Icon, activeIcon: ActiveIcon,
         ) : (
           <button
             onClick={onClick}
+            aria-label={label}
+            aria-keyshortcuts={shortcutKey}
             className="flex items-center justify-center size-9 rounded-full transition-colors duration-150 text-foregroundMuted hover:text-foreground"
           >
             <DisplayIcon size={20} />
@@ -72,8 +77,10 @@ export function SidebarButton({ to, onClick, icon: Icon, activeIcon: ActiveIcon,
         )}
       </motion.div>
 
-      {/* Hover label + shortcut key, revealed by the parent's `group` hover. */}
-      <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-[44px] top-1/2 -translate-y-1/2 z-popover flex items-center gap-1">
+      {/* Hover label + shortcut key, revealed by the parent's `group` hover.
+          Hidden from assistive tech: the control carries the name (aria-label)
+          and the shortcut (aria-keyshortcuts) itself. */}
+      <div aria-hidden="true" className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 absolute left-[44px] top-1/2 -translate-y-1/2 z-popover flex items-center gap-1">
         <span className="text-sm text-foreground whitespace-nowrap">{label}</span>
         <div className="flex items-center justify-center size-6 bg-surface border border-borderLight rounded-md shadow-sm">
           <span className="text-xs font-semibold text-foreground">{shortcutKey}</span>
