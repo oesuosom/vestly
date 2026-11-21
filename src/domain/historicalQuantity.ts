@@ -1,6 +1,11 @@
 import type { Holding, Transaction } from '@/types'
 import { staticLookupInstrument } from './instrumentLookup'
 
+/** Lowercase, trim and collapse runs of whitespace, so "  Apple   Inc " equals "apple inc". */
+function normalizeName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 /**
  * Compute the quantity of a holding actually held at a given date,
  * reconstructed from imported transaction history.
@@ -10,7 +15,9 @@ import { staticLookupInstrument } from './instrumentLookup'
  *
  * Matching rules (in priority order):
  *   1. ticker match (case-insensitive) within the same account
- *   2. instrument name match within the same account
+ *   2. instrument name match within the same account: the whole name, ignoring
+ *      case and extra spaces. Not a substring, so "Apple" does not pick up
+ *      "Apple Hospitality REIT".
  */
 export function quantityAtDate(
   holding: Holding,
@@ -45,9 +52,7 @@ export function quantityAtDate(
 
     // Fallback: match by instrument name
     if (t.instrument && holding.name) {
-      const inst = t.instrument.toLowerCase()
-      const name = holding.name.toLowerCase()
-      return inst === name || inst.includes(name) || name.includes(inst)
+      return normalizeName(t.instrument) === normalizeName(holding.name)
     }
 
     return false

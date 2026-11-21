@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The history chart no longer counts another instrument's shares when names overlap** — for a
+  holding with no ticker, the chart matched transactions by part of the name, so a holding
+  "Apple" also counted buys of "Apple Hospitality REIT", and the reverse. Names now have to match
+  in full; case and extra spaces still don't matter.
+
 - **Screen readers name the sidebar links and the Settings button** — the Overview, Portfolio
   and Activity links and the Settings button held only an icon, so they were announced as an
   unnamed "link" or "button". Each now carries its name and its keyboard shortcut, and the link
