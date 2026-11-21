@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Primary buttons are readable in the dark theme** — their label was always white, so on the
+  near-white dark-theme button it couldn't be read (Save, Add Account, Continue and the other main
+  actions). The label now follows the theme. In dark mode the hover darkens the button and the
+  glossy edge is a dark tint, so both still show. A disabled button's label is faded once instead
+  of twice, so it stays readable in both themes.
+
 - **The history chart no longer counts another instrument's shares when names overlap** — for a
   holding with no ticker, the chart matched transactions by part of the name, so a holding
   "Apple" also counted buys of "Apple Hospitality REIT", and the reverse. Names now have to match

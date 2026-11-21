@@ -29,10 +29,6 @@ type VariantConfig = {
   disabledContentClass?: string
 }
 
-// TEMP (#39 design review): lets /dev show the hover state without a pointer.
-// Remove together with the comparison block in DevShowcase before the PR.
-const FORCE_HOVER = 'group-data-[force-state=hover]:opacity-20 dark:group-data-[force-state=hover]:opacity-10'
-
 const variantConfig: Record<ButtonVariant, VariantConfig> = {
   primary: {
     containerClass: 'bg-foreground gradient-border',
@@ -42,7 +38,7 @@ const variantConfig: Record<ButtonVariant, VariantConfig> = {
     // Themed in index.css: a white edge on the dark light-theme button, a dark one on the near-white dark-theme button.
     gradient: 'var(--button-primary-sheen)',
     // Lighten on hover in light mode, darken in dark mode (white over near-white would not show).
-    overlayClass: `bg-white group-hover:opacity-20 dark:bg-black dark:group-hover:opacity-10 ${FORCE_HOVER}`,
+    overlayClass: 'bg-white group-hover:opacity-20 dark:bg-black dark:group-hover:opacity-10',
     // The button's opacity-50 is enough; dimming the label again made it unreadable.
     disabledContentClass: '',
   },
