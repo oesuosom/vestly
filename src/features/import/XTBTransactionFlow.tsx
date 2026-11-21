@@ -13,6 +13,7 @@ import type {
   UnresolvedRow,
 } from '@/importers/xtbPostProcessing'
 import { usePortfolio } from '@/context/PortfolioContext'
+import { formatDate, formatQuantity } from '@/utils/formatters'
 import { useSettings } from '@/context/SettingsContext'
 import { ChevronDownSmall, CircleCheck, CircleCross, Skip } from '@/generated/icons'
 import { joinDoneParts } from './doneSummary'
@@ -20,6 +21,7 @@ import { useXTBReconcile, type ReconcileStage } from './useXTBReconcile'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import type { DevSeed } from './devSeed'
 import type { HoldingSyncRow } from '@/domain/holdingSync'
+import type { Transaction } from '@/types'
 
 // ─────────────────────────────────────────
 // Types
@@ -59,6 +61,13 @@ export type XTBTransactionFlowDevState = {
 // ─────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────
+
+/** "ACME: 0,5 + 2 bought on 5 Jan 2026" — a trade, or the fills of one order. */
+function tradeLabel(rows: Transaction[]): string {
+  const first = rows[0]
+  const quantities = rows.map((t) => formatQuantity(t.quantity ?? 0)).join(' + ')
+  return `${first.ticker ?? first.instrument}: ${quantities} ${first.type === 'buy' ? 'bought' : 'sold'} on ${formatDate(first.date.slice(0, 10))}`
+}
 
 function formatMonthYear(iso: string): string {
   return new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
@@ -232,7 +241,7 @@ function PreviewStep({
   onBack: () => void
 }) {
   const [warningsOpen, setWarningsOpen] = useState(false)
-  const { transactions, skipped, crossFormatSkipped, warnings } = parseResult
+  const { transactions, skipped, crossFormatSkipped, crossFormat, internalTransfersSkipped, closedByHand, warnings } = parseResult
 
   const dateRange = useMemo(() => {
     if (transactions.length === 0) return null
@@ -260,11 +269,44 @@ function PreviewStep({
             </div>
           )}
           {crossFormatSkipped > 0 && (
+            <div className="flex items-start gap-2">
+              <Skip size={16} className="text-accent shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-sm text-foregroundMuted tracking-[-0.35px]">
+                  {crossFormatSkipped} skipped (already imported from a daily statement)
+                </span>
+                {crossFormat.map((d) => (
+                  <span key={d.candidates[0].id} className="text-xs text-accent">
+                    {tradeLabel(d.candidates)}
+                    {d.candidateFees.length > 0 && ` + ${d.candidateFees.length === 1 ? 'its commission' : `${d.candidateFees.length} fees`}`}
+                    , matches the statement's {formatQuantity(d.existing.reduce((q, t) => q + (t.quantity ?? 0), 0))} on {formatDate(d.existing[0].date.slice(0, 10))}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {internalTransfersSkipped > 0 && (
             <div className="flex items-center gap-2">
               <Skip size={16} className="text-accent shrink-0" />
               <span className="text-sm text-foregroundMuted tracking-[-0.35px]">
-                {crossFormatSkipped} skipped (already imported from a daily statement)
+                {internalTransfersSkipped} transfer rows skipped (money moved within this XTB account, in and out)
               </span>
+            </div>
+          )}
+          {closedByHand.length > 0 && (
+            <div className="flex items-start gap-2">
+              <Skip size={16} className="text-accent shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-0.5 min-w-0">
+                <span className="text-sm text-foregroundMuted tracking-[-0.35px]">
+                  {closedByHand.length} sale{closedByHand.length !== 1 ? 's' : ''} skipped (likely already recorded with Close position)
+                </span>
+                {closedByHand.map(({ sale, existing }) => (
+                  <span key={sale.id} className="text-xs text-accent">
+                    {sale.ticker ?? sale.instrument}: {formatQuantity(sale.quantity ?? 0)} sold on {formatDate(sale.date.slice(0, 10))},
+                    {' '}closed by hand on {formatDate(existing.date.slice(0, 10))}
+                  </span>
+                ))}
+              </div>
             </div>
           )}
           {warnings.length > 0 && (

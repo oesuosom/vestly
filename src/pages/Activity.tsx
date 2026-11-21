@@ -57,13 +57,20 @@ const TYPE_META: Record<TransactionType, TypeMeta> = {
 // Formatting helpers
 // ─────────────────────────────────────────
 
+/**
+ * A transaction's day as dd/MM/yy. The day as stored (`date.slice(0, 10)`),
+ * not converted to the viewer's time zone: it is the day cash, positions and
+ * tax years count the row on. An XTB row timestamped 23:30 UTC stays on its
+ * own day here, instead of showing the next day in Warsaw.
+ */
 function formatDateTime(isoDate: string): string {
-  const d = new Date(isoDate)
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit',
-  })
+  const [year, month, day] = isoDate.slice(0, 10).split('-')
+  return `${day}/${month}/${year.slice(2)}`
+}
+
+/** A picked calendar day (local midnight) as `yyyy-MM-dd`, to compare with stored days. */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function formatAmountRaw(amount: number): string {
@@ -486,8 +493,9 @@ export function Activity() {
           const key = t.ticker?.toUpperCase() ?? t.instrument
           if (!key || !instrumentFilter.has(key)) return false
         }
-        if (dateRange?.from && new Date(t.date) < dateRange.from) return false
-        if (dateRange?.to && new Date(t.date) > new Date(dateRange.to.getTime() + 86399999)) return false
+        // By the stored day, both forms alike ("2026-02-10" and "2026-02-10T23:30:00.000Z").
+        if (dateRange?.from && t.date.slice(0, 10) < localDay(dateRange.from)) return false
+        if (dateRange?.to && t.date.slice(0, 10) > localDay(dateRange.to)) return false
         return true
       })
       .sort((a, b) => b.date.localeCompare(a.date))

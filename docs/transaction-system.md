@@ -27,7 +27,7 @@ Holdings remain the source of truth for portfolio *value*. Transactions are an a
 |---|---|---|
 | Source of truth | Holdings, not transactions | Avoids requiring a complete, gap-free history; the schema supports migrating later |
 | Dividend linking | Auto-linked to holdings by ticker | Enables per-holding total return |
-| Ticker extraction | Five-level resolution chain | XTB buy comments carry no ticker; dividend rows do |
+| Ticker extraction | Six-level resolution chain | Only some XTB trade comments carry a ticker; dividend rows do |
 | Original currency | Stored as metadata only | `originalCurrency` / `pricePerUnitOriginal` are preserved but never used in math |
 | XTB cash balance | Synthetic holding, recomputed after import | Flows into Total Wealth and the cash allocation slice automatically |
 | Crypto accounts | No synthetic cash holding | They hold assets, not fiat |
@@ -36,9 +36,11 @@ Holdings remain the source of truth for portfolio *value*. Transactions are an a
 
 ### A caveat on `Transaction.date`
 
-The type comment calls this a full ISO datetime, and most parsers emit one. **The XTB Cash Operations parser deliberately does not.** `parseXTBDateTime` returns a date-only `YYYY-MM-DD` string, because XTB timestamps are Warsaw local time and converting them to UTC without a timezone library risks shifting a transaction across a day boundary — which would corrupt tax-year attribution.
+The type comment calls this a full ISO datetime, and most parsers emit one. **XTB Cash Operations rows imported before #29 do not**: that parser used to keep only the date, so those rows are stored date-only (`"2026-02-10"`) and stay that way. It now keeps the time, as UTC: XTB labels the file's date range `(UTC)`, as it does the times on its other sheets.
 
 So the field holds a mix of `"2026-02-10"` and `"2026-02-10T10:59:02.277Z"`. Lexicographic sorting still works (a date-only string sorts before any same-day timestamp), and anything comparing days should `.slice(0, 10)` both sides. Do not assume the field parses as a full datetime.
+
+**The stored day is the day.** Cash on a past day, the position walk, the chart, tax-year totals and Activity (its dates and its date filter) all use `date.slice(0, 10)`, never the day in the viewer's time zone. For XTB rows that is the UTC day the file shows: a deposit at 23:30 UTC on 31 December counts in that year, although it was already 1 January in Warsaw. Before #29, Activity converted to local time, so such a row would have shown on a different day than it was counted on.
 
 ---
 
@@ -49,51 +51,69 @@ Parser: [`src/importers/xtbParser.ts`](../src/importers/xtbParser.ts)
 ### File layout
 
 ```
-Rows 1–4   metadata (account number, "Cash Operations", date from, date to)
+Rows 1–4   metadata (account number, "Cash Operations", date from (UTC), date to (UTC))
 Row 5      column headers: Type, Instrument, Time, Amount, ID, Comment, Product
-Rows 6–N   transaction data
-Last row   "Total,,,,57.67,," — a running balance, stripped before parsing
+Rows 6–N   transaction data, newest first
+Last row   "Total" — the sum of the Amount column
 ```
 
-Warning row numbers shown to the user are offset by those five header rows, so they match what the user sees in a spreadsheet.
+XTB has shipped several layouts (7, 8 and 10 columns, some with a `Ticker` column), so the header row is found by its names (`Type` and `Amount`) and every column is read by name, case-insensitively. Warning row numbers are the file's own line numbers, so they match what the user sees in a spreadsheet.
+
+**Transfers that cancel out.** Two `Transfer` / `Subaccount transfer` rows with the same time and comment, opposite amounts and a different Product are money moved between two parts of the same account (say, from trading to an investment plan). They are left out: imported, they would net to zero but inflate deposits and withdrawals. A transfer with no partner in the file imports as a deposit or withdrawal by its sign.
+
+**The Total check.** The rows imported, plus the rows left out on purpose (already imported, CFD rows, transfers that cancel out, duplicates of a confirmation or of a Close position sale, and fee rows skipped with them), must add up to the Total row. When they don't, the preview's first warning says how much is missing: that catches a row type dropped in future, not only the ones the parser already warns about.
 
 ### Date formats
 
-`parseXTBDateTime` accepts two, returning date-only in both cases:
+`parseCashOperationsTime` reads the time as UTC and returns a full ISO timestamp (`2026-01-02 14:37:04` → `2026-01-02T14:37:04.000Z`). It accepts:
 
-1. `2026-02-10 10:59:02.277000` — `YYYY-MM-DD` with optional fractional seconds; the format real exports use
+1. `2026-02-10 10:59:02`, optionally with fractional seconds (`.277000`, kept to the millisecond) — the format real exports use
 2. `10.02.2026 10:59:02` — `DD.MM.YYYY` fallback
+
+A bare date stays date-only.
 
 ### Type mapping
 
-Rows whose `Type` is not in this map produce a warning and are skipped, never guessed:
+Matched case-insensitively. Rows whose `Type` is not in this map produce a warning and are skipped, never guessed:
 
 | XTB `Type` | `TransactionType` |
 |---|---|
-| `Stock purchase` | `buy` |
+| `Stock purchase`, `Stocks/ETF purchase` | `buy` |
+| `Stock sale`, `Stock sell`, `Stocks/ETF sale` | `sell` — `amountPLN` is the whole proceeds (quantity × price), positive |
 | `Deposit` | `deposit` |
 | `Withdrawal` | `withdrawal` |
-| `Dividend` | `dividend` |
+| `Transfer`, `Subaccount transfer` | `deposit` when money comes in, `withdrawal` when it goes out |
+| `Dividend`, `DIVIDENT`, `Spinoff` | `dividend` |
 | `Withholding tax` | `withholding_tax` |
-| `Free funds interest` | `interest` |
-| `Free funds interest tax` | `interest_tax` |
+| `Free funds interest`, `Free funds interests` | `interest` |
+| `Free funds interest tax`, `Free funds interests tax` | `interest_tax` |
+| `Commission`, `SEC fee`, `Tax IFTT` | `fee` — a separate row next to the trade; it moves Cash and shows in Activity, but is not added to the trade's cost |
+
+**CFD rows are not imported**: `Swap`, `Close trade` and `Profit/Loss (FX/CFD)`, and a share row whose comment is a short trade (`OPEN SELL`, `CLOSE SELL`). Each gets a warning; nothing is guessed.
 
 ### Comment parsing
 
-- `parseBuyComment` — `"OPEN BUY 0.1724 @ 79.98"` → `quantity: 0.1724`, `pricePerUnitOriginal: 79.98`
+- `parseTradeComment` — one parser for buys and sales: `(OPEN|CLOSE) (BUY|SELL) [TICKER.EX ]qty[/total] @ price`.
+  - `"OPEN BUY 0.25 @ 100.00"` → a buy of 0.25
+  - `"OPEN BUY ACME.US 2 @ 10.00"` → a buy of 2, ticker `ACME` on `US`
+  - `"OPEN BUY ACME.US 0.5/2.5 @ 10.00"` → a buy of 0.5: one fill of an order of 2.5. The first number is the units in this row, and that is what is imported.
+  - `"CLOSE BUY 6/12 @ 55.00"` → a sale of 6 (closing a long position)
+
+  A purchase must open (`OPEN BUY`) and a sale must close (`CLOSE BUY`); a row whose comment says otherwise gets a warning.
 - `parseTickerFromComment` — `"AGNC.US USD 0.1200/ SHR"` → `{ ticker: "AGNC", exchange: "US" }`
 
-### Ticker resolution for buy rows
+### Ticker resolution for trade rows
 
-Buy comments carry no ticker, so it is resolved through a five-level fallback chain, tried in order. The same numbering appears as a comment at the resolution site in `xtbParser.ts`:
+Only some trade comments name the instrument, so the ticker is resolved through a six-level fallback chain, tried in order. The same numbering appears as a comment at the resolution site in `xtbParser.ts`:
 
-1. **Comment** — `parseTickerFromComment` on the buy row. Not present in real XTB buy rows; handled for robustness.
-2. **`instrumentTickerMap`** — built in a pre-pass over dividend and withholding-tax rows *in the same file*, whose comments do name the instrument.
-3. **`instrumentAliases`** — user-defined name→ticker mappings from Settings. Tried by exact key, then lowercased.
-4. **`staticLookupInstrument`** — the built-in map in `domain/instrumentLookup.ts`, for common ETFs and stocks.
-5. **`holdingNameMap`** — case-insensitive match against existing holdings that already carry a ticker. Covers buy-only instruments that never appear in dividend rows.
+1. **`Ticker` column** — in layouts that have one (`ACME.US`).
+2. **Comment** — `"OPEN BUY ACME.US 2 @ 10.00"`. Some rows have it and some don't, for the same kind of trade.
+3. **`instrumentTickerMap`** — built in a pre-pass over the other rows *in the same file* that name the instrument: trade comments with a ticker, a `Ticker` column, and dividend and withholding-tax comments.
+4. **`instrumentAliases`** — user-defined name→ticker mappings from Settings. Tried by exact key, then lowercased.
+5. **`staticLookupInstrument`** — the built-in map in `domain/instrumentLookup.ts`, for common ETFs and stocks.
+6. **`holdingNameMap`** — case-insensitive match against existing holdings that already carry a ticker. Covers buy-only instruments that never appear in dividend rows.
 
-Levels 1–4 can supply an `exchange`; level 5 yields a ticker only, since a holding name match says nothing about the venue. When all five fail the transaction keeps `ticker: undefined` and surfaces as an unresolved instrument in the post-import cost-basis step, prompting the user to add an alias.
+Levels 1–5 can supply an `exchange`; level 6 yields a ticker only, since a holding name match says nothing about the venue. When all six fail the transaction keeps `ticker: undefined` and surfaces as an unresolved instrument in the post-import cost-basis step, prompting the user to add an alias.
 
 `originalCurrency` is inferred from the resolved exchange — `PL` → `PLN`, `US` → `USD`, otherwise left undefined.
 
@@ -106,11 +126,13 @@ parseXTBCashOperations(
   existingExternalIds: Set<string>,
   accounts?: Account[],                                 // for holdingNameMap (level 5)
   instrumentAliases?: Record<string, InstrumentAlias>,  // from Settings (level 3)
-  existingTransactions?: Transaction[]                  // for cross-format dedup
+  existingTransactions?: Transaction[]                  // for cross-format and Close position dedup
 ): Promise<ParseResult>
 ```
 
-`ParseResult` reports `skipped` (duplicate `externalId`s already in the store) separately from `crossFormatSkipped` (trades already imported from a confirmation PDF), plus per-row `warnings`.
+`ParseResult` reports `skipped` (duplicate `externalId`s already in the store) separately from `crossFormatSkipped` (trades already imported from a confirmation PDF) and `closedByHand` (sales already recorded with Close position), plus per-row `warnings`.
+
+**Sales already recorded with Close position.** A holding closed by hand has a `sell` with `externalId` `close-sell-<holdingId>`. An imported sale with the same account, ticker and quantity, on a day at most one apart, is left out and listed in the preview as a likely duplicate (`findClosedByHandSales` in `tradeDedup.ts`). The amount isn't compared: Close position stores the proceeds after the fee, the file the gross proceeds.
 
 ---
 
@@ -125,6 +147,13 @@ These PDFs are rotated, so the parser reads by geometric layout rather than text
 XTB reports the same purchase through two documents that **share no identifier**: the Cash Operations export dedups on its own `ID` column, while a daily confirmation carries a *Numer zlecenia* (order number). Different ID spaces, so `externalId` equality cannot catch a trade arriving by both routes — and importing a confirmation today plus the monthly export later would double-count the buy, corrupting both quantity and cost basis.
 
 [`src/importers/tradeDedup.ts`](../src/importers/tradeDedup.ts) matches on economic identity instead: account, type, ticker, quantity, cash amount, and date. **Tolerances are deliberately loose, so a match is a strong hint, not a verdict** — matches are surfaced in the import preview, unticked by default, rather than dropped silently. `features/import/useXTBReconcile.tsx` drives that UI.
+
+The two documents don't cut a trade the same way, so the matcher compares **orders**, not rows (`findDuplicateTradeGroups`), in both directions:
+
+- **Fills.** A confirmation line is one whole order: the parser keeps one line per order number. Cash Operations can list that order as fills, each with the order's size after a slash (`0.5/2.5` and `2/2.5`). Fills with the same account, side, ticker and order size, within the date tolerance, are one order once their quantities add up to the size. A confirmation line matches one row, or all of an order's fills together, and the amount tolerance grows with the number of rows added up. A confirmation per fill still matches fill to fill.
+- **Commission.** A confirmation's amount has the order's costs inside it. Cash Operations has the trade at gross, with a separate `Commission` row (a `fee`) on the same instrument at the same timestamp. The matcher tries the export's amount with and without those fee rows. When the export is the one being imported and its fee rows made the match, they are skipped with the trade: the confirmation already counted them.
+
+A sale already recorded with Close position takes the file's fee rows charged on it along only when a fee was entered in Close position; with no fee entered there, the file's fee rows import.
 
 ---
 

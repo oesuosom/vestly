@@ -52,6 +52,11 @@ export type ClosePlan = {
 const QUANTITY_EPSILON = 1e-9
 
 const saleExternalId = (holdingId: string) => `close-sell-${holdingId}`
+
+/** Whether a transaction is the sale Close position recorded (not one an import brought). */
+export function isCloseSale(t: Transaction): boolean {
+  return t.type === 'sell' && t.externalId.startsWith('close-sell-')
+}
 const buyExternalId = (holdingId: string) => `close-buy-${holdingId}`
 
 /**
