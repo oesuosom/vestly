@@ -183,11 +183,20 @@ const xtbParseResult: XTBTransactionFlowDevState['parseResult'] = {
     tx({ type: 'buy', date: '2025-03-04T13:12:00.000Z', amountPLN: -902.1, instrument: 'AGNC Investment', ticker: 'AGNC', exchange: 'US', quantity: 60 }),
     tx({ type: 'dividend', date: '2025-04-01T09:00:00.000Z', amountPLN: 42.18, relatedInstrument: 'AGNC Investment', relatedTicker: 'AGNC' }),
     tx({ type: 'deposit', date: '2025-01-02T08:00:00.000Z', amountPLN: 5000 }),
+    tx({ type: 'sell', date: '2025-05-06T14:20:00.000Z', amountPLN: 640, instrument: 'AGNC Investment', ticker: 'AGNC', exchange: 'US', quantity: 40 }),
+    tx({ type: 'fee', date: '2025-05-06T14:20:00.000Z', amountPLN: -0.5, relatedInstrument: 'AGNC Investment', relatedTicker: 'AGNC' }),
   ],
   skipped: 6,
   crossFormatSkipped: 0,
+  closedByHand: [
+    {
+      sale: tx({ type: 'sell', date: '2025-06-02T15:01:00.000Z', amountPLN: 1520, instrument: 'Fortinet', ticker: 'FTNT', exchange: 'US', quantity: 4 }),
+      existing: tx({ type: 'sell', date: '2025-06-02', amountPLN: 1515, instrument: 'Fortinet', ticker: 'FTNT', quantity: 4 }),
+    },
+  ],
   warnings: [
-    { row: 14, message: 'Could not parse quantity from comment.', rawData: 'OPEN BUY @ market' },
+    { row: 14, message: 'Could not parse sale comment: "CLOSE BUY @ market"', rawData: '{"type":"Stock sale","comment":"CLOSE BUY @ market"}' },
+    { row: 15, message: 'Not imported: "Swap" is a CFD row, and Vestly tracks shares only', rawData: '{"type":"Swap","amount":"-0.12"}' },
   ],
 }
 

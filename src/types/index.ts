@@ -258,7 +258,7 @@ export type Transaction = {
   accountId: string             // which account this belongs to
 
   type: TransactionType
-  date: string                  // full ISO datetime ("2026-02-10T10:59:02.277Z")
+  date: string                  // full ISO datetime ("2026-02-10T10:59:02.277Z"); XTB rows imported before #29 are date-only
 
   // Cash impact — always PLN, always signed
   // negative = money out (buy, tax, fee)
@@ -269,7 +269,7 @@ export type Transaction = {
   instrument?: string           // XTB instrument name ("Fortinet", "AGNC Investment")
   ticker?: string               // parsed: "AGNC" from "AGNC.US"
   exchange?: string             // parsed: "US" | "PL" — stored for future use
-  quantity?: number             // parsed from Comment ("OPEN BUY 0.1724 @ 79.98" → 0.1724)
+  quantity?: number             // parsed from Comment ("OPEN BUY 0.1724 @ 79.98" → 0.1724; "CLOSE BUY 6/12 @ 55.00" → 6)
   pricePerUnitPLN?: number      // Math.abs(amountPLN) / quantity — stored for convenience
 
   // Original currency metadata — display only, never used in calculations

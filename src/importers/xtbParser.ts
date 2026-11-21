@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { Account, InstrumentAlias, Transaction, TransactionType } from '@/types'
 import { fileToCSVText } from './xlsReader'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
-import { findDuplicateTrades } from './tradeDedup'
+import { findClosedByHandSales, findDuplicateTrades } from './tradeDedup'
 
 // ─────────────────────────────────────────
 // Types
@@ -12,6 +12,14 @@ export type ParseWarning = {
   row: number
   message: string
   rawData: string
+}
+
+/** A sale in the file that Close position already recorded by hand. */
+export type ClosedByHandMatch = {
+  /** The file's sale, not imported. */
+  sale: Transaction
+  /** The sale Close position recorded. */
+  existing: Transaction
 }
 
 export type ParseResult = {
@@ -24,6 +32,12 @@ export type ParseResult = {
    * see tradeDedup.ts.
    */
   crossFormatSkipped: number
+  /**
+   * Sales left out because the holding was already closed by hand with the
+   * same ticker, quantity and day (see `findClosedByHandSales`). Shown in the
+   * preview as likely duplicates.
+   */
+  closedByHand: ClosedByHandMatch[]
   warnings: ParseWarning[]
 }
 
@@ -31,33 +45,96 @@ export type ParseResult = {
 // XTB type mapping
 // ─────────────────────────────────────────
 
-const XTB_TYPE_MAP: Record<string, TransactionType> = {
-  'Stock purchase':          'buy',
-  'Deposit':                 'deposit',
-  'Withdrawal':              'withdrawal',
-  'Dividend':                'dividend',
-  'Withholding tax':         'withholding_tax',
-  'Free funds interest':     'interest',
-  'Free funds interest tax': 'interest_tax',
+/**
+ * What each XTB `Type` imports as, keyed lowercase. XTB has renamed some
+ * types over the years; older spellings map to the same thing.
+ *
+ * Fees use the existing `fee` type: they are money out of the account that
+ * belongs to no dividend or interest payment, which is what `fee` already
+ * means (Revolut's trade fees). XTB fee rows are never paired with a trade
+ * (`pairTradeFees` only knows Revolut ids), so they move Cash and show in
+ * Activity, and stay out of cost basis.
+ *
+ * `Spinoff` is cash paid out by a company to its shareholders, so it imports
+ * as a dividend. `Transfer` and `Subaccount transfer` move money between XTB
+ * accounts: in is a deposit, out a withdrawal (see {@link typeForRow}).
+ */
+const XTB_TYPE_MAP: Record<string, TransactionType | 'transfer'> = {
+  'stock purchase':           'buy',
+  'stocks/etf purchase':      'buy',
+  'stock sale':               'sell',
+  'stock sell':               'sell',
+  'stocks/etf sale':          'sell',
+  'deposit':                  'deposit',
+  'withdrawal':               'withdrawal',
+  'dividend':                 'dividend',
+  'divident':                 'dividend',
+  'spinoff':                  'dividend',
+  'withholding tax':          'withholding_tax',
+  'free funds interest':      'interest',
+  'free funds interests':     'interest',
+  'free funds interest tax':  'interest_tax',
+  'free funds interests tax': 'interest_tax',
+  'commission':               'fee',
+  'sec fee':                  'fee',
+  'tax iftt':                 'fee',
+  'transfer':                 'transfer',
+  'subaccount transfer':      'transfer',
+}
+
+/** CFD rows: Vestly tracks shares only, so these are skipped with a warning. */
+const CFD_TYPES = new Set(['swap', 'close trade', 'profit/loss (fx/cfd)'])
+
+function typeForRow(rawType: string, amount: number): TransactionType | undefined {
+  const mapped = XTB_TYPE_MAP[rawType.trim().toLowerCase()]
+  if (mapped !== 'transfer') return mapped
+  return amount < 0 ? 'withdrawal' : 'deposit'
 }
 
 // ─────────────────────────────────────────
 // Comment parsers
 // ─────────────────────────────────────────
 
-/**
- * Parse quantity and original price from a buy comment.
- * Example: "OPEN BUY 0.1724 @ 79.98" → { quantity: 0.1724, pricePerUnitOriginal: 79.98 }
- */
-export function parseBuyComment(comment: string): {
+export type TradeComment = {
+  /** `OPEN` starts a position, `CLOSE` ends one. */
+  action: 'OPEN' | 'CLOSE'
+  /** The side of the position: `BUY` is a long (shares), `SELL` a short (CFD). */
+  side: 'BUY' | 'SELL'
+  /** When the comment names the instrument: "ACME" from "ACME.US". */
+  ticker?: string
+  exchange?: string
+  /** Units in this row. */
   quantity: number
+  /** Units in the whole order, when the row is one fill of it ("0.5/2.5"). */
+  orderQuantity?: number
   pricePerUnitOriginal: number
-} | null {
-  const match = comment.match(/OPEN BUY ([\d.]+) @ ([\d.]+)/)
-  if (!match) return null
+}
+
+const NUMBER = String.raw`\d+(?:\.\d+)?`
+const TRADE_COMMENT_RE = new RegExp(
+  String.raw`^\s*(OPEN|CLOSE)\s+(BUY|SELL)\s+(?:(\S+)\.([A-Z]{2,3})\s+)?(${NUMBER})(?:\s*/\s*(${NUMBER}))?\s+@\s+(${NUMBER})`,
+)
+
+/**
+ * Parse a trade comment. Every shape XTB writes:
+ *   "OPEN BUY 0.25 @ 100.00"             → buy 0.25
+ *   "OPEN BUY ACME.US 2 @ 10.00"         → buy 2, ticker ACME on US
+ *   "OPEN BUY ACME.US 0.5/2.5 @ 10.00"   → buy 0.5, one fill of an order of 2.5
+ *   "CLOSE BUY 6/12 @ 55.00"             → sale of 6 shares held
+ * `OPEN SELL` and `CLOSE SELL` are short (CFD) trades; the caller skips them.
+ */
+export function parseTradeComment(comment: string): TradeComment | null {
+  const m = comment.match(TRADE_COMMENT_RE)
+  if (!m) return null
+  const quantity = parseFloat(m[5])
+  if (!(quantity > 0)) return null
   return {
-    quantity: parseFloat(match[1]),
-    pricePerUnitOriginal: parseFloat(match[2]),
+    action: m[1] as TradeComment['action'],
+    side: m[2] as TradeComment['side'],
+    ...(m[3] && { ticker: m[3], exchange: m[4] }),
+    quantity,
+    ...(m[6] && { orderQuantity: parseFloat(m[6]) }),
+    pricePerUnitOriginal: parseFloat(m[7]),
   }
 }
 
@@ -77,74 +154,97 @@ export function parseTickerFromComment(comment: string): {
   return { ticker: match[1], exchange: match[2] }
 }
 
+/** A `Ticker` column value: "ACME.US" → ACME on US; a bare "ACME" has no exchange. */
+function parseTickerCell(cell: string): { ticker: string; exchange?: string } | null {
+  const value = cell.trim()
+  if (!value) return null
+  const m = value.match(/^(\S+)\.([A-Z]{2,3})$/)
+  return m ? { ticker: m[1], exchange: m[2] } : { ticker: value }
+}
+
 // ─────────────────────────────────────────
 // CSV structure helpers
 // ─────────────────────────────────────────
 
+/** Cash amounts in whole grosze, so sums of many rows don't pick up float noise. */
+const toCents = (amount: number) => Math.round(amount * 100)
+
+function splitLine(line: string): string[] {
+  const result: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  result.push(current.trim())
+  return result
+}
+
+type RawRow = {
+  /** 1-based line number in the file, as a spreadsheet shows it. */
+  line: number
+  cells: Record<string, string>
+  raw: string
+}
 
 /**
  * XTB Cash Operations CSV structure:
- *   Rows 1–4:  metadata headers (Account number, Cash Operations, Date from, Date to)
- *   Row 5:     column headers: Type, Instrument, Time, Amount, ID, Comment, Product
- *   Row 6–N:   transaction data
- *   Last row:  "Total,,,,57.67,," — strip this running balance row
+ *   A few metadata rows (account number, "Cash Operations", date from / to in UTC)
+ *   A header row naming the columns: Type, Instrument, Time, Amount, ID, Comment, …
+ *   Transaction rows
+ *   A "Total" row: the sum of the Amount column
  *
- * Separator: comma. Rows may be quoted.
+ * XTB has shipped several layouts (7, 8 and 10 columns, some with a `Ticker`
+ * column), so the header row is found by its names, not its position, and
+ * columns are read by name. Names are matched case-insensitively and stored
+ * lowercase. Separator: comma. Fields may be quoted.
  */
-function parseXTBCSVRaw(text: string): {
-  headers: string[]
-  rows: Record<string, string>[]
-} {
-  const lines = text.trim().split('\n')
+function parseXTBCSVRaw(text: string): { rows: RawRow[]; total: RawRow | null } {
+  const lines = text.split(/\r?\n/)
+  const headerIndex = lines.findIndex((line) => {
+    const names = splitLine(line).map((c) => c.toLowerCase())
+    return names.includes('type') && names.includes('amount')
+  })
+  if (headerIndex < 0) return { rows: [], total: null }
 
-  // Row 5 (index 4) is the column header row
-  const HEADER_ROW_INDEX = 4
+  const headers = splitLine(lines[headerIndex]).map((h) => h.toLowerCase())
+  const rows: RawRow[] = []
+  let total: RawRow | null = null
 
-  if (lines.length <= HEADER_ROW_INDEX) {
-    return { headers: [], rows: [] }
-  }
-
-  const separator = ','
-
-  const splitLine = (line: string): string[] => {
-    // Simple CSV split that handles quoted fields
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]
-      if (ch === '"') {
-        inQuotes = !inQuotes
-      } else if (ch === separator && !inQuotes) {
-        result.push(current.trim())
-        current = ''
-      } else {
-        current += ch
-      }
-    }
-    result.push(current.trim())
-    return result
-  }
-
-  const headers = splitLine(lines[HEADER_ROW_INDEX])
-  const rows: Record<string, string>[] = []
-
-  for (let i = HEADER_ROW_INDEX + 1; i < lines.length; i++) {
+  for (let i = headerIndex + 1; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
-
-    // Skip the "Total" summary row at the end
-    if (line.startsWith('Total')) continue
-
     const values = splitLine(line)
-    const row: Record<string, string> = {}
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j] ?? ''
+    if (values.every((v) => v === '')) continue
+    const cells: Record<string, string> = {}
+    headers.forEach((h, j) => { if (h) cells[h] = values[j] ?? '' })
+    const row = { line: i + 1, cells, raw: line }
+    if (values[0].toLowerCase() === 'total' || (cells['type'] ?? '').toLowerCase() === 'total') {
+      // The Total value sits under Amount; if a layout puts it elsewhere, it is the row's last number.
+      if (!Number.isFinite(parseFloat(cells['amount'] ?? ''))) {
+        const last = values.filter((v) => v !== '' && Number.isFinite(Number(v))).at(-1)
+        if (last !== undefined) cells['amount'] = last
+      }
+      total = row
+      continue
     }
     rows.push(row)
   }
 
-  return { headers, rows }
+  return { rows, total }
 }
 
 // ─────────────────────────────────────────
@@ -161,6 +261,8 @@ function parseXTBCSVRaw(text: string): {
  *                              resolve tickers for buy-only instruments (e.g. Fortinet)
  *                              that never appear in dividend rows. Matched by
  *                              case-insensitive holding name against the CSV Instrument column.
+ * @param existingTransactions  The log, to catch trades already imported from a daily
+ *                              confirmation and sales already recorded with Close position.
  */
 export async function parseXTBCashOperations(
   file: File,
@@ -171,22 +273,38 @@ export async function parseXTBCashOperations(
   existingTransactions?: Transaction[]
 ): Promise<ParseResult> {
   const text = await fileToCSVText(file)
-  const { rows } = parseXTBCSVRaw(text)
+  return parseXTBCashOperationsText(text, accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
+}
 
-  // Pass 1: build instrument name → ticker map from dividend/withholding_tax rows.
-  // Buy comments ("OPEN BUY 0.1724 @ 79.98") contain no ticker, but the
-  // corresponding dividend comments ("AGNC.US USD 0.1200/ SHR") do.
-  // e.g. "AGNC Investment" → "AGNC", "US"
-  const instrumentTickerMap = new Map<string, { ticker: string; exchange: string }>()
+/** {@link parseXTBCashOperations} on the file's text. */
+export function parseXTBCashOperationsText(
+  text: string,
+  accountId: string,
+  existingExternalIds: Set<string>,
+  accounts?: Account[],
+  instrumentAliases?: Record<string, InstrumentAlias>,
+  existingTransactions?: Transaction[]
+): ParseResult {
+  const { rows, total } = parseXTBCSVRaw(text)
+  const cell = (row: RawRow, name: string) => row.cells[name] ?? ''
+  const tickerCell = (row: RawRow) => parseTickerCell(cell(row, 'ticker') || cell(row, 'symbol'))
+
+  // Pass 1: build instrument name → ticker map from the rows that name one:
+  // a Ticker column, a trade comment with a ticker ("OPEN BUY ACME.US 2 @ …"),
+  // or a dividend/withholding-tax comment ("AGNC.US USD 0.1200/ SHR"). Trade
+  // rows of the same instrument that don't name it then still resolve.
+  const instrumentTickerMap = new Map<string, { ticker: string; exchange?: string }>()
   for (const row of rows) {
-    const rawType = row['Type'] ?? ''
-    const type = XTB_TYPE_MAP[rawType]
-    if (type !== 'dividend' && type !== 'withholding_tax') continue
-    const instrument = (row['Instrument'] ?? '').trim()
-    const comment = row['Comment'] ?? ''
-    if (!instrument) continue
-    if (instrumentTickerMap.has(instrument)) continue
-    const tickerInfo = parseTickerFromComment(comment)
+    const instrument = cell(row, 'instrument').trim()
+    if (!instrument || instrumentTickerMap.has(instrument)) continue
+    const comment = cell(row, 'comment')
+    const type = XTB_TYPE_MAP[cell(row, 'type').trim().toLowerCase()]
+    const fromComment = type === 'dividend' || type === 'withholding_tax'
+      ? parseTickerFromComment(comment)
+      : type === 'buy' || type === 'sell'
+        ? parseTradeComment(comment)
+        : null
+    const tickerInfo = tickerCell(row) ?? (fromComment?.ticker ? { ticker: fromComment.ticker, exchange: fromComment.exchange } : null)
     if (tickerInfo) instrumentTickerMap.set(instrument, tickerInfo)
   }
 
@@ -207,59 +325,56 @@ export async function parseXTBCashOperations(
   const transactions: Transaction[] = []
   const warnings: ParseWarning[] = []
   let skipped = 0
+  /** Amount of every row imported, or left out on purpose (duplicates, CFD), in grosze. */
+  let accountedCents = 0
+  const warn = (row: RawRow, message: string) =>
+    warnings.push({ row: row.line, message, rawData: JSON.stringify(row.cells) })
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    // Row numbers shown to the user are 1-based and offset by 5 header rows
-    const rowNum = i + 6
-
-    const rawType = row['Type'] ?? ''
-    const rawInstrument = row['Instrument'] ?? ''
-    const rawTime = row['Time'] ?? ''
-    const rawAmount = row['Amount'] ?? ''
-    const rawId = row['ID'] ?? ''
-    const rawComment = row['Comment'] ?? ''
+  for (const row of rows) {
+    const rawType = cell(row, 'type')
+    const rawInstrument = cell(row, 'instrument')
+    const rawTime = cell(row, 'time')
+    const rawAmount = cell(row, 'amount')
+    const rawId = cell(row, 'id')
+    const rawComment = cell(row, 'comment')
+    const amountPLN = parseFloat(rawAmount)
 
     // 1. Deduplication: skip if externalId already exists
-    if (existingExternalIds.has(rawId)) {
+    if (rawId && existingExternalIds.has(rawId)) {
       skipped++
+      if (Number.isFinite(amountPLN)) accountedCents += toCents(amountPLN)
       continue
     }
 
-    // 2. Map type
-    const type = XTB_TYPE_MAP[rawType]
+    // 2. Amount
+    if (!Number.isFinite(amountPLN)) {
+      warn(row, `Invalid amount: "${rawAmount}"`)
+      continue
+    }
+
+    // 3. CFD rows: not shares, so not imported. Nothing is guessed.
+    const typeKey = rawType.trim().toLowerCase()
+    if (CFD_TYPES.has(typeKey)) {
+      warn(row, `Not imported: "${rawType}" is a CFD row, and Vestly tracks shares only`)
+      accountedCents += toCents(amountPLN)
+      continue
+    }
+
+    // 4. Map type
+    const type = typeForRow(rawType, amountPLN)
     if (!type) {
-      warnings.push({
-        row: rowNum,
-        message: `Unknown transaction type: "${rawType}"`,
-        rawData: JSON.stringify(row),
-      })
+      warn(row, `Unknown transaction type: "${rawType}"`)
       continue
     }
 
-    // 3. Parse amount
-    const amountPLN = parseFloat(rawAmount)
-    if (isNaN(amountPLN)) {
-      warnings.push({
-        row: rowNum,
-        message: `Invalid amount: "${rawAmount}"`,
-        rawData: JSON.stringify(row),
-      })
-      continue
-    }
-
-    // 4. Parse date
-    const date = parseXTBDateTime(rawTime)
+    // 5. Parse date
+    const date = parseCashOperationsTime(rawTime)
     if (!date) {
-      warnings.push({
-        row: rowNum,
-        message: `Invalid date: "${rawTime}"`,
-        rawData: JSON.stringify(row),
-      })
+      warn(row, `Invalid date: "${rawTime}"`)
       continue
     }
 
-    // 5. Build transaction with type-specific fields
+    // 6. Build transaction with type-specific fields
     const base = {
       id: uuidv4(),
       accountId,
@@ -272,38 +387,46 @@ export async function parseXTBCashOperations(
       createdAt: new Date().toISOString(),
     }
 
-    if (type === 'buy') {
-      const parsed = parseBuyComment(rawComment)
+    if (type === 'buy' || type === 'sell') {
+      const parsed = parseTradeComment(rawComment)
       if (!parsed) {
-        warnings.push({
-          row: rowNum,
-          message: `Could not parse buy comment: "${rawComment}"`,
-          rawData: JSON.stringify(row),
-        })
+        warn(row, `Could not parse ${type === 'buy' ? 'buy' : 'sale'} comment: "${rawComment}"`)
+        continue
+      }
+      // A short position (OPEN SELL / CLOSE SELL) on a share row is a CFD trade.
+      if (parsed.side === 'SELL') {
+        warn(row, `Not imported: "${rawComment}" is a short (CFD) trade, and Vestly tracks shares only`)
+        accountedCents += toCents(amountPLN)
+        continue
+      }
+      // A purchase opens a long position and a sale closes one; anything else is unexpected.
+      if ((type === 'buy') !== (parsed.action === 'OPEN')) {
+        warn(row, `"${rawType}" row with a comment that doesn't match it: "${rawComment}"`)
         continue
       }
 
-      // Ticker resolution priority for buy rows:
-      //   1. Comment (not present in real XTB buy rows, but handled for robustness)
-      //   2. instrumentTickerMap — built from dividend/withholding_tax rows in Pass 1
-      //   3. instrumentAliases  — user-defined name→ticker map from Settings
-      //   4. staticLookupInstrument — built-in map for common ETFs
-      //   5. holdingNameMap — case-insensitive name match against existing holdings
+      // Ticker resolution priority for trade rows:
+      //   1. Ticker column, when the layout has one
+      //   2. Comment ("OPEN BUY ACME.US 2 @ 10.00"); only some rows name it
+      //   3. instrumentTickerMap — other rows of the same instrument in this file (Pass 1)
+      //   4. instrumentAliases  — user-defined name→ticker map from Settings
+      //   5. staticLookupInstrument — built-in map for common ETFs
+      //   6. holdingNameMap — case-insensitive name match against existing holdings
       //      (covers buy-only instruments like Fortinet that never appear in dividend rows)
       const instrumentKey = rawInstrument.trim()
-      const tickerFromComment = parseTickerFromComment(rawComment)
-      const tickerFromMap = instrumentKey ? instrumentTickerMap.get(instrumentKey) : undefined
-      const aliasKey = instrumentKey.toLowerCase()
-      const tickerFromAlias = (!tickerFromComment && !tickerFromMap && instrumentKey && instrumentAliases)
-        ? (instrumentAliases[instrumentKey] ?? instrumentAliases[aliasKey])
+      const fromFile = tickerCell(row)
+        ?? (parsed.ticker ? { ticker: parsed.ticker, exchange: parsed.exchange } : undefined)
+        ?? (instrumentKey ? instrumentTickerMap.get(instrumentKey) : undefined)
+      const tickerFromAlias = (!fromFile && instrumentKey && instrumentAliases)
+        ? (instrumentAliases[instrumentKey] ?? instrumentAliases[instrumentKey.toLowerCase()])
         : undefined
-      const tickerFromStatic = (!tickerFromComment && !tickerFromMap && !tickerFromAlias && instrumentKey)
+      const tickerFromStatic = (!fromFile && !tickerFromAlias && instrumentKey)
         ? staticLookupInstrument(instrumentKey)
         : undefined
-      const tickerFromHolding = (!tickerFromComment && !tickerFromMap && !tickerFromAlias && !tickerFromStatic && instrumentKey)
+      const tickerFromHolding = (!fromFile && !tickerFromAlias && !tickerFromStatic && instrumentKey)
         ? holdingNameMap.get(instrumentKey.toLowerCase())
         : undefined
-      const tickerInfo = tickerFromComment ?? tickerFromMap ?? tickerFromAlias ?? tickerFromStatic
+      const tickerInfo = fromFile ?? tickerFromAlias ?? tickerFromStatic
       const ticker = tickerInfo?.ticker ?? tickerFromHolding
       const exchange = tickerInfo?.exchange  // not available from holding name match
       const originalCurrency = exchange === 'PL' ? 'PLN' : exchange === 'US' ? 'USD' : undefined
@@ -314,13 +437,15 @@ export async function parseXTBCashOperations(
         ticker,
         exchange,
         quantity: parsed.quantity,
+        // A buy's amount is what it cost; a sale's is the whole proceeds (quantity × price).
         pricePerUnitPLN: Math.abs(amountPLN) / parsed.quantity,
         originalCurrency,
         pricePerUnitOriginal: parsed.pricePerUnitOriginal,
       })
-    } else if (type === 'dividend' || type === 'withholding_tax') {
+    } else if (type === 'dividend' || type === 'withholding_tax' || type === 'fee') {
       // relatedInstrument from Instrument column, relatedTicker from Comment
-      const tickerInfo = parseTickerFromComment(rawComment)
+      const tickerInfo = tickerCell(row) ?? parseTickerFromComment(rawComment)
+        ?? (rawInstrument.trim() ? instrumentTickerMap.get(rawInstrument.trim()) : undefined)
 
       transactions.push({
         ...base,
@@ -329,20 +454,43 @@ export async function parseXTBCashOperations(
         exchange: tickerInfo?.exchange,
       })
     } else {
-      // deposit, withdrawal, interest, interest_tax, fee, sell
-      // no instrument fields
+      // deposit, withdrawal, interest, interest_tax: no instrument fields
       transactions.push(base)
+    }
+    accountedCents += toCents(amountPLN)
+  }
+
+  // Pass 3: drop sales Close position already recorded by hand, then trades
+  // that already arrived via a daily confirmation PDF. Matching is by economic
+  // identity, not id — none of these share an id with this file. Both stay
+  // accounted for in the Total check: they are in the log already.
+  const existing = existingTransactions ?? []
+  const closedByHand = findClosedByHandSales(transactions, existing)
+  const afterHand = closedByHand.size > 0 ? transactions.filter((t) => !closedByHand.has(t.id)) : transactions
+  const usedByHand = new Set([...closedByHand.values()].map((t) => t.id))
+  const dupes = findDuplicateTrades(afterHand, existing.filter((t) => !usedByHand.has(t.id)))
+
+  // Pass 4: the rows must add up to the file's Total row (the sum of its
+  // Amount column). A gap means rows were dropped — a row type this parser
+  // doesn't know yet, or a row it couldn't read.
+  if (total) {
+    const totalAmount = parseFloat(cell(total, 'amount'))
+    if (Number.isFinite(totalAmount) && toCents(totalAmount) !== accountedCents) {
+      const gap = (toCents(totalAmount) - accountedCents) / 100
+      // First: it is the one that says how much is missing.
+      warnings.unshift({
+        row: total.line,
+        message: `The rows add up to ${(accountedCents / 100).toFixed(2)}, but the file's Total row says ${totalAmount.toFixed(2)}: ${Math.abs(gap).toFixed(2)} PLN wasn't imported, so Cash will be off by that much`,
+        rawData: total.raw,
+      })
     }
   }
 
-  // Pass 3: drop trades that already arrived via a daily confirmation PDF.
-  // Matching is by economic identity, not id — the two documents share none.
-  const dupes = findDuplicateTrades(transactions, existingTransactions ?? [])
-
   return {
-    transactions: dupes.size > 0 ? transactions.filter((t) => !dupes.has(t.id)) : transactions,
+    transactions: dupes.size > 0 ? afterHand.filter((t) => !dupes.has(t.id)) : afterHand,
     skipped,
     crossFormatSkipped: dupes.size,
+    closedByHand: [...closedByHand].map(([id, match]) => ({ sale: transactions.find((t) => t.id === id)!, existing: match })),
     warnings,
   }
 }
@@ -352,30 +500,34 @@ export async function parseXTBCashOperations(
 // ─────────────────────────────────────────
 
 /**
- * Parse XTB datetime string to ISO 8601.
+ * Parse an XTB Cash Operations `Time` cell to a full ISO 8601 timestamp in UTC.
  *
- * Handles two formats observed in XTB exports:
- *   "2026-02-10 10:59:02.277000"  — YYYY-MM-DD HH:MM:SS.microseconds (actual)
- *   "10.02.2026 10:59:02"         — DD.MM.YYYY HH:MM:SS (documented)
+ * XTB labels the file's date range `(UTC)`, and its other sheets' times too,
+ * so the time is read as UTC: "2026-01-02 14:37:04" → "2026-01-02T14:37:04.000Z".
+ * The stored day (`date.slice(0, 10)`) is the day the file shows. Accepts:
+ *   "2026-02-10 10:59:02"         — YYYY-MM-DD HH:MM:SS (real exports)
+ *   "2026-02-10 10:59:02.277000"  — with fractional seconds, kept to the millisecond
+ *   "10.02.2026 10:59:02"         — DD.MM.YYYY HH:MM:SS
+ * A bare date ("2026-02-10") stays date-only: the time is unknown.
  *
  * Returns null if unparseable.
  */
-function parseXTBDateTime(raw: string): string | null {
-  // Format 1: "2026-02-10 10:59:02.277000" (YYYY-MM-DD with optional fractional seconds)
-  const isoSpaceMatch = raw.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/)
-  if (isoSpaceMatch) {
-    // Store date only — XTB timestamps are Warsaw time but we can't safely convert
-    // to UTC without a timezone library. The date portion is all that's needed for
-    // tax-year attribution, sorting, and deduplication.
-    return isoSpaceMatch[1]
-  }
+export function parseCashOperationsTime(raw: string): string | null {
+  const value = raw.trim()
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?$/)
+  const dot = value.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?$/)
+  const parts = iso
+    ? [iso[1], iso[2], iso[3], iso[4], iso[5], iso[6], iso[7]]
+    : dot
+      ? [dot[3], dot[2], dot[1], dot[4], dot[5], dot[6], dot[7]]
+      : null
+  if (!parts) return null
 
-  // Format 2: "10.02.2026 10:59:02" (DD.MM.YYYY)
-  const dotMatch = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/)
-  if (dotMatch) {
-    const [, day, month, year] = dotMatch
-    return `${year}-${month}-${day}`
-  }
-
-  return null
+  const [y, mo, d, h, mi, s, frac] = parts
+  const ms = frac ? Number(frac.padEnd(3, '0').slice(0, 3)) : 0
+  const when = new Date(Date.UTC(+y, +mo - 1, +d, h ? +h : 0, mi ? +mi : 0, s ? +s : 0, ms))
+  // Date.UTC rolls 2026-02-30 over into March; that is not a real date.
+  if (when.getUTCFullYear() !== +y || when.getUTCMonth() !== +mo - 1 || when.getUTCDate() !== +d) return null
+  if (h && (when.getUTCHours() !== +h || when.getUTCMinutes() !== +mi || when.getUTCSeconds() !== +s)) return null
+  return h ? when.toISOString() : `${y}-${mo}-${d}`
 }

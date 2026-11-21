@@ -36,6 +36,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **XTB Cash Operations imports sales, fees and every buy** — the import skipped every sale with
+  an "Unknown transaction type" warning, so Cash was short by the proceeds of each sale, sold
+  shares still counted in the chart's history, and Realized return never saw them. Sales now
+  import with their quantity, ticker and proceeds, and the holding-changes step after the import
+  offers to close a holding sold in full, or lower the quantity of one sold in part. Buys whose
+  comment names the ticker (`OPEN BUY ACME.US 2 @ 10.00`) or is one fill of a larger order
+  (`0.5/2.5`) import too, instead of being skipped with "Could not parse buy comment". Commission,
+  SEC fee and Tax IFTT rows import as fees, so they come out of Cash and show in Activity.
+  Transfers between XTB accounts import as a deposit or withdrawal, and older spellings of the
+  row types are read too. CFD rows are skipped with a warning saying so. Rows now keep their time
+  of day (as UTC, as XTB labels it), so a sale and a rebuy on the same day run in the right
+  order: sell 10 shares bought for 1,000 PLN, then buy 10 back for 2,000 PLN the same day, and
+  the holding costs 200 PLN a share, not 150. Rows you imported before keep their date only.
+  The preview warns when the rows don't add up to the file's Total row, so a row the import
+  can't read never goes missing silently. A sale you already recorded with Close position is
+  shown as a likely duplicate and not imported again, and a sale that came in from a daily
+  confirmation is still counted once. Activity shows each transaction on the day it is counted
+  on, in any time zone: a date-only row no longer shows the day before in time zones behind UTC.
+
 - **The last holding's ⋯ menu is no longer cut off** — on an account page, the menu of the
   bottom row in the holdings table opened inside the table's rounded border, which hid Edit,
   Close position and Delete for that holding. The menu now opens on top of the page, below the

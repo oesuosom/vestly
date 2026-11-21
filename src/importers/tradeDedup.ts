@@ -17,6 +17,8 @@
  * deliberately loose, so a match is a strong hint, not a verdict.
  */
 import type { Transaction } from '@/types'
+import { resolveTransactionTicker } from '@/domain/calculations'
+import { isCloseSale } from '@/domain/closePosition'
 
 // ─────────────────────────────────────────
 // Tolerances
@@ -106,6 +108,54 @@ export function findDuplicateTrades(
   for (const candidate of candidates) {
     const pool = existing.filter((t) => !consumed.has(t.id))
     const match = findDuplicateTrade(candidate, pool)
+    if (match) {
+      matches.set(candidate.id, match)
+      consumed.add(match.id)
+    }
+  }
+  return matches
+}
+
+// ─────────────────────────────────────────
+// Sales already recorded with Close position
+// ─────────────────────────────────────────
+
+/** Whole days between two stored dates, by the day each is stored on. */
+function dayGap(a: string, b: string): number {
+  return Math.abs(Date.parse(a.slice(0, 10)) - Date.parse(b.slice(0, 10))) / DATE_TOLERANCE_MS
+}
+
+/**
+ * Pair each imported sale with a sale Close position recorded by hand for the
+ * same holding, if any: same account, same ticker, the same quantity, and a
+ * day at most one apart (the person picks the day in their own time zone; the
+ * file's day is UTC).
+ *
+ * The amount is not compared. Close position stores the proceeds after the
+ * fee, and the person may have typed a rounded figure, while the file has the
+ * gross proceeds. Each hand-recorded sale matches at most one imported sale.
+ */
+export function findClosedByHandSales(
+  candidates: Transaction[],
+  existing: Transaction[],
+): Map<string, Transaction> {
+  const closes = existing.filter(isCloseSale)
+  const matches = new Map<string, Transaction>()
+  if (closes.length === 0) return matches
+  const consumed = new Set<string>()
+
+  for (const candidate of candidates) {
+    if (candidate.type !== 'sell' || candidate.quantity == null) continue
+    const ticker = resolveTransactionTicker(candidate)
+    if (!ticker) continue
+    const match = closes.find((t) =>
+      !consumed.has(t.id) &&
+      t.accountId === candidate.accountId &&
+      t.quantity != null &&
+      Math.abs(t.quantity - candidate.quantity!) <= QTY_EPSILON &&
+      resolveTransactionTicker(t) === ticker &&
+      dayGap(t.date, candidate.date) <= 1,
+    )
     if (match) {
       matches.set(candidate.id, match)
       consumed.add(match.id)

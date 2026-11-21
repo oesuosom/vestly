@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findDuplicateTrade, findDuplicateTrades } from './tradeDedup'
+import { findClosedByHandSales, findDuplicateTrade, findDuplicateTrades } from './tradeDedup'
 import type { Transaction } from '@/types'
 
 function tx(overrides: Partial<Transaction> = {}): Transaction {
@@ -76,5 +76,45 @@ describe('findDuplicateTrades', () => {
     const matches = findDuplicateTrades([a, b], [existing])
     expect(matches.size).toBe(1)
     expect(matches.get('a')).toBe(existing)
+  })
+})
+
+describe('sales', () => {
+  const pdfSale = tx({ id: 'pdf', type: 'sell', amountPLN: 600, quantity: 5, ticker: 'ACME', date: '2026-09-08T14:00:00.000Z' })
+
+  it('a sale from a daily confirmation matches the same sale in Cash Operations', () => {
+    const cashOps = tx({ id: 'co', type: 'sell', amountPLN: 600, quantity: 5, ticker: 'ACME', externalId: '7', source: 'xtb_import', date: '2026-09-08T14:00:01.000Z' })
+    expect(findDuplicateTrades([cashOps], [pdfSale])).toEqual(new Map([['co', pdfSale]]))
+  })
+
+  it('a sale never matches a buy', () => {
+    const buy = tx({ id: 'co', type: 'buy', amountPLN: 600, quantity: 5, ticker: 'ACME', externalId: '7' })
+    expect(findDuplicateTrade(buy, [pdfSale])).toBeNull()
+  })
+})
+
+describe('findClosedByHandSales', () => {
+  const hand = tx({
+    id: 'hand', type: 'sell', date: '2026-09-09', amountPLN: 590, quantity: 5, ticker: 'ACME',
+    externalId: 'close-sell-h1', source: 'manual',
+  })
+  const imported = tx({ id: 'imp', type: 'sell', date: '2026-09-08T21:30:00.000Z', amountPLN: 600, quantity: 5, ticker: 'ACME', externalId: '7', source: 'xtb_import' })
+
+  it('matches on ticker, quantity and a day at most one apart, whatever the amount', () => {
+    expect(findClosedByHandSales([imported], [hand])).toEqual(new Map([['imp', hand]]))
+  })
+
+  it('ignores sales an import brought: only Close position’s own sale counts', () => {
+    expect(findClosedByHandSales([imported], [{ ...hand, externalId: '99' }]).size).toBe(0)
+  })
+
+  it('uses each hand-recorded sale once', () => {
+    const second = { ...imported, id: 'imp2', externalId: '8' }
+    expect([...findClosedByHandSales([imported, second], [hand]).keys()]).toEqual(['imp'])
+  })
+
+  it('matches by the instrument when the imported sale has no ticker', () => {
+    const noTicker = { ...imported, ticker: undefined, instrument: 'ACME' }
+    expect(findClosedByHandSales([noTicker], [hand]).get('imp')).toBe(hand)
   })
 })
