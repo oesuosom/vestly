@@ -11,7 +11,7 @@ function tx(overrides: Partial<Transaction> = {}): Transaction {
     amountPLN: -99.125,
     ticker: 'KRU',
     quantity: 0.25,
-    externalId: 'xtb-order:2802219889',
+    externalId: 'xtb-order:1000000001',
     source: 'xtb_confirmation',
     createdAt: '2026-09-08T10:00:00.000Z',
     ...overrides,

@@ -56,7 +56,7 @@ export async function detectFileFormat(file: File): Promise<DetectedFormat> {
       return { type: 'revolut_crypto' }
     }
     // XTB daily order confirmation — sniffed by content rather than filename.
-    // The filename (50797751_20260908_DailyStatement.pdf) is too generic to
+    // The filename (00000000_20260908_DailyStatement.pdf) is too generic to
     // trust, and the document's *title* is rasterised, so we key off the table's
     // column headers, which are real text.
     if (await isXTBConfirmation(file)) {

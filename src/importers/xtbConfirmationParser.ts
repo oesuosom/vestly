@@ -78,7 +78,7 @@ export type ConfirmationParseResult = {
  * Parse a number as XTB writes it.
  *
  * Most cells use Polish convention — space thousands separator, comma decimal
- * ("7 399,89"). The FX rate column uses a dot decimal instead ("1.0000"), so a
+ * ("1 234,56"). The FX rate column uses a dot decimal instead ("1.0000"), so a
  * comma is treated as the decimal mark when present and a dot otherwise.
  */
 export function parseXTBNumber(raw: string): number | null {

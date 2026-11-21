@@ -8,7 +8,7 @@ import {
 
 describe('parseXTBNumber', () => {
   it('parses Polish-formatted numbers', () => {
-    expect(parseXTBNumber('7 399,89')).toBe(7399.89)
+    expect(parseXTBNumber('1 234,56')).toBe(1234.56)
     expect(parseXTBNumber('396,50000')).toBe(396.5)
     expect(parseXTBNumber('99,12500')).toBe(99.125)
     expect(parseXTBNumber('0,2500')).toBe(0.25)
@@ -53,7 +53,7 @@ function kruTrade(overrides: Partial<ParsedTrade> = {}): ParsedTrade {
   return {
     id: 'trade-1',
     direction: 'buy',
-    orderNo: '2802219889',
+    orderNo: '1000000001',
     ticker: 'KRU',
     exchange: 'PL',
     instrument: 'KRUK SA',
@@ -88,7 +88,7 @@ describe('tradesToTransactions', () => {
 
   it('namespaces externalId so it cannot collide with a Cash Operations ID', () => {
     const [t] = tradesToTransactions([kruTrade()], 'acc-1', new Map())
-    expect(t.externalId).toBe('xtb-order:2802219889')
+    expect(t.externalId).toBe('xtb-order:1000000001')
   })
 
   it('adds costs to a purchase and subtracts them from a sale', () => {
