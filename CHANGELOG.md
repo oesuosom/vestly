@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-11-21
+
+Recording sales, and safer data. You can mark a holding as sold, XTB imports now bring in sales
+and fees, and imported trades update or close the holdings they belong to. No import deletes a
+holding missing from a file any more. Average cost and realized return account for sales and
+fees, per account. Backups are checked before they are restored, failed saves and unreadable data
+are reported instead of passing silently, and keyboard focus stays in the open dialog or pop-up.
+
 ### Added
 
 - **Close position: record that you sold a holding** — "Close position" sits next to Edit and
@@ -209,4 +217,6 @@ First tagged release. Everything runs client-side; no backend, no sign-up, no te
   proxy, so price refresh and AI insights need an equivalent host to work.
 - All portfolio data lives in `localStorage` (~47 KB in typical use).
 
+[Unreleased]: https://github.com/oesuosom/vestly/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/oesuosom/vestly/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/oesuosom/vestly/releases/tag/v0.0.1
