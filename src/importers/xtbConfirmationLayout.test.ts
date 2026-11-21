@@ -4,7 +4,8 @@
  * The real statements can't be committed (they carry a name and account
  * number), so these rebuild the layout `extractPDFLayout` produces for one —
  * cell text and relative positions taken from a real KRU fractional-rights
- * confirmation, with the account holder anonymised.
+ * confirmation, with the account holder, account number, order number and
+ * balances replaced by made-up values.
  *
  * This is the only coverage for column assignment, continuation merging and
  * Typ-badge classification, so keep it in step with the real document.
@@ -34,7 +35,7 @@ const STATEMENT_LABELS = [
   'Wartość OMI i Praw ułamkowych', 'Depozyt zabezpieczający', 'Wolne środki',
 ]
 const STATEMENT_VALUES = [
-  'Anonymous', '50797751', 'PLN', '51,41', '7 399,89', '7 348,48', '0,00', '51,41',
+  'Anonymous', '00000000', 'PLN', '12,34', '1 234,56', '1 222,22', '0,00', '12,34',
 ]
 
 const cells = (texts: (string | null)[]) =>
@@ -54,7 +55,7 @@ function statementPage(badge: [number, number, number] | null): LayoutPage {
       {
         cross: 200,
         cells: cells([
-          '1', '2802219889', 'KRU.PL', 'KRUK SA', 'XTB', null, '0,2500',
+          '1', '1000000001', 'KRU.PL', 'KRUK SA', 'XTB', null, '0,2500',
           '08.09.2026', 'rynkowe', '396,50000', '99,12500', 'Prawa ułamkowe',
           'PLN', '1.0000', '0,00', '0,00', '0,00',
         ]),
@@ -86,11 +87,11 @@ describe('parseXTBConfirmations, layout level', () => {
     const { trades, warnings, statement } = await parseXTBConfirmations([file()])
 
     expect(warnings).toEqual([])
-    expect(statement.freeCash).toBe(51.41)
+    expect(statement.freeCash).toBe(12.34)
     expect(trades).toHaveLength(1)
     expect(trades[0]).toMatchObject({
       direction: 'buy',
-      orderNo: '2802219889',
+      orderNo: '1000000001',
       ticker: 'KRU',
       exchange: 'PL',
       instrument: 'KRUK SA',
