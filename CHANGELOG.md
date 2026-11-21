@@ -51,8 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the holding costs 200 PLN a share, not 150. Rows you imported before keep their date only.
   The preview warns when the rows don't add up to the file's Total row, so a row the import
   can't read never goes missing silently. A sale you already recorded with Close position is
-  shown as a likely duplicate and not imported again, and a sale that came in from a daily
-  confirmation is still counted once. Activity shows each transaction on the day it is counted
+  shown as a likely duplicate and not imported again. A trade that also came in from a daily
+  confirmation is counted once, in either order of import, even when the export splits it into
+  fills (`0.5/2.5` and `2/2.5`) or lists its commission as a separate row: the fills and the
+  commission are skipped together. Two transfer rows that move money between parts of the same
+  XTB account, in and out at the same time, are skipped instead of counting as a deposit and a
+  withdrawal. Activity shows each transaction on the day it is counted
   on, in any time zone: a date-only row no longer shows the day before in time zones behind UTC.
 
 - **The last holding's ⋯ menu is no longer cut off** — on an account page, the menu of the

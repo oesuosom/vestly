@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findClosedByHandSales, findDuplicateTrade, findDuplicateTrades } from './tradeDedup'
+import { findClosedByHandSales, findDuplicateTrade, findDuplicateTradeGroups, findDuplicateTrades } from './tradeDedup'
 import type { Transaction } from '@/types'
 
 function tx(overrides: Partial<Transaction> = {}): Transaction {
@@ -116,5 +116,47 @@ describe('findClosedByHandSales', () => {
   it('matches by the instrument when the imported sale has no ticker', () => {
     const noTicker = { ...imported, ticker: undefined, instrument: 'ACME' }
     expect(findClosedByHandSales([noTicker], [hand]).get('imp')).toBe(hand)
+  })
+})
+
+describe('orders: fills and commission, both directions', () => {
+  const fill = (id: string, quantity: number, amountPLN: number, date = '2026-09-08T14:00:00.000Z') => tx({
+    id, externalId: id, source: 'xtb_import', ticker: 'ACME', instrument: 'Acme Corp', quantity, amountPLN, date,
+    comment: `OPEN BUY ACME.US ${quantity}/2.5 @ 20.00`,
+  })
+  const fee = (id: string, amountPLN: number, date = '2026-09-08T14:00:00.000Z'): Transaction => ({
+    id, accountId: 'acc-1', type: 'fee', date, amountPLN, relatedInstrument: 'Acme Corp', relatedTicker: 'ACME',
+    externalId: id, source: 'xtb_import', createdAt: '',
+  })
+  const pdf = (amountPLN: number, quantity = 2.5) => tx({ id: 'pdf', ticker: 'ACME', quantity, amountPLN, externalId: 'xtb-order:1' })
+
+  it('a confirmation imported after the export matches the fills already in the log', () => {
+    const groups = findDuplicateTradeGroups([pdf(-200)], [fill('f1', 0.5, -40), fill('f2', 2, -160, '2026-09-08T14:00:01.000Z')])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].existing.map((t) => t.id)).toEqual(['f1', 'f2'])
+    expect(findDuplicateTrades([pdf(-200)], [fill('f1', 0.5, -40), fill('f2', 2, -160)]).get('pdf')?.id).toBe('f1')
+  })
+
+  it('…and the commission already in the log counts towards the confirmation’s amount', () => {
+    const groups = findDuplicateTradeGroups([pdf(-201)], [fill('f1', 0.5, -40), fill('f2', 2, -160), fee('c1', -1)])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].candidateFees).toEqual([]) // nothing on the PDF side to skip
+  })
+
+  it('the export after a confirmation: its fills and commission are the duplicate', () => {
+    const groups = findDuplicateTradeGroups([fill('f1', 0.5, -40), fill('f2', 2, -160), fee('c1', -1)], [pdf(-201)])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].candidates.map((t) => t.id)).toEqual(['f1', 'f2'])
+    expect(groups[0].candidateFees.map((t) => t.id)).toEqual(['c1'])
+  })
+
+  it('fills that do not add up to the order are not matched as one', () => {
+    expect(findDuplicateTradeGroups([fill('f1', 0.5, -40), fill('f2', 1.5, -120)], [pdf(-160, 2)])).toEqual([])
+  })
+
+  it('a commission at another time, or on another instrument, is not counted', () => {
+    expect(findDuplicateTradeGroups([fill('f1', 0.5, -40), fill('f2', 2, -160), fee('c1', -1, '2026-09-08T15:00:00.000Z')], [pdf(-201)])).toEqual([])
+    const other = { ...fee('c1', -1), relatedTicker: 'OTHER', relatedInstrument: 'Other Co' }
+    expect(findDuplicateTradeGroups([fill('f1', 0.5, -40), fill('f2', 2, -160), other], [pdf(-201)])).toEqual([])
   })
 })

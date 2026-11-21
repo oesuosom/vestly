@@ -59,7 +59,9 @@ Last row   "Total" — the sum of the Amount column
 
 XTB has shipped several layouts (7, 8 and 10 columns, some with a `Ticker` column), so the header row is found by its names (`Type` and `Amount`) and every column is read by name, case-insensitively. Warning row numbers are the file's own line numbers, so they match what the user sees in a spreadsheet.
 
-**The Total check.** The rows imported, plus the rows left out on purpose (already imported, CFD rows, duplicates of a confirmation or of a Close position sale), must add up to the Total row. When they don't, the preview's first warning says how much is missing: that catches a row type dropped in future, not only the ones the parser already warns about.
+**Transfers that cancel out.** Two `Transfer` / `Subaccount transfer` rows with the same time and comment, opposite amounts and a different Product are money moved between two parts of the same account (say, from trading to an investment plan). They are left out: imported, they would net to zero but inflate deposits and withdrawals. A transfer with no partner in the file imports as a deposit or withdrawal by its sign.
+
+**The Total check.** The rows imported, plus the rows left out on purpose (already imported, CFD rows, transfers that cancel out, duplicates of a confirmation or of a Close position sale, and fee rows skipped with them), must add up to the Total row. When they don't, the preview's first warning says how much is missing: that catches a row type dropped in future, not only the ones the parser already warns about.
 
 ### Date formats
 
@@ -145,6 +147,13 @@ These PDFs are rotated, so the parser reads by geometric layout rather than text
 XTB reports the same purchase through two documents that **share no identifier**: the Cash Operations export dedups on its own `ID` column, while a daily confirmation carries a *Numer zlecenia* (order number). Different ID spaces, so `externalId` equality cannot catch a trade arriving by both routes — and importing a confirmation today plus the monthly export later would double-count the buy, corrupting both quantity and cost basis.
 
 [`src/importers/tradeDedup.ts`](../src/importers/tradeDedup.ts) matches on economic identity instead: account, type, ticker, quantity, cash amount, and date. **Tolerances are deliberately loose, so a match is a strong hint, not a verdict** — matches are surfaced in the import preview, unticked by default, rather than dropped silently. `features/import/useXTBReconcile.tsx` drives that UI.
+
+The two documents don't cut a trade the same way, so the matcher compares **orders**, not rows (`findDuplicateTradeGroups`), in both directions:
+
+- **Fills.** A confirmation line is one whole order: the parser keeps one line per order number. Cash Operations can list that order as fills, each with the order's size after a slash (`0.5/2.5` and `2/2.5`). Fills with the same account, side, ticker and order size, within the date tolerance, are one order once their quantities add up to the size. A confirmation line matches one row, or all of an order's fills together, and the amount tolerance grows with the number of rows added up. A confirmation per fill still matches fill to fill.
+- **Commission.** A confirmation's amount has the order's costs inside it. Cash Operations has the trade at gross, with a separate `Commission` row (a `fee`) on the same instrument at the same timestamp. The matcher tries the export's amount with and without those fee rows. When the export is the one being imported and its fee rows made the match, they are skipped with the trade: the confirmation already counted them.
+
+A sale already recorded with Close position takes the file's fee rows charged on it along only when a fee was entered in Close position; with no fee entered there, the file's fee rows import.
 
 ---
 

@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { Account, InstrumentAlias, Transaction, TransactionType } from '@/types'
 import { fileToCSVText } from './xlsReader'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
-import { findClosedByHandSales, findDuplicateTrades } from './tradeDedup'
+import { feesChargedWith, findClosedByHandSales, findDuplicateTradeGroups, type TradeDuplicate } from './tradeDedup'
 
 // ─────────────────────────────────────────
 // Types
@@ -20,18 +20,32 @@ export type ClosedByHandMatch = {
   sale: Transaction
   /** The sale Close position recorded. */
   existing: Transaction
+  /**
+   * The file's fee rows charged on that sale, not imported either: the fee
+   * entered in Close position already came off its amount. Empty when no fee
+   * was entered there; the file's fee rows are then imported.
+   */
+  fees: Transaction[]
 }
 
 export type ParseResult = {
   transactions: Transaction[]
   skipped: number           // duplicate externalIds already in store
   /**
-   * Trades dropped because they match one already imported from a daily
-   * confirmation PDF. Those carry XTB's *order* number, which is a different ID
-   * space from this export's `ID` column, so `skipped` can't catch them —
-   * see tradeDedup.ts.
+   * Rows dropped because they match a trade already imported from a daily
+   * confirmation PDF: the trade, every fill of its order, and the commission
+   * the confirmation already counted. Those carry XTB's *order* number, which
+   * is a different ID space from this export's `ID` column, so `skipped` can't
+   * catch them — see tradeDedup.ts.
    */
   crossFormatSkipped: number
+  /** The same, trade by trade, for the preview. */
+  crossFormat: TradeDuplicate[]
+  /**
+   * Transfer rows left out because they cancel out inside the file: money
+   * moved between two parts of the same XTB account (see `pairInternalTransfers`).
+   */
+  internalTransfersSkipped: number
   /**
    * Sales left out because the holding was already closed by hand with the
    * same ticker, quantity and day (see `findClosedByHandSales`). Shown in the
@@ -247,6 +261,41 @@ function parseXTBCSVRaw(text: string): { rows: RawRow[]; total: RawRow | null } 
   return { rows, total }
 }
 
+/** XTB types that move money between XTB accounts, keyed lowercase. */
+const TRANSFER_TYPES = new Set(['transfer', 'subaccount transfer'])
+
+/**
+ * Transfer rows that cancel out inside the file: the two legs of moving money
+ * between two parts of one XTB account (say, from trading to an investment
+ * plan). Each pair is two transfer rows with the same time and comment,
+ * opposite amounts and a different Product. Imported, they would add a
+ * deposit and a withdrawal that net to zero but inflate both totals, so they
+ * are left out. A transfer with no partner in the file moves money in or out
+ * of it, and imports by its sign.
+ */
+function pairInternalTransfers(rows: RawRow[]): Set<RawRow> {
+  const paired = new Set<RawRow>()
+  const transfers = rows.filter((r) => TRANSFER_TYPES.has((r.cells['type'] ?? '').trim().toLowerCase()))
+  for (const a of transfers) {
+    if (paired.has(a)) continue
+    const amountA = toCents(parseFloat(a.cells['amount'] ?? ''))
+    if (!Number.isFinite(amountA) || amountA === 0) continue
+    const b = transfers.find((r) =>
+      r !== a &&
+      !paired.has(r) &&
+      (r.cells['time'] ?? '') === (a.cells['time'] ?? '') &&
+      (r.cells['comment'] ?? '') === (a.cells['comment'] ?? '') &&
+      (r.cells['product'] ?? '') !== (a.cells['product'] ?? '') &&
+      toCents(parseFloat(r.cells['amount'] ?? '')) === -amountA,
+    )
+    if (b) {
+      paired.add(a)
+      paired.add(b)
+    }
+  }
+  return paired
+}
+
 // ─────────────────────────────────────────
 // Main parser
 // ─────────────────────────────────────────
@@ -327,6 +376,7 @@ export function parseXTBCashOperationsText(
   let skipped = 0
   /** Amount of every row imported, or left out on purpose (duplicates, CFD), in grosze. */
   let accountedCents = 0
+  const internalTransfers = pairInternalTransfers(rows)
   const warn = (row: RawRow, message: string) =>
     warnings.push({ row: row.line, message, rawData: JSON.stringify(row.cells) })
 
@@ -352,7 +402,13 @@ export function parseXTBCashOperationsText(
       continue
     }
 
-    // 3. CFD rows: not shares, so not imported. Nothing is guessed.
+    // 3. A transfer that another row in the file cancels out: not imported.
+    if (internalTransfers.has(row)) {
+      accountedCents += toCents(amountPLN)
+      continue
+    }
+
+    // 4. CFD rows: not shares, so not imported. Nothing is guessed.
     const typeKey = rawType.trim().toLowerCase()
     if (CFD_TYPES.has(typeKey)) {
       warn(row, `Not imported: "${rawType}" is a CFD row, and Vestly tracks shares only`)
@@ -360,21 +416,21 @@ export function parseXTBCashOperationsText(
       continue
     }
 
-    // 4. Map type
+    // 5. Map type
     const type = typeForRow(rawType, amountPLN)
     if (!type) {
       warn(row, `Unknown transaction type: "${rawType}"`)
       continue
     }
 
-    // 5. Parse date
+    // 6. Parse date
     const date = parseCashOperationsTime(rawTime)
     if (!date) {
       warn(row, `Invalid date: "${rawTime}"`)
       continue
     }
 
-    // 6. Build transaction with type-specific fields
+    // 7. Build transaction with type-specific fields
     const base = {
       id: uuidv4(),
       accountId,
@@ -462,13 +518,26 @@ export function parseXTBCashOperationsText(
 
   // Pass 3: drop sales Close position already recorded by hand, then trades
   // that already arrived via a daily confirmation PDF. Matching is by economic
-  // identity, not id — none of these share an id with this file. Both stay
-  // accounted for in the Total check: they are in the log already.
+  // identity, not id — none of these share an id with this file. Fee rows
+  // charged on a dropped trade go with it when the other record already took
+  // the fee out of its amount. All stay accounted for in the Total check:
+  // they are in the log already.
   const existing = existingTransactions ?? []
-  const closedByHand = findClosedByHandSales(transactions, existing)
-  const afterHand = closedByHand.size > 0 ? transactions.filter((t) => !closedByHand.has(t.id)) : transactions
-  const usedByHand = new Set([...closedByHand.values()].map((t) => t.id))
-  const dupes = findDuplicateTrades(afterHand, existing.filter((t) => !usedByHand.has(t.id)))
+  const dropped = new Set<string>()
+  const closedByHand: ClosedByHandMatch[] = []
+  for (const [id, match] of findClosedByHandSales(transactions, existing)) {
+    const sale = transactions.find((t) => t.id === id)!
+    const fees = (match.feePLN ?? 0) > 0 ? feesChargedWith([sale], transactions).filter((f) => !dropped.has(f.id)) : []
+    for (const t of [sale, ...fees]) dropped.add(t.id)
+    closedByHand.push({ sale, existing: match, fees })
+  }
+  const usedByHand = new Set(closedByHand.map((m) => m.existing.id))
+  const crossFormat = findDuplicateTradeGroups(
+    transactions.filter((t) => !dropped.has(t.id)),
+    existing.filter((t) => !usedByHand.has(t.id)),
+  )
+  for (const d of crossFormat) for (const t of [...d.candidates, ...d.candidateFees]) dropped.add(t.id)
+  const crossFormatSkipped = crossFormat.reduce((n, d) => n + d.candidates.length + d.candidateFees.length, 0)
 
   // Pass 4: the rows must add up to the file's Total row (the sum of its
   // Amount column). A gap means rows were dropped — a row type this parser
@@ -487,10 +556,12 @@ export function parseXTBCashOperationsText(
   }
 
   return {
-    transactions: dupes.size > 0 ? afterHand.filter((t) => !dupes.has(t.id)) : afterHand,
+    transactions: dropped.size > 0 ? transactions.filter((t) => !dropped.has(t.id)) : transactions,
     skipped,
-    crossFormatSkipped: dupes.size,
-    closedByHand: [...closedByHand].map(([id, match]) => ({ sale: transactions.find((t) => t.id === id)!, existing: match })),
+    crossFormatSkipped,
+    crossFormat,
+    internalTransfersSkipped: internalTransfers.size,
+    closedByHand,
     warnings,
   }
 }

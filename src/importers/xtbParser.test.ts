@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { computeAccountCashBalance } from '@/domain/calculations'
 import { walkPosition } from '@/domain/position'
 import type { Transaction } from '@/types'
+import { tradesToTransactions, type ParsedTrade } from './xtbConfirmationParser'
 import {
   parseCashOperationsTime,
   parseTradeComment,
@@ -356,5 +357,143 @@ describe('duplicates', () => {
     for (const other of [{ quantity: 4 }, { ticker: 'OTHER' }, { date: '2026-01-12' }, { accountId: 'elsewhere' }]) {
       expect(parse(sale, [{ ...base, ...other }]).transactions).toHaveLength(1)
     }
+  })
+})
+
+// ─── Confirmation PDFs: split fills and commission ─────────────────────────────
+
+describe('trades already imported from a daily confirmation', () => {
+  /** A confirmation line as the confirmation import stores it: one whole order, costs inside the amount. */
+  function pdfTrade(orderNo: string, type: 'buy' | 'sell', quantity: number, grossPLN: number, totalCosts = 0, date = '2026-01-05T14:00:00.000Z'): Transaction {
+    const trade: ParsedTrade = {
+      id: `pdf-${orderNo}`, direction: type, orderNo, ticker: 'ACME', exchange: 'US', instrument: 'Acme Corp',
+      quantity, unitPriceOriginal: grossPLN / quantity / 4, currency: 'USD', fxRate: 4, totalCosts, date, grossPLN,
+    }
+    return tradesToTransactions([trade], 'xtb', new Map())[0]
+  }
+
+  it('one confirmation line matches the order’s fills 0.5 + 2.0 in the export: one duplicate, both fills skipped', () => {
+    const r = parse(cashOps([
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:01', -160, '2', 'OPEN BUY ACME.US 2/2.5 @ 20.00'),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -40, '1', 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'),
+    ]), [pdfTrade('900', 'buy', 2.5, 200)])
+    expect(r.transactions).toEqual([])
+    expect(r.crossFormatSkipped).toBe(2)
+    expect(r.crossFormat).toHaveLength(1)
+    expect(r.crossFormat[0].candidates.map((t) => t.quantity).sort()).toEqual([0.5, 2])
+    expect(r.warnings).toEqual([])
+  })
+
+  it('five fills of 0.5 are one order of 2.5', () => {
+    const fills = [1, 2, 3, 4, 5].map((i) =>
+      row('Stock purchase', 'Acme Corp', `2026-01-05 14:00:0${i}`, -40, String(i), 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'))
+    const r = parse(cashOps(fills), [pdfTrade('900', 'buy', 2.5, 200)])
+    expect(r.transactions).toEqual([])
+    expect(r.crossFormat).toHaveLength(1)
+    expect(r.crossFormat[0].candidates).toHaveLength(5)
+  })
+
+  it('a confirmation per fill still matches fill to fill', () => {
+    const r = parse(cashOps([
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:01', -160, '2', 'OPEN BUY ACME.US 2/2.5 @ 20.00'),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -40, '1', 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'),
+    ]), [pdfTrade('900', 'buy', 0.5, 40), pdfTrade('901', 'buy', 2, 160)])
+    expect(r.transactions).toEqual([])
+    expect(r.crossFormat).toHaveLength(2)
+  })
+
+  it('a sale with commission: the export’s sale and its Commission row are both skipped', () => {
+    const r = parse(cashOps([
+      row('Commission', 'Acme Corp', '2026-01-05 14:00:00', -2.5, '2', ''),
+      row('Stock sale', 'Acme Corp', '2026-01-05 14:00:00', 600, '1', 'CLOSE BUY ACME.US 5 @ 30.00'),
+    ]), [pdfTrade('900', 'sell', 5, 600, 2.5)]) // the PDF stores 597.50
+    expect(r.transactions).toEqual([])
+    expect(r.crossFormatSkipped).toBe(2)
+    expect(r.crossFormat[0].candidateFees.map((f) => f.amountPLN)).toEqual([-2.5])
+    expect(r.warnings).toEqual([]) // both still accounted for in the Total
+  })
+
+  it('a buy with commission, split in fills, against one confirmation line', () => {
+    const r = parse(cashOps([
+      row('Commission', 'Acme Corp', '2026-01-05 14:00:00', -1, '3', ''),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -160, '2', 'OPEN BUY ACME.US 2/2.5 @ 20.00'),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -40, '1', 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'),
+    ]), [pdfTrade('900', 'buy', 2.5, 200, 1)]) // −201 in the PDF
+    expect(r.transactions).toEqual([])
+    expect(r.crossFormatSkipped).toBe(3)
+  })
+
+  it('rows next to a duplicate that are not part of it still import', () => {
+    const r = parse(cashOps([
+      row('Commission', 'Other Co', '2026-01-05 14:00:00', -1, '5', ''),               // another instrument’s fee
+      row('Commission', 'Acme Corp', '2026-01-05 15:00:00', -1, '4', ''),              // another time
+      row('Stock purchase', 'Acme Corp', '2026-01-05 15:00:00', -80, '3', 'OPEN BUY ACME.US 1/3 @ 20.00'), // another order, incomplete
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:01', -160, '2', 'OPEN BUY ACME.US 2/2.5 @ 20.00'),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -40, '1', 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'),
+    ]), [pdfTrade('900', 'buy', 2.5, 200)])
+    expect(r.transactions.map((t) => t.externalId)).toEqual(['5', '4', '3'])
+    expect(r.crossFormatSkipped).toBe(2)
+  })
+
+  it('a confirmation of a different size or amount is not a match', () => {
+    const fills = cashOps([
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:01', -160, '2', 'OPEN BUY ACME.US 2/2.5 @ 20.00'),
+      row('Stock purchase', 'Acme Corp', '2026-01-05 14:00:00', -40, '1', 'OPEN BUY ACME.US 0.5/2.5 @ 20.00'),
+    ])
+    expect(parse(fills, [pdfTrade('900', 'buy', 3, 200)]).transactions).toHaveLength(2)
+    expect(parse(fills, [pdfTrade('900', 'buy', 2.5, 230)]).transactions).toHaveLength(2)
+  })
+})
+
+// ─── Transfers inside the file ─────────────────────────────────────────────────
+
+describe('transfers that cancel out inside the file', () => {
+  it('a pair moving money between two parts of the account is skipped and still adds up', () => {
+    const r = parse(cashOps([
+      row('Subaccount transfer', '', '2026-01-05 10:00:00', 300, '3', 'Transfer to plan', 'Investment Plans'),
+      row('Subaccount transfer', '', '2026-01-05 10:00:00', -300, '2', 'Transfer to plan', 'My Trades'),
+      row('Deposit', '', '2026-01-02 09:00:00', 1000, '1', '', ''),
+    ]))
+    expect(r.transactions.map((t) => t.type)).toEqual(['deposit'])
+    expect(r.internalTransfersSkipped).toBe(2)
+    expect(r.warnings).toEqual([])
+  })
+
+  it('legs that differ in time, comment, product or amount are not a pair', () => {
+    for (const other of [
+      row('Transfer', '', '2026-01-05 10:00:01', 300, '3', 'Move', 'Investment Plans'),
+      row('Transfer', '', '2026-01-05 10:00:00', 300, '3', 'Other', 'Investment Plans'),
+      row('Transfer', '', '2026-01-05 10:00:00', 300, '3', 'Move', 'My Trades'),
+      row('Transfer', '', '2026-01-05 10:00:00', 299, '3', 'Move', 'Investment Plans'),
+    ]) {
+      const r = parse(cashOps([other, row('Transfer', '', '2026-01-05 10:00:00', -300, '2', 'Move', 'My Trades')]))
+      expect(r.internalTransfersSkipped).toBe(0)
+      expect(r.transactions.map((t) => t.type).sort()).toEqual(['deposit', 'withdrawal'])
+    }
+  })
+})
+
+// ─── Commission on a sale closed by hand ───────────────────────────────────────
+
+describe('commission on a sale already closed by hand', () => {
+  const file = cashOps([
+    row('Commission', 'Acme Corp', '2026-01-05 15:00:00', -2.5, '8', ''),
+    row('Stock sale', 'Acme Corp', '2026-01-05 15:00:00', 600, '7', 'CLOSE BUY ACME.US 5 @ 30.00'),
+  ])
+  const hand: Transaction = {
+    id: 'hand', accountId: 'xtb', type: 'sell', date: '2026-01-05', amountPLN: 597.5, ticker: 'ACME', quantity: 5,
+    externalId: 'close-sell-h1', source: 'manual', createdAt: '',
+  }
+
+  it('is skipped with the sale when Close position recorded a fee', () => {
+    const r = parse(file, [{ ...hand, feePLN: 2.5 }])
+    expect(r.transactions).toEqual([])
+    expect(r.closedByHand[0].fees.map((f) => f.amountPLN)).toEqual([-2.5])
+  })
+
+  it('is imported when no fee was entered there', () => {
+    const r = parse(file, [{ ...hand, amountPLN: 600 }])
+    expect(r.transactions.map((t) => t.type)).toEqual(['fee'])
+    expect(r.closedByHand[0].fees).toEqual([])
   })
 })
