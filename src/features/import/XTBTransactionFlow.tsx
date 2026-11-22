@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
 import { parseXTBCashOperations, type ParseResult } from '@/importers/xtbParser'
+import { StatementCurrencyError } from '@/importers/xtbStatement'
 import type {
   CostBasisDiffRow,
   UnmatchedRow,
@@ -136,7 +137,9 @@ export function XTBTransactionFlow({
         setParseResult(result)
         setStep('preview')
       } catch (err) {
-        setParseError(err instanceof Error ? err.message : String(err))
+        // A statement in another currency is refused on purpose: its message says so in full.
+        if (err instanceof StatementCurrencyError) setParseError(err.message)
+        else setParseError(`Failed to read the file: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
     void parse()
@@ -185,7 +188,7 @@ export function XTBTransactionFlow({
   if (parseError) {
     return (
       <ImportErrorCard
-        message={`Failed to parse CSV: ${parseError}`}
+        message={parseError}
         onBack={onBack}
       />
     )
@@ -241,7 +244,7 @@ function PreviewStep({
   onBack: () => void
 }) {
   const [warningsOpen, setWarningsOpen] = useState(false)
-  const { transactions, skipped, crossFormatSkipped, crossFormat, internalTransfersSkipped, closedByHand, warnings } = parseResult
+  const { transactions, skipped, crossFormatSkipped, crossFormat, internalTransfersSkipped, closedByHand, warnings, period } = parseResult
 
   const dateRange = useMemo(() => {
     if (transactions.length === 0) return null
@@ -321,6 +324,14 @@ function PreviewStep({
 
         {/* Meta */}
         <div className="border border-borderLight rounded-lg p-4 bg-background flex flex-col gap-2">
+          {period && (
+            <div className="flex justify-between text-sm">
+              <span className="text-accent tracking-[-0.35px]">Statement period</span>
+              <span className="text-foreground font-medium tracking-[-0.35px]">
+                {formatDate(period.from.slice(0, 10))} – {formatDate(period.to.slice(0, 10))}
+              </span>
+            </div>
+          )}
           {dateRange && (
             <div className="flex justify-between text-sm">
               <span className="text-accent tracking-[-0.35px]">Date range</span>

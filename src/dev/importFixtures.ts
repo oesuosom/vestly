@@ -210,6 +210,7 @@ const xtbParseResult: XTBTransactionFlowDevState['parseResult'] = {
     { row: 14, message: 'Could not parse sale comment: "CLOSE BUY @ market"', rawData: '{"type":"Stock sale","comment":"CLOSE BUY @ market"}' },
     { row: 15, message: 'Not imported: "Swap" is a CFD row, and Vestly tracks shares only', rawData: '{"type":"Swap","amount":"-0.12"}' },
   ],
+  period: { from: '2025-01-01', to: '2025-06-30T23:59:59.000Z' },
 }
 
 const xtbUnmatchedRows: XTBTransactionFlowDevState['unmatchedRows'] = [

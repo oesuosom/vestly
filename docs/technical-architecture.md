@@ -98,7 +98,7 @@ A typed wrapper over `Settings`, persisted to `ft_settings` on every change. It 
 |---|---|---|
 | `pko_ike` | PKO IKE Obligacje Skarbowe CSV | Holdings |
 | `xtb_holdings` | XTB Portfolio CSV | Holdings |
-| `xtb_transactions` | XTB Cash Operations CSV | Transactions |
+| `xtb_transactions` | XTB statement .xlsx (its Cash Operations sheet) or Cash Operations CSV | Transactions |
 | `xtb_confirmation` | XTB daily confirmation PDF | Transactions |
 | `emakler_portfolio` | eMakler Portfolio CSV (CP1250) | Holdings |
 | `emakler_order_history` | eMakler Order History CSV (CP1250) | Holdings |
