@@ -20,10 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The holding panel's close button has a name** — the icon-only button that closes a holding
-  panel (Cash included) was read out by screen readers as just "button". It is now announced as
-  "Close", and its icon is hidden from assistive technology. It looks the same, and it still
-  shows the browser's focus ring when you reach it with Tab.
+- **Icon-only buttons have names** — buttons that show only an icon were read out by screen
+  readers as just "button": the holding panel's close button (Cash included), dialog and toast
+  close buttons, the account page's menu and price refresh, each holding's row menu, the
+  Portfolio allocation switch between amounts and percentages, the photo buttons in Settings ›
+  Account, and the provider settings and API key buttons in Settings › Market Data and AI
+  Providers (the Anthropic switch had no name either). Each now has a short name, like "Close",
+  "Dismiss", "Refresh prices" or "Show EODHD API key", and the per-row buttons name their row,
+  like "Actions for Demo Equity Fund" or "Delete Buy, Demo Equity Fund, 2 Jan 2026". Their icons
+  are hidden from assistive technology. An icon-only button without a name now fails the type
+  check. Nothing looks different.
 
 - **Provider switches are respected; nothing goes to Anthropic while AI is off** — the on/off
   switches in Settings › Market Data and AI Providers were saved but mostly ignored, so with AI

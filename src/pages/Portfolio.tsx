@@ -637,12 +637,13 @@ export function Portfolio() {
                 </span>
                 <button
                   onClick={() => setShowAsPercent((p) => !p)}
+                  aria-label={showAsPercent ? 'Show amounts' : 'Show percentages'}
                   className="absolute top-[18px] right-6 text-accent hover:text-foreground transition-colors"
                 >
                   <IconSwap
                     state={showAsPercent ? 'b' : 'a'}
-                    iconA={<PercentCircle className="size-5" />}
-                    iconB={<Coins className="size-5" />}
+                    iconA={<PercentCircle className="size-5" aria-hidden="true" />}
+                    iconB={<Coins className="size-5" aria-hidden="true" />}
                   />
                 </button>
                 <AllocationDonut

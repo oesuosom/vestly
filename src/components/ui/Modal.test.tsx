@@ -113,3 +113,14 @@ describe('Modal — Escape with nested overlays', () => {
     expect(closeOuter).not.toHaveBeenCalled()
   })
 })
+
+describe('Modal — close button', () => {
+  it.each(['default', 'card'] as const)('is named Close and closes the %s modal', (variant) => {
+    const onClose = vi.fn()
+    render(<Modal isOpen onClose={onClose} title="Solo" variant={variant}><p>Body</p></Modal>)
+    const close = screen.getByRole('button', { name: 'Close' })
+    expect(close.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    fireEvent.click(close)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})

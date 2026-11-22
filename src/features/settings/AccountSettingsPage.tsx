@@ -35,6 +35,7 @@ export function AccountSettingsPage() {
             variant="secondary"
             iconPosition="only"
             icon={EditSmall}
+            aria-label="Change photo"
             onClick={() => fileInputRef.current?.click()}
           />
         </div>
@@ -51,6 +52,7 @@ export function AccountSettingsPage() {
             variant="secondary"
             iconPosition="only"
             icon={Trash}
+            aria-label="Remove photo"
             onClick={() => updateUserAvatar(undefined)}
           />
         </div>

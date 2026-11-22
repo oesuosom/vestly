@@ -97,3 +97,14 @@ describe('AccountDetail — row actions', () => {
     expect(within(row('Cash')).queryByRole('button')).toBeNull()
   })
 })
+
+describe('AccountDetail — icon-only buttons are named', () => {
+  it('names the account menu, the price refresh and each row menu by its holding', () => {
+    renderPage()
+    expect(screen.getByRole('button', { name: 'Account actions' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Refresh prices' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Example Corp' }))
+    expect(document.querySelector('[data-dropdown-popover]')).not.toBeNull()
+  })
+})

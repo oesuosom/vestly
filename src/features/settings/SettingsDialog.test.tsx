@@ -114,3 +114,11 @@ describe('SettingsDialog focus', () => {
     expect(document.activeElement).toBe(document.body)
   })
 })
+
+describe('SettingsDialog — Account page', () => {
+  it('names the icon-only photo buttons', () => {
+    render(<SettingsDialog isOpen onClose={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Change photo' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove photo' })).toBeTruthy()
+  })
+})

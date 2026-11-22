@@ -88,3 +88,12 @@ describe('Activity — ?account=', () => {
     expect(where().dataset.navigation).toBe('REPLACE')
   })
 })
+
+describe('Activity — delete buttons', () => {
+  it('says which transaction each one deletes', () => {
+    renderAt('/activity')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Deposit, Demo Broker, 1 Feb 2026' }))
+    expect(portfolio.deleteTransaction).toHaveBeenCalledWith('t1')
+    expect(screen.getByRole('button', { name: 'Delete Deposit, Other Broker, 1 Feb 2026' })).toBeTruthy()
+  })
+})
