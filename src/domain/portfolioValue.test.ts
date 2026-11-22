@@ -53,3 +53,13 @@ describe('computePortfolioAt — closed holdings', () => {
     expect(computePortfolioAt('2026-02-01', [crypto], cryptoLog, null, TODAY)).toBeCloseTo(1310, 9)
   })
 })
+
+describe('computePortfolioAt — skip', () => {
+  it('leaves skipped holdings out, and keeps the rest', () => {
+    const open: Holding = { ...closed, id: 'open', closedAt: undefined, currentPrice: 200 }
+    const withOpen: Account = { ...account, holdings: [open], closedHoldings: [] }
+    const without = computePortfolioAt('2026-02-01', [withOpen], [], null, TODAY, new Set(['open']))
+    expect(without).toBeUndefined()
+    expect(computePortfolioAt('2026-02-01', [withOpen], [], null, TODAY)).toBeGreaterThan(0)
+  })
+})

@@ -16,12 +16,16 @@ const portfolio = {
 }
 vi.mock('@/context/PortfolioContext', () => ({ usePortfolio: () => portfolio }))
 
-vi.mock('@/context/SettingsContext', () => ({
-  useSettings: () => ({ priceProvider: { enabled: false, apiKey: '' } }),
-}))
+const settings = {
+  priceProvider: { id: 'eodhd' as const, enabled: false, apiKey: '' },
+  coinGeckoEnabled: true,
+}
+vi.mock('@/context/SettingsContext', () => ({ useSettings: () => settings }))
 
 afterEach(() => {
   cleanup()
+  settings.priceProvider = { id: 'eodhd', enabled: false, apiKey: '' }
+  settings.coinGeckoEnabled = true
   portfolio.accounts = []
   portfolio.transactions = []
   vi.clearAllMocks()
@@ -291,5 +295,43 @@ describe('HoldingSlidePanel — the Cash row', () => {
   it('leaves a real holding its actions', () => {
     render(<HoldingSlidePanel holding={holding} isOpen onClose={() => {}} />)
     expect(actions()).toEqual(['Edit', 'Close Position', 'Delete'])
+  })
+})
+
+describe('HoldingSlidePanel — price provider off', () => {
+  const listed: Holding = { ...holding, ticker: 'EXMP', exchange: 'US' }
+  const coin: Holding = { ...holding, name: 'Test Coin', category: 'crypto', ticker: 'BTC', exchange: 'CC' }
+
+  it('says the price isn’t updated and hides Refresh Price while EODHD is off, key or not', () => {
+    settings.priceProvider = { id: 'eodhd', enabled: false, apiKey: 'fake-eodhd' }
+    render(<HoldingSlidePanel holding={listed} isOpen onClose={() => {}} />)
+    expect(screen.getByText('This price isn’t updated automatically')).toBeTruthy()
+    expect(screen.getByText('EODHD is off, so the current price is the last one you entered or imported.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Refresh Price' })).toBeNull()
+  })
+
+  it('names CoinGecko for crypto', () => {
+    settings.coinGeckoEnabled = false
+    render(<HoldingSlidePanel holding={coin} isOpen onClose={() => {}} />)
+    expect(screen.getByText('CoinGecko is off, so the current price is the last one you entered or imported.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Refresh Price' })).toBeNull()
+  })
+
+  it('shows Refresh Price and no warning while the provider is on', () => {
+    settings.priceProvider = { id: 'eodhd', enabled: true, apiKey: 'fake-eodhd' }
+    render(<HoldingSlidePanel holding={listed} isOpen onClose={() => {}} />)
+    expect(screen.queryByText('This price isn’t updated automatically')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Refresh Price' })).toBeTruthy()
+  })
+
+  it('crypto refreshes through CoinGecko even with EODHD off', () => {
+    render(<HoldingSlidePanel holding={coin} isOpen onClose={() => {}} />)
+    expect(screen.queryByText('This price isn’t updated automatically')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Refresh Price' })).toBeTruthy()
+  })
+
+  it('shows no warning for a holding nothing can price, like a bond', () => {
+    render(<HoldingSlidePanel holding={{ ...holding, category: 'bond' }} isOpen onClose={() => {}} />)
+    expect(screen.queryByText('This price isn’t updated automatically')).toBeNull()
   })
 })

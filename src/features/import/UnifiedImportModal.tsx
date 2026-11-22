@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 import { usePortfolio } from '@/context/PortfolioContext'
+import { useSettings } from '@/context/SettingsContext'
+import { canResolveExchangeRates } from '@/importers/eMaklerImport'
 import { IMPORT_FILE_ACCEPT } from '@/importers/xlsReader'
 import { fileToCSVText } from '@/importers/xlsReader'
 import { parseCSVRaw, detectFormat } from '@/importers/csvParser'
@@ -83,6 +85,7 @@ export function UnifiedImportModal({
   onImportDone,
 }: UnifiedImportModalProps) {
   const { accounts } = usePortfolio()
+  const settings = useSettings()
 
   // Wizard
   const [step, setStep] = useState<Step>('upload')
@@ -290,6 +293,12 @@ export function UnifiedImportModal({
                   {allUnsupported
                     ? 'None of the selected files are supported'
                     : 'Some files are not supported and will be ignored'}
+                </InlineAlert>
+              )}
+
+              {isEMakler && !canResolveExchangeRates(settings) && (
+                <InlineAlert variant="warning">
+                  This import needs exchange rates to convert foreign prices to PLN, and Narodowy Bank Polski and EODHD are both off. Turn on Narodowy Bank Polski in Settings › Market Data before you continue.
                 </InlineAlert>
               )}
 

@@ -1,3 +1,4 @@
+import { assertProviderOn, type ProviderSettings } from './providers'
 import type { DividendCacheEntry, NewsCacheEntry } from '@/storage/portfolioStore'
 
 export type InsightTopHolding = {
@@ -212,13 +213,62 @@ For Polish government bonds, the ticker encodes maturity: EDOMMYY means it matur
 
 Use markup: wrap positive amounts and percentages in {+X} (e.g. {+329 PLN}, {+40.9%}), negative amounts and percentages in {-X} (e.g. {-14.2%}, {-50 PLN}), ticker and instrument names in [TICKER]. No financial advice language.`
 
+/** A non-2xx answer from Anthropic, with the reason Anthropic gave. */
+export class AnthropicApiError extends Error {
+  readonly status: number
+  readonly reason: string
+  constructor(status: number, reason: string) {
+    super(`Claude API error ${status}: ${reason}`)
+    this.name = 'AnthropicApiError'
+    this.status = status
+    this.reason = reason
+  }
+
+  static async from(res: Response): Promise<AnthropicApiError> {
+    const body = await res.text().catch(() => '')
+    let reason = ''
+    try {
+      reason = (JSON.parse(body) as { error?: { message?: string } }).error?.message ?? ''
+    } catch {
+      // Not JSON (e.g. a proxy error page): no reason to show.
+    }
+    return new AnthropicApiError(res.status, reason.trim())
+  }
+}
+
+const KEY_HINT = 'Check the key in Settings → AI Providers, then try again.'
+
+/** What went wrong generating an insight, in plain words for the insight card. */
+export function describeInsightError(err: unknown): string {
+  if (err instanceof AnthropicApiError) {
+    const { status, reason } = err
+    if (status === 401) return `Anthropic answered: invalid API key (401). ${KEY_HINT}`
+    if (status === 403) return `Anthropic answered: this key isn't allowed to do that (403). ${KEY_HINT}`
+    if (status === 429) return 'Anthropic answered: too many requests (429). Wait a minute, then try again.'
+    if (status === 529 || status === 503) return `Anthropic answered: it's overloaded right now (${status}). Try again in a few minutes.`
+    const said = reason ? reason.replace(/\.$/, '') : 'an unexpected error'
+    return `Anthropic answered: ${said} (${status}). Try again, or check Settings → AI Providers.`
+  }
+  if (err instanceof EmptyAnswerError) return 'Anthropic sent back an empty answer. Try again.'
+  return "Couldn't reach Anthropic. Check your connection, then try again."
+}
+
+class EmptyAnswerError extends Error {
+  constructor() {
+    super('Empty response from Claude API')
+    this.name = 'EmptyAnswerError'
+  }
+}
+
 const CLAUDE_HEADERS = {
   'anthropic-version': '2023-06-01',
   'anthropic-dangerous-direct-browser-access': 'true',
   'content-type': 'application/json',
 }
 
-export async function generateAccountInsight(input: AccountInsightInput, apiKey: string): Promise<string> {
+export async function generateAccountInsight(input: AccountInsightInput, settings: ProviderSettings): Promise<string> {
+  assertProviderOn(settings, 'anthropic')
+  const apiKey = settings.claudeApiKey
   const userMessage = buildAccountInsightPrompt(input)
 
   const res = await fetch('/api/anthropic/v1/messages', {
@@ -233,14 +283,11 @@ export async function generateAccountInsight(input: AccountInsightInput, apiKey:
     }),
   })
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => res.statusText)
-    throw new Error(`Claude API error ${res.status}: ${body}`)
-  }
+  if (!res.ok) throw await AnthropicApiError.from(res)
 
   const data = (await res.json()) as ClaudeResponse
   const text = data.content?.[0]?.text?.trim()
-  if (!text) throw new Error('Empty response from Claude API')
+  if (!text) throw new EmptyAnswerError()
 
   // If too short (< 30 words), retry once with an explicit nudge
   const wordCount = text.split(/\s+/).length
@@ -304,7 +351,9 @@ export function parseAccountInsightMarkup(text: string): Array<string | { type: 
   return parts
 }
 
-export async function generateInsight(input: InsightInput, apiKey: string): Promise<string> {
+export async function generateInsight(input: InsightInput, settings: ProviderSettings): Promise<string> {
+  assertProviderOn(settings, 'anthropic')
+  const apiKey = settings.claudeApiKey
   const userMessage = buildInsightPrompt(input)
 
   const res = await fetch('/api/anthropic/v1/messages', {
@@ -319,13 +368,10 @@ export async function generateInsight(input: InsightInput, apiKey: string): Prom
     }),
   })
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => res.statusText)
-    throw new Error(`Claude API error ${res.status}: ${body}`)
-  }
+  if (!res.ok) throw await AnthropicApiError.from(res)
 
   const data = (await res.json()) as ClaudeResponse
   const text = data.content?.[0]?.text
-  if (!text) throw new Error('Empty response from Claude API')
+  if (!text) throw new EmptyAnswerError()
   return text.trim()
 }

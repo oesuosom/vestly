@@ -1,3 +1,5 @@
+import type { ProviderSettings } from '@/services/providers'
+
 // ─────────────────────────────────────────
 // Provider interface types
 // ─────────────────────────────────────────
@@ -26,8 +28,9 @@ export interface PriceProvider {
   id: string
   name: string
   supported: PriceProviderSupport
-  fetchPrices(tickers: NormalizedTicker[], apiKey: string): Promise<PriceResult[]>
-  fetchExchangeRate?(from: string, to: string, apiKey: string): Promise<number>
+  /** Throws ProviderOffError when the provider is switched off. */
+  fetchPrices(tickers: NormalizedTicker[], settings: ProviderSettings): Promise<PriceResult[]>
+  fetchExchangeRate?(from: string, to: string, settings: ProviderSettings): Promise<number>
 }
 
 // ─────────────────────────────────────────
@@ -44,4 +47,6 @@ export type PriceCacheEntry = {
 export type PriceCache = {
   entries: PriceCacheEntry[]
   cachedAt: string  // ISO timestamp of the cache write
+  /** Price providers that were on when the cache was written, e.g. "eodhd,coingecko". */
+  providers?: string
 }

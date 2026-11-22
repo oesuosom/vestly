@@ -45,6 +45,8 @@ function getInterpolatedPrice(
  * Closed holdings count on the days before their close date, the same way, except that
  * with no cached prices they are interpolated up to the close date, crypto included:
  * both ends of the line are known.
+ * Holdings in `skip` are left out entirely — the chart passes the ones without
+ * price history so they aren't drawn as a straight line.
  * Returns undefined only when no holdings were active on that date.
  */
 export function computePortfolioAt(
@@ -53,11 +55,13 @@ export function computePortfolioAt(
   transactions: Transaction[],
   historiesMap: Map<string, HoldingPricePoint[]> | null,
   today: Date,
+  skip?: ReadonlySet<string>,
 ): number | undefined {
   let total = 0
   let hasAny = false
 
   function addHolding(account: Account, holding: Holding) {
+    if (skip?.has(holding.id)) return
     if (date < holding.purchaseDate) return
     if (holding.closedAt && date >= holding.closedAt) return
 

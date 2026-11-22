@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Account } from '@/types'
+import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import {
+  describeInsightError,
   generateAccountInsight,
   type AccountInsightInput,
   type AccountInsightHolding,
@@ -48,7 +50,7 @@ type Props = {
   ikeRemainingPLN?: number
   ikzeLimitPLN?: number
   ikzeRemainingPLN?: number
-  claudeApiKey: string
+  settings: ProviderSettings
 }
 
 export function useAccountInsight({
@@ -61,7 +63,7 @@ export function useAccountInsight({
   ikeRemainingPLN,
   ikzeLimitPLN,
   ikzeRemainingPLN,
-  claudeApiKey,
+  settings,
 }: Props): UseAccountInsightResult {
   const [summary, setSummary] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -71,12 +73,19 @@ export function useAccountInsight({
 
   const isFetchingRef = useRef(false)
 
+  // Nothing about the account is sent to Anthropic unless AI is on with a key.
+  const aiOn = isProviderOn(settings, 'anthropic')
+  const settingsRef = useRef(settings)
+  useEffect(() => {
+    settingsRef.current = settings
+  })
+
   const regenerate = useCallback(() => {
     setForceRefresh((prev) => !prev)
   }, [])
 
   useEffect(() => {
-    if (!account || !claudeApiKey || currentValuePLN === 0) return
+    if (!account || !aiOn || currentValuePLN === 0) return
     if (isFetchingRef.current) return
 
     const inputHash = buildInputHash(account.id, currentValuePLN)
@@ -133,7 +142,7 @@ export function useAccountInsight({
     }
 
     const run = async () => {
-      const text = await generateAccountInsight(insightInput, claudeApiKey)
+      const text = await generateAccountInsight(insightInput, settingsRef.current)
       const now = new Date().toISOString()
       const cache: AccountInsightCache = { summary: text, cachedAt: now, inputHash }
       saveAccountInsightCache(account.id, cache)
@@ -143,8 +152,7 @@ export function useAccountInsight({
 
     run()
       .catch((err) => {
-        const msg = err instanceof Error ? err.message : 'Failed to generate insight'
-        setError(msg)
+        setError(describeInsightError(err))
       })
       .finally(() => {
         isFetchingRef.current = false
@@ -156,7 +164,7 @@ export function useAccountInsight({
   // a paid Anthropic request on every re-render. The cache key (`inputHash`)
   // already covers what actually changes the answer.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claudeApiKey, account?.id, currentValuePLN, forceRefresh])
+  }, [aiOn, settings.claudeApiKey, account?.id, currentValuePLN, forceRefresh])
 
   return { summary, isLoading, error, cachedAt, regenerate }
 }

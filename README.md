@@ -47,7 +47,11 @@ Yahoo Finance and NBP (exchange rates) require no keys. All keys are stored in y
 ## Privacy model
 
 - All portfolio data lives in `localStorage` — nothing is uploaded anywhere
-- Price/AI providers are called directly with your own keys, only when you enable them
+- Price/AI providers are called directly from your browser, with your own keys, and only while
+  their switch is on in Settings — a provider that's off is never contacted, even with a key saved
+- Out of the box, Yahoo Finance, NBP and CoinGecko (no key needed) are on; Anthropic and EODHD
+  stay off until you switch them on. With Anthropic on, a summary of your holdings (names,
+  tickers, values, weights and returns) is sent to Anthropic to write the AI insights
 - Backups are plain JSON files you control; API keys are excluded from them
 
 ## Project structure

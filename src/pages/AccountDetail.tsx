@@ -12,7 +12,11 @@ import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import { useHistoricalPrices } from '@/hooks/useHistoricalPrices'
 import { useAccountInsight } from '@/hooks/useAccountInsight'
-import { parseAccountInsightMarkup } from '@/services/claude'
+import { isProviderOn, isProviderSwitchedOn } from '@/services/providers'
+import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCoverage'
+import { useOpenSettings } from '@/features/settings/openSettings'
+import { AccountInsightPanel, type AiAvailability } from '@/features/accounts/AccountInsightPanel'
+import { MissingHistoryPill, NoPriceHistory } from '@/components/charts/HistoryNotices'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
 import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
@@ -26,7 +30,6 @@ import { HoldingIcon } from '@/components/ui/HoldingIcon'
 import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { DATE_RANGES } from '@/types'
 import type { DateRange } from '@/types'
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { DropdownMenu, DropdownMenuGroup, DropdownItem, DropdownPopover } from '@/components/ui/Dropdown'
 import { PortfolioAreaChart } from '@/components/charts/PortfolioAreaChart'
@@ -58,31 +61,6 @@ const CATEGORY_LABELS: Record<AssetCategory, string> = {
   bond: 'Bond',
   crypto: 'Crypto',
   cash: 'Cash',
-}
-
-// ─────────────────────────────────────────
-// Inline rich-text renderer for AI insight
-// ─────────────────────────────────────────
-
-function InsightText({ text }: { text: string }) {
-  const parts = parseAccountInsightMarkup(text)
-  return (
-    <p className="text-[20px] leading-relaxed text-foreground tracking-[-0.5px]">
-      {parts.map((part, i) => {
-        if (typeof part === 'string') return <span key={i}>{part}</span>
-        if (part.type === 'positive') return <span key={i} className="text-positive">{part.text}</span>
-        if (part.type === 'negative') return <span key={i} className="text-negative">{part.text}</span>
-        return (
-          <span
-            key={i}
-            className="underline decoration-dotted decoration-border underline-offset-2"
-          >
-            {part.text}
-          </span>
-        )
-      })}
-    </p>
-  )
 }
 
 // ─────────────────────────────────────────
@@ -184,10 +162,22 @@ export function AccountDetail() {
   } = usePortfolio()
   const contributions = getStore().contributions
   const settings = useSettings()
-  const { historicalPrices } = useHistoricalPrices(accounts, settings.coinGeckoApiKey, settings.priceProvider.apiKey)
+  const openSettings = useOpenSettings()
+  const { historicalPrices } = useHistoricalPrices(accounts, settings)
 
   const account = accounts.find((a) => slugify(a.name) === accountSlug)
   const accountId = account?.id
+
+  // Which holdings the chart can draw with the providers that are on.
+  const coverage = useMemo(
+    () => getHistoryCoverage(account ? [account] : [], settings, historicalPrices),
+    [account, settings, historicalPrices],
+  )
+  const missingMessage = missingHistoryMessage(coverage.missing)
+
+  const aiAvailability: AiAvailability = isProviderOn(settings, 'anthropic')
+    ? 'on'
+    : isProviderSwitchedOn(settings, 'anthropic') ? 'no-key' : 'off'
 
   // ── State ──────────────────────────────
   const [selectedHoldingId, setSelectedHoldingId] = useState<string | null>(null)
@@ -272,7 +262,7 @@ export function AccountDetail() {
     ikeRemainingPLN: ikeEntry ? Math.max(0, ikeEntry.limit - ikeEntry.contributed) : undefined,
     ikzeLimitPLN: ikzeEntry?.limit,
     ikzeRemainingPLN: ikzeEntry ? Math.max(0, ikzeEntry.limit - ikzeEntry.contributed) : undefined,
-    claudeApiKey: settings.claudeApiKey,
+    settings,
   })
 
   // ── Table columns ──────────────────────
@@ -601,41 +591,48 @@ export function AccountDetail() {
             </button>
           </div>
 
-          {/* Chart */}
-          <div className="h-[180px] shrink-0">
-            <PortfolioAreaChart
-              snapshots={accountSnapshots}
-              accounts={[account]}
-              transactions={accountTransactions}
-              dateRange={dateRange}
-              historicalPrices={historicalPrices ?? undefined}
-              minimal
-            />
-          </div>
+          {coverage.noHistory ? (
+            // Nothing to draw: the message takes the chart's and range picker's place.
+            <div className="flex-1 min-h-0 flex items-center justify-center px-6 pb-4">
+              <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+            </div>
+          ) : (
+            <>
+              {/* Chart */}
+              <div className="relative h-[180px] shrink-0">
+                <PortfolioAreaChart
+                  snapshots={accountSnapshots}
+                  accounts={[account]}
+                  transactions={accountTransactions}
+                  dateRange={dateRange}
+                  historicalPrices={historicalPrices ?? undefined}
+                  coverage={coverage}
+                  minimal
+                />
+                {missingMessage && (
+                  <MissingHistoryPill message={missingMessage} className="absolute inset-x-0 bottom-0" />
+                )}
+              </div>
 
-          <div className="flex items-center justify-center p-4 shrink-0">
-            <SegmentedControl options={DATE_RANGES} value={dateRange} onChange={setDateRange} />
-          </div>
+              <div className="flex items-center justify-center p-4 shrink-0">
+                <SegmentedControl options={DATE_RANGES} value={dateRange} onChange={setDateRange} />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Card 2: AI Insight + Stats */}
         <div className="bg-surface border border-borderLight rounded-xl w-[440px] h-[360px] flex flex-col overflow-hidden shrink-0">
           {/* Insight text */}
           <div className="flex-1 p-6 overflow-y-auto min-h-0">
-            {!settings.claudeApiKey ? (
-              <p className="text-sm text-accent">
-                Add a Claude API key in Settings to enable AI insights.
-              </p>
-            ) : insight.isLoading && !insight.summary ? (
-              <div className="flex items-center gap-2">
-                <LoadingSpinner size="sm" />
-                <span className="text-sm text-accent">Generating insight…</span>
-              </div>
-            ) : insight.summary ? (
-              <InsightText text={insight.summary} />
-            ) : insight.error ? (
-              <p className="text-xs text-negative font-mono break-all">{insight.error}</p>
-            ) : null}
+            <AccountInsightPanel
+              availability={aiAvailability}
+              summary={insight.summary}
+              isLoading={insight.isLoading}
+              error={insight.error}
+              onOpenSettings={() => openSettings('ai-providers')}
+              onRetry={insight.regenerate}
+            />
           </div>
 
           {/* Stats strip */}

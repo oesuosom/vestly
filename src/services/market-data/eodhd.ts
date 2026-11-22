@@ -1,5 +1,6 @@
 import { toEODHDTicker, currencyForExchange } from './tickerUtils'
 import type { NormalizedTicker, PriceProvider, PriceResult } from './types'
+import { assertProviderOn, type ProviderSettings } from '@/services/providers'
 
 // ─────────────────────────────────────────
 // EODHD API base URL
@@ -39,7 +40,9 @@ export const eodhdProvider: PriceProvider = {
     crypto: false,   // EODHD crypto endpoint requires a paid plan; handled via Yahoo Finance
   },
 
-  async fetchExchangeRate(from: string, to: string, apiKey: string): Promise<number> {
+  async fetchExchangeRate(from: string, to: string, settings: ProviderSettings): Promise<number> {
+    assertProviderOn(settings, 'eodhd')
+    const apiKey = settings.priceProvider.apiKey
     const pair = `${from}${to}.FOREX`
     const url = `${EODHD_BASE}/real-time/${pair}?api_token=${apiKey}&fmt=json`
     const res = await fetch(url)
@@ -50,7 +53,9 @@ export const eodhdProvider: PriceProvider = {
     return rate
   },
 
-  async fetchPrices(tickers: NormalizedTicker[], apiKey: string): Promise<PriceResult[]> {
+  async fetchPrices(tickers: NormalizedTicker[], settings: ProviderSettings): Promise<PriceResult[]> {
+    assertProviderOn(settings, 'eodhd')
+    const apiKey = settings.priceProvider.apiKey
     const now = new Date().toISOString()
 
     // Determine which currency conversion rates we need
@@ -63,7 +68,7 @@ export const eodhdProvider: PriceProvider = {
 
     if (needsUSD) {
       try {
-        usdPlnRate = await eodhdProvider.fetchExchangeRate!('USD', 'PLN', apiKey)
+        usdPlnRate = await eodhdProvider.fetchExchangeRate!('USD', 'PLN', settings)
       } catch (err) {
         console.error('[EODHD] Failed to fetch USD/PLN rate:', err)
         return tickers.map((t) => ({
@@ -78,7 +83,7 @@ export const eodhdProvider: PriceProvider = {
 
     if (needsEUR) {
       try {
-        eurPlnRate = await eodhdProvider.fetchExchangeRate!('EUR', 'PLN', apiKey)
+        eurPlnRate = await eodhdProvider.fetchExchangeRate!('EUR', 'PLN', settings)
       } catch (err) {
         console.error('[EODHD] Failed to fetch EUR/PLN rate:', err)
         return tickers.map((t) => ({

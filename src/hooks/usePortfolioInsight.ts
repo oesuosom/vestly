@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Holding } from '@/types'
-import { generateInsight, type InsightInput, type InsightTopHolding } from '@/services/claude'
+import { describeInsightError, generateInsight, type InsightInput, type InsightTopHolding } from '@/services/claude'
+import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import { fetchUpcomingDividends } from '@/services/market-data/eodhdDividends'
 import { fetchNewsHeadlines } from '@/services/news'
 import {
@@ -47,8 +48,7 @@ export type UsePortfolioInsightResult = {
 
 export function usePortfolioInsight(
   baseInput: BaseInsightInput,
-  claudeApiKey: string,
-  eodhdApiKey: string,
+  settings: ProviderSettings,
 ): UsePortfolioInsightResult {
   const [summary, setSummary] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -58,12 +58,20 @@ export function usePortfolioInsight(
 
   const isFetchingRef = useRef(false)
 
+  // Nothing is sent to Anthropic (or fetched for it) unless AI is on with a key.
+  const aiOn = isProviderOn(settings, 'anthropic')
+  const settingsRef = useRef(settings)
+  useEffect(() => {
+    settingsRef.current = settings
+  })
+
   const regenerate = useCallback(() => {
     setForceRefresh((prev) => !prev)
   }, [])
 
   useEffect(() => {
-    if (!claudeApiKey || baseInput.totalValue === 0) return
+    if (!aiOn || baseInput.totalValue === 0) return
+    const current = settingsRef.current
     if (isFetchingRef.current) return
 
     const inputHash = buildInputHash(baseInput.totalValue, baseInput.delta, baseInput.topHoldings[0])
@@ -104,14 +112,15 @@ export function usePortfolioInsight(
       // Fetch stale/missing data in parallel
       const [freshDividends, freshNews] = await Promise.all([
         dividends === null
-          ? fetchUpcomingDividends(baseInput.allHoldings, eodhdApiKey)
+          ? fetchUpcomingDividends(baseInput.allHoldings, current)
           : Promise.resolve(null),
         news === null
           ? fetchNewsHeadlines(
               baseInput.allHoldings
                 .filter((h) => !h.isSynthetic)
                 .sort((a, b) => b.quantity * b.currentPrice - a.quantity * a.currentPrice)
-                .slice(0, 10)
+                .slice(0, 10),
+              current,
             )
           : Promise.resolve(null),
       ])
@@ -132,7 +141,7 @@ export function usePortfolioInsight(
         newsHeadlines: news ?? [],
       }
 
-      const text = await generateInsight(insightInput, claudeApiKey)
+      const text = await generateInsight(insightInput, current)
       const now = new Date().toISOString()
 
       const cache: InsightCache = { summary: text, cachedAt: now, inputHash }
@@ -143,8 +152,7 @@ export function usePortfolioInsight(
 
     run()
       .catch((err) => {
-        const msg = err instanceof Error ? err.message : 'Failed to generate insight'
-        setError(msg)
+        setError(describeInsightError(err))
       })
       .finally(() => {
         isFetchingRef.current = false
@@ -154,7 +162,7 @@ export function usePortfolioInsight(
   // rebuilt each render, so depending on the object would fire a paid Anthropic
   // request every time. Only the fields that change the answer are listed.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claudeApiKey, eodhdApiKey, baseInput.totalValue, baseInput.delta, forceRefresh])
+  }, [aiOn, settings.claudeApiKey, baseInput.totalValue, baseInput.delta, forceRefresh])
 
   return { summary, isLoading, error, cachedAt, regenerate }
 }

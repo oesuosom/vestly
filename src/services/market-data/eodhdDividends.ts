@@ -2,6 +2,7 @@ import type { Holding } from '@/types'
 import type { DividendCacheEntry } from '@/storage/portfolioStore'
 import { getNoDivCache, saveNoDivCache } from '@/storage/portfolioStore'
 import { toEODHDTicker, currencyForExchange } from './tickerUtils'
+import { isProviderOn, type ProviderSettings } from '@/services/providers'
 
 const NO_DIV_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -29,11 +30,13 @@ async function fetchUsdToPln(apiKey: string): Promise<number> {
   }
 }
 
+/** Upcoming dividends from EODHD. Empty, with no request, while EODHD is off. */
 export async function fetchUpcomingDividends(
   holdings: Holding[],
-  eodhdApiKey: string,
+  settings: ProviderSettings,
 ): Promise<DividendCacheEntry[]> {
-  if (!eodhdApiKey) return []
+  if (!isProviderOn(settings, 'eodhd')) return []
+  const eodhdApiKey = settings.priceProvider.apiKey
 
   const eligible = holdings.filter(
     (h) => h.ticker && !h.isSynthetic && h.exchange !== 'CC'

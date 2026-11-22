@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { differenceInDays, parseISO } from 'date-fns'
 import type { Account, HistoricalPricesCache } from '@/types'
-import { buildHistoricalPricesCache } from '@/services/market-data/yahooHistorical'
+import { buildHistoricalPricesCache, historyProviderSignature } from '@/services/market-data/yahooHistorical'
+import type { ProviderSettings } from '@/services/providers'
 import {
   HISTORICAL_PRICES_STORAGE_KEY,
   HISTORICAL_PRICES_UPDATED_EVENT,
@@ -52,10 +53,24 @@ function cacheDataIsBehind(cache: HistoricalPricesCache | null, accounts: Accoun
  * NOTE: Only reruns when holding *IDs* change, not on currentPrice updates.
  * This prevents a cascade of Yahoo requests every time "Refresh All Prices" fires.
  */
-export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: string, eodhdApiKey?: string): UseHistoricalPricesResult {
+export function useHistoricalPrices(accounts: Account[], settings: ProviderSettings): UseHistoricalPricesResult {
   const [historicalPrices, setHistoricalPrices] = useState<HistoricalPricesCache | null>(() =>
     loadHistoricalPricesCache()
   )
+
+  // Changes when a history provider is switched on or off (or its key changes),
+  // so switching one on takes effect without a reload.
+  const providers = historyProviderSignature(settings)
+  const keys = `${settings.priceProvider.apiKey}|${settings.coinGeckoApiKey}`
+
+  // Latest settings for the effect below, which only re-runs on the strings above.
+  const settingsRef = useRef(settings)
+  useEffect(() => {
+    settingsRef.current = settings
+  })
+
+  // Bumped when providers changed while a build was running, to run once more.
+  const [rerun, setRerun] = useState(0)
 
   // Guard: prevent concurrent fetches (e.g. rapid accounts updates mid-fetch)
   const isFetchingRef = useRef(false)
@@ -88,7 +103,11 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
     // first open, since fetchedAt being today otherwise suppresses the daily rebuild.
     const cacheIsBehind = cacheDataIsBehind(cache, accounts)
 
-    const shouldRebuild = cacheIsStale || !cacheCoversAll || cacheIsFromPreviousDay || cacheIsBehind
+    // A provider switched on since the cache was built: fetch what it can now provide.
+    const providerSwitchedOn = cache !== null &&
+      providers.split(',').some((id) => id && !(cache.providers ?? '').split(',').includes(id))
+
+    const shouldRebuild = cacheIsStale || !cacheCoversAll || cacheIsFromPreviousDay || cacheIsBehind || providerSwitchedOn
 
     // No rebuild: state already matches the cache — it's initialised from it,
     // and every later write is picked up by the listeners below.
@@ -101,7 +120,8 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
     // avoiding a full 5-year Yahoo Finance re-fetch on every daily rebuild.
     // A fully stale cache is discarded so all holdings get a fresh fetch.
     const cacheToReuse = cacheIsStale ? null : cache
-    buildHistoricalPricesCache(accounts, coinGeckoApiKey, cacheToReuse, eodhdApiKey)
+    const builtWith = historyProviderSignature(settingsRef.current)
+    buildHistoricalPricesCache(accounts, settingsRef.current, cacheToReuse)
       .then((newCache) => {
         saveHistoricalPricesCache(newCache)
         setHistoricalPrices(newCache)
@@ -113,8 +133,9 @@ export function useHistoricalPrices(accounts: Account[], coinGeckoApiKey?: strin
       })
       .finally(() => {
         isFetchingRef.current = false
+        if (historyProviderSignature(settingsRef.current) !== builtWith) setRerun((n) => n + 1)
       })
-  }, [holdingIds, coinGeckoApiKey, eodhdApiKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [holdingIds, providers, keys, rerun]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pick up cache writes made elsewhere in the tree (e.g. the "Rebuild" button in the
   // settings overlay, which stays mounted alongside this hook) without a page reload,
