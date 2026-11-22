@@ -421,12 +421,22 @@ export function Activity() {
   // ── Filter state ──────────────────────
   const [typeFilter, setTypeFilter] = useState<Set<TransactionType>>(new Set())
   // `?account=<id>` presets the account filter (the Cash panel links here);
-  // an unknown ID is ignored.
-  const [searchParams] = useSearchParams()
-  const [accountFilter, setAccountFilter] = useState<string>(() => {
+  // an unknown ID is ignored. Changing or clearing the filter updates the
+  // parameter in place, so a reload doesn't bring back a cleared filter.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [accountFilter, setAccountFilterState] = useState<string>(() => {
     const preset = searchParams.get('account')
     return preset && accounts.some((a) => a.id === preset) ? preset : 'all'
   })
+  const setAccountFilter = useCallback((value: string) => {
+    setAccountFilterState(value)
+    const wanted = value === 'all' ? null : value
+    if (searchParams.get('account') === wanted) return
+    const next = new URLSearchParams(searchParams)
+    if (wanted === null) next.delete('account')
+    else next.set('account', wanted)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
   const [instrumentFilter, setInstrumentFilter] = useState<Set<string>>(new Set())
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Activity } from '@/pages/Activity'
 import type { Account, Transaction } from '@/types'
@@ -28,12 +28,28 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+let location = { search: '' }
+let navigationType = ''
+function Where() {
+  location = useLocation()
+  navigationType = useNavigationType()
+  return null
+}
+
 function renderAt(url: string) {
   return render(
     <MemoryRouter initialEntries={[url]}>
       <Activity />
+      <Where />
     </MemoryRouter>,
   )
+}
+
+/** Clicks the account chip's remove zone (its left quarter). */
+function clearAccountChip() {
+  const chip = screen.getByText('Demo Broker', { selector: 'span' }).parentElement!
+  chip.getBoundingClientRect = () => ({ left: 0, width: 200 }) as DOMRect
+  fireEvent.click(chip, { clientX: 10 })
 }
 
 const shows = (text: string) => screen.queryAllByText(text, { exact: false }).length > 0
@@ -59,11 +75,17 @@ describe('Activity — ?account=', () => {
 
   it('clears like any other account filter', () => {
     renderAt('/activity?account=acc_a')
-    // The chip removes itself on a click in its left quarter.
-    const chip = screen.getByText('Demo Broker', { selector: 'span' }).parentElement!
-    chip.getBoundingClientRect = () => ({ left: 0, width: 200 }) as DOMRect
-    fireEvent.click(chip, { clientX: 10 })
+    clearAccountChip()
     expect(screen.queryByText('Demo Broker', { selector: 'span' })).toBeNull()
     expect(shows('+222,00')).toBe(true)
+  })
+
+  it('drops the parameter when the filter is cleared, keeping other parameters', () => {
+    renderAt('/activity?account=acc_a&other=1')
+    expect(location.search).toBe('?account=acc_a&other=1')
+    clearAccountChip()
+    expect(location.search).toBe('?other=1')
+    // In place, so Back doesn't return to the filtered list.
+    expect(navigationType).toBe('REPLACE')
   })
 })
