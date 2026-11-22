@@ -28,13 +28,12 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-let location = { search: '' }
-let navigationType = ''
+/** Shows the current search and navigation type for the assertions. */
 function Where() {
-  location = useLocation()
-  navigationType = useNavigationType()
-  return null
+  const { search } = useLocation()
+  return <output data-testid="where" data-search={search} data-navigation={useNavigationType()} />
 }
+const where = () => screen.getByTestId('where')
 
 function renderAt(url: string) {
   return render(
@@ -82,10 +81,10 @@ describe('Activity — ?account=', () => {
 
   it('drops the parameter when the filter is cleared, keeping other parameters', () => {
     renderAt('/activity?account=acc_a&other=1')
-    expect(location.search).toBe('?account=acc_a&other=1')
+    expect(where().dataset.search).toBe('?account=acc_a&other=1')
     clearAccountChip()
-    expect(location.search).toBe('?other=1')
+    expect(where().dataset.search).toBe('?other=1')
     // In place, so Back doesn't return to the filtered list.
-    expect(navigationType).toBe('REPLACE')
+    expect(where().dataset.navigation).toBe('REPLACE')
   })
 })
