@@ -79,8 +79,11 @@ export function getHistoryCoverage(
       }
       const off = offProvidersFor(holding, settings)
       if (off.length === 0 && prices && prices.length > 0) historiesMap.set(holding.id, prices)
-      // Before any history has loaded, a holding whose provider is on is pending, not missing.
-      else if (off.length > 0 || historicalPrices) missing.push({ holding, off })
+      // A holding whose provider is on but that has no cache entry yet (no history
+      // loaded, a new holding, a rebuild in flight) is pending, not missing: it
+      // keeps today's loading behaviour, so it doesn't drop out of the line and
+      // come back. An entry with no prices means the fetch ran and found nothing.
+      else if (off.length > 0 || prices !== undefined) missing.push({ holding, off })
     }
     // Closed holdings keep any series cached while they were open; they're never
     // fetched again, so no switch affects them.

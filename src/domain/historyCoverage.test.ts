@@ -90,6 +90,16 @@ describe('getHistoryCoverage', () => {
   it('treats holdings as pending, not missing, before any history has loaded', () => {
     expect(getHistoryCoverage([account([stock])], on, null).missing).toEqual([])
   })
+
+  it('treats a holding not fetched yet as pending, so it never drops out of the line and comes back', () => {
+    // History has loaded for the stock; Bitcoin (provider on) has no entry yet.
+    const c = getHistoryCoverage([account([stock, btc])], on, cache(['s1']))
+    expect(c.missing).toEqual([])
+    const accounts = [account([stock, btc])]
+    const points = buildChartData({ snapshots: [], accounts, transactions: [], dateRange: '1M', historicalPrices: cache(['s1']), coverage: c })
+    // Today's value includes Bitcoin, as it did before history loaded.
+    expect(points[points.length - 1].totalValue).toBe(2000 + 1000)
+  })
 })
 
 describe('chart messages', () => {
