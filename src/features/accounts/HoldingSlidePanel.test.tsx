@@ -226,10 +226,20 @@ describe('HoldingSlidePanel — the Cash row', () => {
     expect(screen.getByText(body)).toBeTruthy()
   })
 
-  it('explains a single uncounted trade of another kind', () => {
-    renderCash([...full, tx({ type: 'buy', affectsCash: false })])
-    expect(screen.getByText('1 trade isn’t counted.')).toBeTruthy()
+  it('explains several uncounted trades of another kind or a mix', () => {
+    renderCash([...full, tx({ type: 'buy', affectsCash: false }), tx({ type: 'buy', source: 'emakler_import' })])
+    expect(screen.getByText('2 trades aren’t counted.')).toBeTruthy()
     expect(screen.getByText('They were paid from outside this account, so they don’t change its cash.')).toBeTruthy()
+  })
+
+  it.each([
+    [{ source: 'emakler_import' }, 'It came from an eMakler import and was paid from a bank account outside Vestly.'],
+    [{ source: 'bond_holding' }, 'It’s a bond purchase recorded with your bond holdings, paid from outside this account.'],
+    [{ affectsCash: false }, 'It was paid from outside this account, so it doesn’t change the balance.'],
+  ] as const)('explains a single uncounted trade in the singular (%o)', (fields, body) => {
+    renderCash([...full, tx({ type: 'buy', ...fields })])
+    expect(screen.getByText('1 trade isn’t counted.')).toBeTruthy()
+    expect(screen.getByText(body)).toBeTruthy()
   })
 
   it('says nothing about uncounted trades when there are none', () => {
@@ -250,7 +260,11 @@ describe('HoldingSlidePanel — the Cash row', () => {
 
   it('warns when cash is below zero', () => {
     renderCash([tx({ type: 'buy', amountPLN: -300, quantity: 2, instrument: 'Initech' })])
-    expect(screen.getByText('Available cash').nextElementSibling!.className).toContain('text-negative')
+    const balance = screen.getByText('Available cash').nextElementSibling!
+    expect(balance.className).toContain('text-negative')
+    // A true minus (U+2212), not a hyphen, in the balance and the total row.
+    expect(balance.textContent).toBe('−300,00 PLN')
+    expect(ledgerRows().at(-1)).toEqual(['Cash', '1', '−300,00 PLN'])
     expect(screen.getByText('Cash is below zero.')).toBeTruthy()
   })
 

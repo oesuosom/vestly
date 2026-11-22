@@ -13,10 +13,19 @@ import { AlertTriangle, CircleInfo } from '@/generated/icons'
 /** Cash is the sum of the account's cash-moving transactions (see `computeAccountCashBalance`). */
 const CASH_NOTE = 'Calculated from this account’s deposits, withdrawals, trades, income, taxes and fees.'
 
-const UNCOUNTED_NOTE: Record<UncountedSource, string> = {
-  emakler_import: 'They came from an eMakler import and were paid from a bank account outside Vestly.',
-  bond_holding: 'They’re bond purchases recorded with your bond holdings, paid from outside this account.',
-  other: 'They were paid from outside this account, so they don’t change its cash.',
+const UNCOUNTED_NOTE: Record<UncountedSource, { one: string; many: string }> = {
+  emakler_import: {
+    one: 'It came from an eMakler import and was paid from a bank account outside Vestly.',
+    many: 'They came from an eMakler import and were paid from a bank account outside Vestly.',
+  },
+  bond_holding: {
+    one: 'It’s a bond purchase recorded with your bond holdings, paid from outside this account.',
+    many: 'They’re bond purchases recorded with your bond holdings, paid from outside this account.',
+  },
+  other: {
+    one: 'It was paid from outside this account, so it doesn’t change the balance.',
+    many: 'They were paid from outside this account, so they don’t change its cash.',
+  },
 }
 
 const CHANGE_LABELS: Partial<Record<TransactionType, string>> = {
@@ -37,6 +46,11 @@ const TABULAR = "[font-feature-settings:'lnum'_1,'tnum'_1]"
 function formatSignedPLN(value: number): string {
   const sign = value > 0 ? '+' : value < 0 ? '−' : ''
   return `${sign}${formatPLNDetail(Math.abs(value))}`
+}
+
+/** Unsigned above zero, with a true minus ("−") below it. */
+function formatBalancePLN(value: number): string {
+  return `${value < 0 ? '−' : ''}${formatPLNDetail(Math.abs(value))}`
 }
 
 /** Amount colour, as on the Activity page. */
@@ -82,7 +96,7 @@ function UncountedNote({ count, source }: { count: number; source: UncountedSour
         <p className={`text-xs font-medium text-foregroundMuted ${TABULAR}`}>{title}</p>
         <CircleInfo size={16} className="text-foregroundMuted shrink-0" aria-hidden="true" />
       </div>
-      <p className="bg-muted border-t border-surface p-3 text-xs text-foregroundMuted leading-[1.5]">{UNCOUNTED_NOTE[source]}</p>
+      <p className="bg-muted border-t border-surface p-3 text-xs text-foregroundMuted leading-[1.5]">{UNCOUNTED_NOTE[source][count === 1 ? 'one' : 'many']}</p>
     </div>
   )
 }
@@ -109,7 +123,7 @@ export function CashDetails({ accountId }: { accountId: string }) {
       <section className="flex flex-col">
         <p className="text-sm font-medium text-accent tracking-[-0.35px]">Available cash</p>
         <p className={`mt-4 text-[28px] font-bold leading-none ${TABULAR} ${balanceColour}`}>
-          {formatPLNDetail(balance)}
+          {formatBalancePLN(balance)}
         </p>
         <p className="mt-2 text-sm text-foregroundMuted leading-[1.5] tracking-[-0.35px]">{CASH_NOTE}</p>
         {balance < 0 && (
@@ -165,7 +179,7 @@ export function CashDetails({ accountId }: { accountId: string }) {
                   <tr className="h-9 border-t border-borderLight bg-muted">
                     <th scope="row" className="px-3 text-left font-medium text-accent">Cash</th>
                     <td className="px-3 text-right text-foreground">{ledger.count}</td>
-                    <td className="px-3 text-right whitespace-nowrap text-foreground">{formatPLNDetail(balance)}</td>
+                    <td className="px-3 text-right whitespace-nowrap text-foreground">{formatBalancePLN(balance)}</td>
                   </tr>
                 </tfoot>
               </table>
