@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { DatePickerInput } from '@/components/ui/DatePickerInput'
 import type { DateRange } from '@/components/ui/DatePickerInput'
@@ -419,7 +420,13 @@ export function Activity() {
 
   // ── Filter state ──────────────────────
   const [typeFilter, setTypeFilter] = useState<Set<TransactionType>>(new Set())
-  const [accountFilter, setAccountFilter] = useState<string>('all')
+  // `?account=<id>` presets the account filter (the Cash panel links here);
+  // an unknown ID is ignored.
+  const [searchParams] = useSearchParams()
+  const [accountFilter, setAccountFilter] = useState<string>(() => {
+    const preset = searchParams.get('account')
+    return preset && accounts.some((a) => a.id === preset) ? preset : 'all'
+  })
   const [instrumentFilter, setInstrumentFilter] = useState<Set<string>>(new Set())
   const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined)
 

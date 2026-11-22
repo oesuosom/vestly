@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HoldingSlidePanel } from '@/features/accounts/HoldingSlidePanel'
 import type { Account, Holding, Transaction } from '@/types'
@@ -118,13 +119,144 @@ describe('HoldingSlidePanel — the Cash row', () => {
     ...holding, id: 'cash_a1', name: 'Cash', category: 'cash', quantity: 1,
     purchasePrice: 1000, currentPrice: 1000, isSynthetic: true,
   }
+  const now = '2026-01-02T00:00:00.000Z'
+  let n = 0
+  const tx = (fields: Partial<Transaction>): Transaction => {
+    n += 1
+    return {
+      id: `c${n}`, accountId: 'a1', type: 'deposit', date: '2026-01-02', amountPLN: 100,
+      externalId: `c${n}`, source: 'manual', createdAt: now, ...fields,
+    }
+  }
+  const demo: Account = { id: 'a1', name: 'Demo Broker', type: 'brokerage', createdAt: now, lastUpdated: now, holdings: [cash] }
+
+  function renderCash(transactions: Transaction[]) {
+    portfolio.accounts = [demo]
+    portfolio.transactions = transactions
+    const onLocation = vi.fn()
+    function Where() {
+      onLocation(useLocation())
+      return null
+    }
+    render(
+      <MemoryRouter initialEntries={['/accounts/demo-broker']}>
+        <HoldingSlidePanel holding={cash} isOpen onClose={() => {}} />
+        <Where />
+      </MemoryRouter>,
+    )
+    return { lastLocation: () => onLocation.mock.calls.at(-1)![0] as { pathname: string; search: string } }
+  }
+
+  /** The "How it adds up" table's rows as [kind, count, amount]. */
+  function ledgerRows() {
+    const table = screen.getByText('How it adds up').nextElementSibling!.querySelector('table')!
+    return [...table.querySelectorAll('tbody tr, tfoot tr')].map((tr) =>
+      [...tr.children].map((c) => c.textContent),
+    )
+  }
+
   const actions = () => screen.getAllByRole('button').map((b) => b.textContent).filter(Boolean)
 
-  it('says where the number comes from instead of offering Edit, Close Position or Delete', () => {
-    render(<HoldingSlidePanel holding={cash} isOpen onClose={() => {}} />)
+  const full = [
+    tx({ type: 'deposit', date: '2026-01-05', amountPLN: 2000 }),
+    tx({ type: 'buy', date: '2026-01-10', amountPLN: -500, instrument: 'Acme Corp', quantity: 3 }),
+    tx({ type: 'buy', date: '2026-01-11', amountPLN: -120, instrument: 'Globex Industries', quantity: 1 }),
+    tx({ type: 'dividend', date: '2026-01-20', amountPLN: 12.4, relatedInstrument: 'Acme Corp' }),
+    tx({ type: 'interest', date: '2026-01-21', amountPLN: 1.6 }),
+    tx({ type: 'withholding_tax', date: '2026-01-20', amountPLN: -2.36, relatedInstrument: 'Acme Corp' }),
+    tx({ type: 'fee', date: '2026-01-25', amountPLN: -5 }),
+  ]
 
+  it('names the account above “Cash”', () => {
+    renderCash(full)
+    expect(screen.getByText('Demo Broker')).toBeTruthy()
+    expect(screen.getByText('Cash', { selector: 'span' })).toBeTruthy()
+  })
+
+  it('shows the balance and where it comes from, without unit, price or return fields', () => {
+    renderCash(full)
+    expect(screen.getByText('Available cash')).toBeTruthy()
+    expect(screen.getByText('Available cash').nextElementSibling!.textContent).toBe('1 386,64 PLN')
     expect(screen.getByText('Calculated from this account’s deposits, withdrawals, trades, income, taxes and fees.')).toBeTruthy()
-    expect(actions()).toEqual([])
+    for (const gone of ['Quantity', 'Avg cost / unit', 'Current price / unit', 'Unrealised P&L', 'Total return']) {
+      expect(screen.queryByText(gone)).toBeNull()
+    }
+    expect(screen.queryByText(/Not yet refreshed/)).toBeNull()
+  })
+
+  it('adds the balance up by kind, hiding kinds with no transactions, to a total that equals it', () => {
+    renderCash(full)
+    expect(ledgerRows()).toEqual([
+      ['Deposits', '1', '+2 000,00 PLN'],
+      ['Buys', '2', '−620,00 PLN'],
+      ['Dividends & interest', '2', '+14,00 PLN'],
+      ['Taxes', '1', '−2,36 PLN'],
+      ['Fees', '1', '−5,00 PLN'],
+      ['Cash', '7', '1 386,64 PLN'],
+    ])
+  })
+
+  it('lists the five latest changes, newest first, and links to the account’s Activity', () => {
+    const { lastLocation } = renderCash(full)
+    const latest = screen.getByText('Latest changes').nextElementSibling!
+    const rows = [...latest.querySelectorAll('tr')].map((tr) => tr.textContent)
+    expect(rows).toEqual([
+      'Fee25/01/2026−5,00 PLN',
+      'Interest21/01/2026+1,60 PLN',
+      'DividendAcme Corp · 20/01/2026+12,40 PLN',
+      'Withholding taxAcme Corp · 20/01/2026−2,36 PLN',
+      'BuyGlobex Industries · 1 unit · 11/01/2026−120,00 PLN',
+      'View all →',
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'View all →' }))
+    expect(lastLocation()).toMatchObject({ pathname: '/activity', search: '?account=a1' })
+  })
+
+  it('has no actions besides closing the panel', () => {
+    renderCash(full)
+    expect(actions()).toEqual(['View all →'])
+  })
+
+  it.each([
+    ['emakler_import', '2 trades aren’t counted.', 'They came from an eMakler import and were paid from a bank account outside Vestly.'],
+    ['bond_holding', '2 trades aren’t counted.', 'They’re bond purchases recorded with your bond holdings, paid from outside this account.'],
+  ] as const)('explains trades from %s that aren’t counted', (source, title, body) => {
+    renderCash([...full, tx({ type: 'buy', source }), tx({ type: 'buy', source })])
+    expect(screen.getByText(title)).toBeTruthy()
+    expect(screen.getByText(body)).toBeTruthy()
+  })
+
+  it('explains a single uncounted trade of another kind', () => {
+    renderCash([...full, tx({ type: 'buy', affectsCash: false })])
+    expect(screen.getByText('1 trade isn’t counted.')).toBeTruthy()
+    expect(screen.getByText('They were paid from outside this account, so they don’t change its cash.')).toBeTruthy()
+  })
+
+  it('says nothing about uncounted trades when there are none', () => {
+    renderCash(full)
+    expect(screen.queryByText(/counted\./)).toBeNull()
+  })
+
+  it('points to Activity when there are no cash transactions yet', () => {
+    const { lastLocation } = renderCash([tx({ type: 'buy', source: 'emakler_import' })])
+    expect(screen.getByText('0,00 PLN').className).toContain('text-accent')
+    expect(screen.getByText('No cash transactions yet')).toBeTruthy()
+    expect(screen.queryByText('How it adds up')).toBeNull()
+    expect(screen.queryByText('Latest changes')).toBeNull()
+    expect(screen.getByText('1 trade isn’t counted.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Activity →' }))
+    expect(lastLocation()).toMatchObject({ pathname: '/activity', search: '?account=a1' })
+  })
+
+  it('warns when cash is below zero', () => {
+    renderCash([tx({ type: 'buy', amountPLN: -300, quantity: 2, instrument: 'Initech' })])
+    expect(screen.getByText('Available cash').nextElementSibling!.className).toContain('text-negative')
+    expect(screen.getByText('Cash is below zero.')).toBeTruthy()
+  })
+
+  it('doesn’t warn for a positive balance', () => {
+    renderCash(full)
+    expect(screen.queryByText('Cash is below zero.')).toBeNull()
   })
 
   it('leaves a real holding its actions', () => {

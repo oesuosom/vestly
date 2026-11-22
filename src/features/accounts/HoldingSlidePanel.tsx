@@ -21,6 +21,7 @@ import { readCloseDuration } from '@/components/ui/panelTiming'
 import { HoldingForm } from './HoldingForm'
 import { DeleteHoldingDialog } from './DeleteHoldingDialog'
 import { ClosePositionDialog } from './ClosePositionDialog'
+import { CashDetails } from './CashDetails'
 import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
@@ -29,9 +30,6 @@ import { useEscapeKey } from '@/hooks/useEscapeKey'
 // ─────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────
-
-/** Cash is the sum of the account's cash-moving transactions (see `computeAccountCashBalance`). */
-const CASH_NOTE = 'Calculated from this account’s deposits, withdrawals, trades, income, taxes and fees.'
 
 type HoldingSlidePanelProps = {
   holding: Holding | null
@@ -298,6 +296,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
   const priceIsPlaceholder = holding.currentPrice === holding.purchasePrice
   const buyLots            = holding.ticker ? buildBuyLots(transactions, holding.ticker, holding.accountId) : []
   const isClosed           = holding.closedAt !== undefined
+  const isCash             = holding.isSynthetic === true && !isClosed
   const account            = accounts.find((a) => a.id === holding.accountId)
   // Reopen waits while a rebuy of the same ticker is open (one position per ticker).
   const reopenBlockedBy    = isClosed && account ? findSharedPositionHolding(holding, account) : undefined
@@ -447,9 +446,10 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <HoldingIcon holding={holding} size={32} />
             <div className="flex flex-col min-w-0">
-              {holding.ticker && (
+              {/* Cash has no ticker: the line names its account instead. */}
+              {(isCash ? account?.name : holding.ticker) && (
                 <span className="text-xs font-medium text-accent tracking-[-0.35px] [font-feature-settings:'lnum'_1,'tnum'_1] truncate">
-                  {holding.ticker}
+                  {isCash ? account?.name : holding.ticker}
                 </span>
               )}
               <span className="text-sm font-semibold text-foreground [font-feature-settings:'lnum'_1,'tnum'_1] truncate">
@@ -467,6 +467,8 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
 
           {isClosed ? (
             <ClosedHoldingDetails holding={holding} />
+          ) : isCash ? (
+            <CashDetails accountId={holding.accountId} />
           ) : (
           <>
           {/* ── Stats grid ── */}
@@ -701,11 +703,9 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
               </Button>
             </div>
           </div>
-        ) : holding.isSynthetic ? (
+        ) : isCash ? (
           // Cash is rebuilt from the log on every load: nothing to edit, close or delete.
-          <p className="px-6 py-6 shrink-0 text-xs text-accent leading-normal">
-            {CASH_NOTE}
-          </p>
+          null
         ) : (
         <div className="px-6 py-6 flex items-center gap-2 shrink-0">
           <Button variant="secondary" onClick={() => setEditOpen(true)}>
