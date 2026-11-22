@@ -39,3 +39,36 @@ describe('Button primary variant', () => {
     expect(screen.getByText('Cancel').className).toContain('group-disabled:opacity-50')
   })
 })
+
+describe('Button icon-only', () => {
+  it.each(['primary', 'secondary', 'ghost', 'destructive'] as const)(
+    'is named by its label and hides the icon (%s)',
+    (variant) => {
+      render(<Button variant={variant} icon={Plus} iconPosition="only" aria-label="Add" />)
+      const icon = screen.getByRole('button', { name: 'Add' }).querySelector('svg')
+      expect(icon?.getAttribute('aria-hidden')).toBe('true')
+    },
+  )
+
+  it('can be named by another element', () => {
+    render(
+      <>
+        <span id="add-label">Add account</span>
+        <Button icon={Plus} iconPosition="only" aria-labelledby="add-label" />
+      </>,
+    )
+    expect(screen.getByRole('button', { name: 'Add account' })).toBeTruthy()
+  })
+
+  it('hides the icon next to a text label too', () => {
+    render(<Button icon={Plus} iconPosition="left">Add</Button>)
+    expect(screen.getByRole('button', { name: 'Add' }).querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  // Type-level: `tsc -b` (npm run build) fails if an unnamed icon-only Button compiles.
+  it('needs aria-label or aria-labelledby to type-check', () => {
+    // @ts-expect-error an icon-only Button has no visible text, so it must be named
+    const unnamed = <Button icon={Plus} iconPosition="only" />
+    expect(unnamed).toBeTruthy()
+  })
+})

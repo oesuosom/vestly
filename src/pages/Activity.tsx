@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/Badge'
 import { StatCardGroup } from '@/components/ui/StatCardGroup'
 import { HoldingIcon } from '@/components/ui/HoldingIcon'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { formatPLNDetail, formatQuantity } from '@/utils/formatters'
+import { formatDate, formatPLNDetail, formatQuantity } from '@/utils/formatters'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useFilterShortcut } from '@/hooks/useFilterShortcut'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
@@ -765,9 +765,11 @@ export function Activity() {
                         <button
                           onClick={() => handleDelete(t)}
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-accent hover:text-negative transition-all cursor-pointer"
-                          aria-label="Delete transaction"
+                          // One per row: say which transaction, e.g. "Delete Buy, Demo Equity Fund, 2 Jan 2026"
+                          // (the account stands in for the instrument on cash rows).
+                          aria-label={`Delete ${meta.label}, ${instrument ?? accountNames[t.accountId] ?? t.accountId}, ${formatDate(t.date)}`}
                         >
-                          <Trash size={14} />
+                          <Trash size={14} aria-hidden="true" />
                         </button>
                       </div>
                     </td>

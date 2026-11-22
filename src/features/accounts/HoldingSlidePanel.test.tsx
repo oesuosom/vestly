@@ -58,6 +58,13 @@ describe('HoldingSlidePanel', () => {
     expect(backdrop.hasAttribute('inert')).toBe(false)
   })
 
+  it('closes with the header button, found by its accessible name', () => {
+    const onClose = vi.fn()
+    render(<HoldingSlidePanel holding={holding} isOpen onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the closed panel rendered but inert', () => {
     const { rerender } = render(<HoldingSlidePanel holding={holding} isOpen onClose={() => {}} />)
     // The parent clears the holding and closes at the same time.

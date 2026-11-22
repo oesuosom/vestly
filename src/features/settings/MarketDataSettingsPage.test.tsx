@@ -46,3 +46,17 @@ describe('MarketDataSettingsPage', () => {
     expect(settings.updateCoinGeckoEnabled).toHaveBeenCalledWith(true)
   })
 })
+
+describe('MarketDataSettingsPage — icon buttons', () => {
+  it('names the settings and key buttons after their provider', () => {
+    render(<MarketDataSettingsPage />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show EODHD settings' }))
+    expect(screen.getByRole('button', { name: 'Hide EODHD settings' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show EODHD API key' }))
+    expect(screen.getByRole('button', { name: 'Hide EODHD API key' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show CoinGecko settings' }))
+    expect(screen.getByRole('button', { name: 'Show CoinGecko API key' })).toBeTruthy()
+  })
+})

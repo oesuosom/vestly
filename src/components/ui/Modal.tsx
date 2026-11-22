@@ -89,7 +89,7 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
                   className="text-accent hover:text-foreground transition-colors cursor-pointer"
                   aria-label="Close"
                 >
-                  <Cross size={20} />
+                  <Cross size={20} aria-hidden="true" />
                 </button>
               </div>
             )}
@@ -104,7 +104,7 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
           <>
             <div className="px-6 pt-6 pb-4 flex items-center justify-between">
               <h2 className="text-base font-semibold text-foreground">{title}</h2>
-              <Button variant="ghost" icon={Cross} iconPosition="only" onClick={onClose} />
+              <Button variant="ghost" icon={Cross} iconPosition="only" onClick={onClose} aria-label="Close" />
             </div>
 
             {children}

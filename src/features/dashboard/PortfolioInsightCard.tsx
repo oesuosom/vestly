@@ -37,6 +37,7 @@ export function PortfolioInsightCard({
           iconPosition="only"
           onClick={onRegenerate}
           disabled={isLoading}
+          aria-label="Regenerate insight"
           title="Regenerate insight"
           className={isLoading ? '[&_svg]:animate-spin' : ''}
         />

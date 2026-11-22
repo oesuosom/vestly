@@ -1,18 +1,31 @@
 import { forwardRef, type ButtonHTMLAttributes, type ComponentType, type ReactNode } from 'react'
 
-type IconComponent = ComponentType<{ size?: number; className?: string }>
+type IconComponent = ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive'
 export type ButtonSize = 'md' | 'lg'
 export type ButtonIconPosition = 'none' | 'left' | 'right' | 'only'
 
-type ButtonProps = {
+type BaseButtonProps = {
   variant?: ButtonVariant
   size?: ButtonSize
-  iconPosition?: ButtonIconPosition
   icon?: IconComponent
   children?: ReactNode
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'size'>
+
+/**
+ * An icon-only button has no visible text, so it must be named for screen
+ * readers: TypeScript requires `aria-label` (or `aria-labelledby`) here.
+ */
+type IconOnlyButtonProps = BaseButtonProps & {
+  iconPosition: 'only'
+} & ({ 'aria-label': string } | { 'aria-labelledby': string })
+
+type TextButtonProps = BaseButtonProps & {
+  iconPosition?: Exclude<ButtonIconPosition, 'only'>
+}
+
+export type ButtonProps = IconOnlyButtonProps | TextButtonProps
 
 const PRIMARY_GRADIENT =
   'linear-gradient(to bottom, rgba(255,255,255,.5) 0%, rgba(255,255,255,.1) 35%, rgba(255,255,255,.1) 50%, rgba(255,255,255,.25) 100%)'
@@ -123,7 +136,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
 
       {(iconPosition === 'left' || iconPosition === 'only') && Icon && (
-        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
+        <Icon size={20} aria-hidden="true" className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
       )}
 
       {iconPosition !== 'only' && (
@@ -135,7 +148,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       )}
 
       {iconPosition === 'right' && Icon && (
-        <Icon size={20} className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
+        <Icon size={20} aria-hidden="true" className={`${config.iconClass ?? config.textClass} relative z-10 shrink-0 ${disabledContent}`} />
       )}
     </button>
   )

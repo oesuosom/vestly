@@ -64,6 +64,7 @@ function ProviderRow({
             variant="ghost"
             iconPosition="only"
             icon={isExpanded ? ChevronTopSmall : Nut}
+            aria-label={isExpanded ? `Hide ${name} settings` : `Show ${name} settings`}
             onClick={onToggleExpand}
           />
         )}
@@ -74,12 +75,14 @@ function ProviderRow({
 }
 
 type ApiKeyRowProps = {
+  /** Provider name, so the show/hide button says whose key it reveals. */
+  provider: string
   savedKey: string
   onSave: (key: string) => void
   isLast?: boolean
 }
 
-function ApiKeyRow({ savedKey, onSave, isLast }: ApiKeyRowProps) {
+function ApiKeyRow({ provider, savedKey, onSave, isLast }: ApiKeyRowProps) {
   const [value, setValue] = useState(savedKey)
   const [showKey, setShowKey] = useState(false)
   const isDirty = value !== savedKey
@@ -100,6 +103,7 @@ function ApiKeyRow({ savedKey, onSave, isLast }: ApiKeyRowProps) {
           variant="ghost"
           iconPosition="only"
           icon={Eye}
+          aria-label={showKey ? `Hide ${provider} API key` : `Show ${provider} API key`}
           onClick={() => setShowKey((v) => !v)}
         />
         <button
@@ -269,6 +273,7 @@ export function MarketDataSettingsPage() {
           />
           {eodhdKeyExpanded && (
             <ApiKeyRow
+              provider="EODHD"
               savedKey={priceProvider.apiKey}
               onSave={(key) => updatePriceProvider('eodhd', key, priceProvider.enabled)}
             />
@@ -310,6 +315,7 @@ export function MarketDataSettingsPage() {
           />
           {coinGeckoExpanded && (
             <ApiKeyRow
+              provider="CoinGecko"
               savedKey={coinGeckoApiKey}
               onSave={(key) => {
                 updateCoinGeckoApiKey(key)
@@ -336,6 +342,8 @@ export function MarketDataSettingsPage() {
             <button
               onClick={handleRebuild}
               disabled={isRebuilding}
+              // While rebuilding, the label is swapped for a spinner; keep the button named.
+              aria-label={isRebuilding ? 'Rebuilding history' : undefined}
               className="flex items-center justify-center h-9 px-4 rounded-full text-sm font-semibold text-foreground tracking-[-0.35px] cursor-pointer disabled:opacity-50 shrink-0"
             >
               {isRebuilding ? <Loader size={16} className="animate-spin" /> : 'Rebuild'}

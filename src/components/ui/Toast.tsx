@@ -115,7 +115,7 @@ export function Toast({
         {action && (
           <Button variant={action.variant ?? 'destructive'} onClick={handleAction}>{action.label}</Button>
         )}
-        <Button variant="ghost" icon={Cross} iconPosition="only" onClick={handleClose} />
+        <Button variant="ghost" icon={Cross} iconPosition="only" onClick={handleClose} aria-label="Dismiss" />
       </div>
     </div>,
     document.body

@@ -40,20 +40,23 @@ function ProviderRow({
           variant="ghost"
           iconPosition="only"
           icon={isExpanded ? ChevronTopSmall : Nut}
+          aria-label={isExpanded ? `Hide ${name} settings` : `Show ${name} settings`}
           onClick={onToggleExpand}
         />
-        <Toggle checked={enabled} onChange={onToggle} disabled={apiKeyMissing && !enabled} />
+        <Toggle checked={enabled} onChange={onToggle} disabled={apiKeyMissing && !enabled} label={name} />
       </div>
     </div>
   )
 }
 
 type ApiKeyRowProps = {
+  /** Provider name, so the show/hide button says whose key it reveals. */
+  provider: string
   savedKey: string
   onSave: (key: string) => void
 }
 
-function ApiKeyRow({ savedKey, onSave }: ApiKeyRowProps) {
+function ApiKeyRow({ provider, savedKey, onSave }: ApiKeyRowProps) {
   const [value, setValue] = useState(savedKey)
   const [showKey, setShowKey] = useState(false)
   const isDirty = value !== savedKey
@@ -72,6 +75,7 @@ function ApiKeyRow({ savedKey, onSave }: ApiKeyRowProps) {
           variant="ghost"
           iconPosition="only"
           icon={Eye}
+          aria-label={showKey ? `Hide ${provider} API key` : `Show ${provider} API key`}
           onClick={() => setShowKey((v) => !v)}
         />
         <button
@@ -115,7 +119,7 @@ export function AiProvidersSettingsPage() {
             onToggleExpand={() => setIsExpanded((v) => !v)}
           />
           {isExpanded && (
-            <ApiKeyRow savedKey={claudeApiKey} onSave={updateClaudeApiKey} />
+            <ApiKeyRow provider="Anthropic" savedKey={claudeApiKey} onSave={updateClaudeApiKey} />
           )}
         </div>
       </div>

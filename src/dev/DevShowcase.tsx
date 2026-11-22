@@ -278,7 +278,7 @@ export function DevShowcase() {
         <Row label="With icon">
           <Button variant="primary" icon={Plus} iconPosition="left">Add account</Button>
           <Button variant="secondary" icon={Plus} iconPosition="left">Add</Button>
-          <Button variant="ghost" icon={Plus} iconPosition="only" />
+          <Button variant="ghost" icon={Plus} iconPosition="only" aria-label="Add" />
         </Row>
         <Row label="Disabled">
           <Button variant="primary" disabled>Primary</Button>

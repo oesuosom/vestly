@@ -89,10 +89,13 @@ function StatStrip({ label, valuePLN }: { label: string; valuePLN: number }) {
 // ─────────────────────────────────────────
 
 function HoldingMenuCell({
+  holdingName,
   onEdit,
   onClosePosition,
   onDelete,
 }: {
+  /** Names the button: there is one per row, so "Actions" alone would be ambiguous. */
+  holdingName: string
   onEdit: () => void
   onClosePosition: () => void
   onDelete: () => void
@@ -107,10 +110,11 @@ function HoldingMenuCell({
         type="button"
         aria-haspopup="true"
         aria-expanded={open}
+        aria-label={`Actions for ${holdingName}`}
         className="flex items-center justify-center size-7 rounded-md text-accent hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
         onClick={() => setOpen((v) => !v)}
       >
-        <MoreHorizontal size={16} />
+        <MoreHorizontal size={16} aria-hidden="true" />
       </button>
       {/* Portalled: the table's rounded container clips its overflow, which hid the bottom row's menu. */}
       <DropdownPopover open={open} onClose={close} anchorRef={buttonRef}>
@@ -387,6 +391,7 @@ export function AccountDetail() {
           if (h.isSynthetic) return null
           return (
             <HoldingMenuCell
+              holdingName={h.name}
               onEdit={() => setEditingHolding(h)}
               onClosePosition={() => setClosingHolding(h)}
               onDelete={() => setDeletingHolding(h)}
@@ -519,6 +524,7 @@ export function AccountDetail() {
                 variant="secondary"
                 icon={MoreHorizontal}
                 iconPosition="only"
+                aria-label="Account actions"
                 onClick={() => setMoreMenuOpen((v) => !v)}
               />
               {moreMenuOpen && (
@@ -585,9 +591,10 @@ export function AccountDetail() {
               className={`flex items-center justify-center size-9 rounded-full text-foreground hover:bg-muted transition-colors cursor-pointer shrink-0 ${isRefreshing ? '[&_svg]:animate-spin' : ''}`}
               onClick={handleRefreshPrices}
               disabled={isRefreshing}
+              aria-label="Refresh prices"
               title="Refresh prices"
             >
-              <Synchronize size={20} />
+              <Synchronize size={20} aria-hidden="true" />
             </button>
           </div>
 
