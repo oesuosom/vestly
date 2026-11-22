@@ -12,7 +12,7 @@ import type { Account, HistoricalPricesCache, Snapshot, Transaction } from '@/ty
 import type { HistoryCoverage } from '@/domain/historyCoverage'
 import type { DateRange } from '@/types'
 import { ChartTooltip } from './ChartTooltip'
-import { buildChartData, isShortRange } from './chartData'
+import { buildChartData, emptyChartMessage, isShortRange, type ChartPoint } from './chartData'
 import { formatChartDate } from '@/utils/formatters'
 import { colors } from '@/utils/tokens'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -29,6 +29,8 @@ type PortfolioAreaChartProps = {
    * line from purchase to today, and series from providers that are off aren't used.
    */
   coverage?: HistoryCoverage
+  /** Points already built with buildChartData from the same inputs, when the caller needs them too. */
+  chartData?: ChartPoint[]
   minimal?: boolean
   simplified?: boolean
 }
@@ -89,12 +91,13 @@ export function PortfolioAreaChart({
   dateRange,
   historicalPrices,
   coverage,
+  chartData: precomputed,
   minimal = false,
   simplified = false,
 }: PortfolioAreaChartProps) {
   const chartData = useMemo(
-    () => buildChartData({ snapshots, accounts, transactions, dateRange, historicalPrices, coverage }),
-    [snapshots, accounts, transactions, dateRange, historicalPrices, coverage],
+    () => precomputed ?? buildChartData({ snapshots, accounts, transactions, dateRange, historicalPrices, coverage }),
+    [precomputed, snapshots, accounts, transactions, dateRange, historicalPrices, coverage],
   )
 
   // Play the left-to-right reveal once on mount, then disable so window
@@ -111,25 +114,9 @@ export function PortfolioAreaChart({
     return [Math.max(0, minVal - pad), maxVal + pad]
   }, [chartData])
 
-  if (chartData.length === 0) {
-    return (
-      <EmptyState
-        title="No chart data yet"
-        description="Add transactions or open the app daily to start building your portfolio history."
-      />
-    )
-  }
-
-  // Need at least 2 points to draw meaningful lines
-  const hasEnoughData = chartData.length >= 2
-  if (!hasEnoughData) {
-    return (
-      <EmptyState
-        title="Not enough history yet"
-        description="Your chart will appear once you have more than one data point."
-      />
-    )
-  }
+  // Nothing to draw, or a single point (a line needs two).
+  const empty = emptyChartMessage(chartData)
+  if (empty) return <EmptyState title={empty.title} description={empty.body} />
 
   const short = isShortRange(dateRange)
 
