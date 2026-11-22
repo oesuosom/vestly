@@ -81,10 +81,11 @@ describe('getHistoryCoverage', () => {
   })
 
   it('leaves out a holding whose fetch came back empty, without naming a provider', () => {
-    const c = getHistoryCoverage([account([stock])], on, { ...cache([]), histories: [{ holdingId: 's1', prices: [] }] })
+    const c = getHistoryCoverage([account([stock, bond])], on, { ...cache(['b1']), histories: [...cache(['b1']).histories, { holdingId: 's1', prices: [] }] })
     expect(c.missing).toEqual([{ holding: stock, off: [] }])
     expect(c.noHistory).toBe(false)
-    expect(missingHistoryMessage(c.missing)).toBeNull()
+    expect(c.allFailed).toBe(false)
+    expect(missingHistoryMessage(c)).toBe("Przykład SA isn't in this chart: its price history couldn't be loaded.")
   })
 
   it('treats holdings as pending, not missing, before any history has loaded', () => {
@@ -103,7 +104,12 @@ describe('getHistoryCoverage', () => {
 })
 
 describe('chart messages', () => {
-  const missing = (hs: Holding[], settings = off) => hs.map((h) => ({ holding: h, off: offProvidersFor(h, settings) }))
+  const missing = (hs: Holding[], settings = off) => ({
+    missing: hs.map((h) => ({ holding: h, off: offProvidersFor(h, settings) })),
+    allFailed: false,
+  })
+  /** Providers on, but the fetch came back empty. */
+  const failed = (hs: Holding[]) => ({ missing: hs.map((h) => ({ holding: h, off: [] })), allFailed: false })
 
   it('names one holding', () => {
     expect(missingHistoryMessage(missing([btc]))).toBe("Bitcoin isn't in this chart: CoinGecko is off.")
@@ -119,6 +125,33 @@ describe('chart messages', () => {
     expect(missingHistoryMessage(missing(stocks))).toBe("3 holdings aren't in this chart: Yahoo Finance and EODHD are off.")
   })
 
+  it("says one holding's history couldn't be loaded", () => {
+    expect(missingHistoryMessage(failed([btc]))).toBe("Bitcoin isn't in this chart: its price history couldn't be loaded.")
+  })
+
+  it("says two holdings' history couldn't be loaded", () => {
+    expect(missingHistoryMessage(failed([btc, eth]))).toBe(
+      "Bitcoin and Ethereum aren't in this chart: their price history couldn't be loaded.",
+    )
+  })
+
+  it("counts three or more that couldn't be loaded: coins when all are crypto, holdings otherwise", () => {
+    expect(missingHistoryMessage(failed([btc, eth, sol]))).toBe(
+      "3 coins aren't in this chart: their price history couldn't be loaded.",
+    )
+    expect(missingHistoryMessage(failed([btc, eth, stock]))).toBe(
+      "3 holdings aren't in this chart: their price history couldn't be loaded.",
+    )
+  })
+
+  it('prefers the provider-off message when some are off and others failed to load', () => {
+    const mixed = {
+      missing: [{ holding: btc, off: offProvidersFor(btc, off) }, { holding: stock, off: [] }],
+      allFailed: false,
+    }
+    expect(missingHistoryMessage(mixed)).toBe("Bitcoin isn't in this chart: CoinGecko is off.")
+  })
+
   it('names only the providers that are off when nothing has history', () => {
     expect(noHistoryMessage(['yahoo', 'eodhd'])).toBe(
       "Yahoo Finance and EODHD are off, so the chart can't show how prices moved. Values today are still correct.",
@@ -126,6 +159,29 @@ describe('chart messages', () => {
     expect(noHistoryMessage(['coingecko'])).toBe(
       "CoinGecko is off, so the chart can't show how prices moved. Values today are still correct.",
     )
+  })
+})
+
+describe('every holding failed to load', () => {
+  const accounts = [account([stock, btc])]
+  const historicalPrices: HistoricalPricesCache = {
+    ...cache([]),
+    histories: [{ holdingId: 's1', prices: [] }, { holdingId: 'c1', prices: [] }],
+  }
+
+  it('keeps the chart empty instead of the "No price history … off" message or a pill', () => {
+    const coverage = getHistoryCoverage(accounts, on, historicalPrices)
+    expect(coverage.allFailed).toBe(true)
+    expect(coverage.noHistory).toBe(false)
+    expect(missingHistoryMessage(coverage)).toBeNull()
+    expect(buildChartData({ snapshots: [], accounts, transactions: [], dateRange: '1M', historicalPrices, coverage })).toEqual([])
+  })
+
+  it('is not "all failed" when one is off and the other failed', () => {
+    const coverage = getHistoryCoverage(accounts, { ...on, coinGeckoEnabled: false }, historicalPrices)
+    expect(coverage.allFailed).toBe(false)
+    expect(coverage.noHistory).toBe(false)
+    expect(missingHistoryMessage(coverage)).toBe("Bitcoin isn't in this chart: CoinGecko is off.")
   })
 })
 

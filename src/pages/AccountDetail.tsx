@@ -173,7 +173,7 @@ export function AccountDetail() {
     () => getHistoryCoverage(account ? [account] : [], settings, historicalPrices),
     [account, settings, historicalPrices],
   )
-  const missingMessage = missingHistoryMessage(coverage.missing)
+  const missingMessage = missingHistoryMessage(coverage)
 
   const aiAvailability: AiAvailability = isProviderOn(settings, 'anthropic')
     ? 'on'

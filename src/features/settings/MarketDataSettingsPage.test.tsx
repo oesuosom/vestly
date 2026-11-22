@@ -26,7 +26,7 @@ describe('MarketDataSettingsPage', () => {
   it('says what each provider is used for', () => {
     render(<MarketDataSettingsPage />)
     expect(screen.getByText('Price updates, price history and dividends for AI insights.')).toBeTruthy()
-    expect(screen.getByText('Price history and exchange rates.')).toBeTruthy()
+    expect(screen.getByText('Price history and news for AI insights.')).toBeTruthy()
     expect(screen.getByText('Exchange rates for history and imports.')).toBeTruthy()
     expect(screen.getByText('Crypto prices and their history.')).toBeTruthy()
   })

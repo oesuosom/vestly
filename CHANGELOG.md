@@ -33,11 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     while it loads, and explains an error in plain words with a way to try again.
   - **New defaults:** a new install starts with Yahoo Finance, NBP and CoinGecko (free tier, no
     key needed) on, and Anthropic and EODHD off. Saved switches keep their values; only missing
-    ones take these defaults. Installs that saved every switch off keep them off, and the charts
-    now say which switch to turn on.
+    ones take these defaults. Installs that saved every switch off keep them off: switch the
+    providers you want on in Settings › Market Data. The charts say which switch is off.
   - **History charts** leave out holdings without price history instead of drawing a straight
     line from purchase to today; the value above the chart still counts them. A note under the
-    chart names what's left out and which provider is off, and when nothing has history the
+    chart names what's left out and which provider is off, or says their price history couldn't
+    be loaded when the provider is on. When nothing has history because providers are off, the
     chart is replaced by a message with a link to Market data.
   - **Holding panel:** when the holding's price provider is off, it says the price isn't
     updated automatically and hides Refresh Price.

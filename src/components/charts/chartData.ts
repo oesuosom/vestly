@@ -161,6 +161,9 @@ export function buildChartData({
   // Holdings without price history are left out of every point, today's
   // included, so the line doesn't jump at the end. Snapshots and anchors hold
   // full portfolio values, so they can't be used for the line either.
+  // Every holding's history failed to load (nothing is off): no line, so the
+  // chart shows its usual empty state.
+  if (historicalPrices && coverage?.allFailed) return []
   const skip = new Set(coverage?.missing.map((m) => m.holding.id) ?? [])
   if (skip.size > 0) {
     const skippedToday = accounts

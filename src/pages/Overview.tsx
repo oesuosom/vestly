@@ -81,7 +81,7 @@ export function Overview() {
     () => getHistoryCoverage(accounts, settings, historicalPrices),
     [accounts, settings, historicalPrices],
   )
-  const missingMessage = missingHistoryMessage(coverage.missing)
+  const missingMessage = missingHistoryMessage(coverage)
 
   const totalValue = useMemo(() => getTotalValue(accounts), [accounts])
 

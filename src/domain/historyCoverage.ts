@@ -24,6 +24,12 @@ export type HistoryCoverage = {
   missing: MissingHistory[]
   /** Every open invested holding is left out because providers are off. */
   noHistory: boolean
+  /**
+   * Every open invested holding is left out because its history couldn't be
+   * loaded (providers on). Nothing is off, so the chart shows its usual empty
+   * state rather than the "No price history … off" message or a pill.
+   */
+  allFailed: boolean
   /** The providers named in the chart's message, in Settings order. */
   offProviders: ProviderId[]
 }
@@ -95,8 +101,10 @@ export function getHistoryCoverage(
 
   const offSet = new Set(missing.flatMap((m) => m.off))
   const offProviders = PROVIDER_ORDER.filter((id) => offSet.has(id))
-  const noHistory = invested > 0 && missing.length === invested && missing.every((m) => m.off.length > 0)
-  return { historiesMap, missing, noHistory, offProviders }
+  const allMissing = invested > 0 && missing.length === invested
+  const noHistory = allMissing && missing.every((m) => m.off.length > 0)
+  const allFailed = allMissing && missing.every((m) => m.off.length === 0)
+  return { historiesMap, missing, noHistory, allFailed, offProviders }
 }
 
 /**
@@ -108,20 +116,38 @@ export function noHistoryMessage(off: ProviderId[]): string {
 }
 
 /**
- * The pill over a chart that leaves holdings out because their provider is off:
- * "Bitcoin isn't in this chart: CoinGecko is off."
- * "Bitcoin and Ethereum aren't in this chart: CoinGecko is off."
- * "5 coins aren't in this chart: CoinGecko is off." / "3 holdings aren't in this chart: …"
- * Returns null when nothing is left out for that reason.
+ * The pill over a chart that leaves holdings out. When a provider is off that's
+ * the message, since switching it on fixes it:
+ *   "Bitcoin isn't in this chart: CoinGecko is off."
+ *   "Bitcoin and Ethereum aren't in this chart: CoinGecko is off."
+ *   "5 coins aren't in this chart: CoinGecko is off." / "3 holdings aren't in this chart: …"
+ * Otherwise, for holdings whose providers are on but whose history came back empty:
+ *   "Bitcoin isn't in this chart: its price history couldn't be loaded."
+ *   "Bitcoin and Ethereum aren't in this chart: their price history couldn't be loaded."
+ *   "5 holdings aren't in this chart: their price history couldn't be loaded."
+ * Null when nothing is left out, or when everything failed to load (the chart
+ * shows its empty state then).
  */
-export function missingHistoryMessage(missing: MissingHistory[]): string | null {
-  const named = missing.filter((m) => m.off.length > 0)
-  if (named.length === 0) return null
-  const offSet = new Set(named.flatMap((m) => m.off))
-  const reason = describeOff(PROVIDER_ORDER.filter((id) => offSet.has(id)))
-  const names = named.map((m) => m.holding.name)
-  if (names.length === 1) return `${names[0]} isn't in this chart: ${reason}.`
-  if (names.length === 2) return `${names[0]} and ${names[1]} aren't in this chart: ${reason}.`
-  const noun = named.every((m) => m.holding.category === 'crypto') ? 'coins' : 'holdings'
-  return `${names.length} ${noun} aren't in this chart: ${reason}.`
+export function missingHistoryMessage(coverage: Pick<HistoryCoverage, 'missing' | 'allFailed'>): string | null {
+  const off = coverage.missing.filter((m) => m.off.length > 0)
+  if (off.length > 0) {
+    const offSet = new Set(off.flatMap((m) => m.off))
+    const reason = `${describeOff(PROVIDER_ORDER.filter((id) => offSet.has(id)))}.`
+    return leftOut(off, reason, reason)
+  }
+  if (coverage.missing.length === 0 || coverage.allFailed) return null
+  return leftOut(
+    coverage.missing,
+    "its price history couldn't be loaded.",
+    "their price history couldn't be loaded.",
+  )
+}
+
+/** "<who> isn't / aren't in this chart: <reason>" — one name, two names, or a count. */
+function leftOut(missing: MissingHistory[], reasonOne: string, reasonMany: string): string {
+  const names = missing.map((m) => m.holding.name)
+  if (names.length === 1) return `${names[0]} isn't in this chart: ${reasonOne}`
+  if (names.length === 2) return `${names[0]} and ${names[1]} aren't in this chart: ${reasonMany}`
+  const noun = missing.every((m) => m.holding.category === 'crypto') ? 'coins' : 'holdings'
+  return `${names.length} ${noun} aren't in this chart: ${reasonMany}`
 }

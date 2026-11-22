@@ -276,7 +276,7 @@ export function MarketDataSettingsPage() {
           <ProviderRow
             icon={yahooIcon}
             name="Yahoo Finance"
-            description="Price history and exchange rates."
+            description="Price history and news for AI insights."
             enabled={exchangeRateProvider.enabled}
             onToggle={(v) => updateExchangeRateProvider('yahoo', undefined, v)}
           />
