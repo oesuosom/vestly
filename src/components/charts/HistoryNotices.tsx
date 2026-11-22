@@ -2,19 +2,23 @@ import { Button } from '@/components/ui/Button'
 import { noHistoryMessage } from '@/domain/historyCoverage'
 import type { ProviderId } from '@/services/providers'
 
-/** Centred title, explanation and one action: takes the history chart's (and range picker's) place. */
-function ChartMessage({ title, body, actionLabel, onAction }: {
+/** Centred title, explanation and an optional action: takes the history chart's (and range picker's) place. */
+export function ChartMessage({ title, body, actionLabel, onAction }: {
   title: string
   body: string
-  actionLabel: string
-  onAction: () => void
+  actionLabel?: string
+  onAction?: () => void
 }) {
   return (
     <div className="flex flex-col items-center gap-2 w-full max-w-[360px] mx-auto text-center">
       <p className="text-sm font-medium leading-normal tracking-[-0.35px] text-foreground">{title}</p>
       <p className="text-sm leading-normal tracking-[-0.35px] text-foregroundMuted">{body}</p>
-      <div className="h-1" aria-hidden="true" />
-      <Button variant="secondary" onClick={onAction}>{actionLabel}</Button>
+      {actionLabel && onAction && (
+        <>
+          <div className="h-1" aria-hidden="true" />
+          <Button variant="secondary" onClick={onAction}>{actionLabel}</Button>
+        </>
+      )}
     </div>
   )
 }

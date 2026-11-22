@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The account card's empty chart fits the card** — when an account's chart had nothing to draw
+  yet ("No chart data yet" or "Not enough history yet"), the Vestly logo covered the range picker
+  and the title and text fell below the card, cut off. In the account card the message now takes
+  the chart's and range picker's place, centred and without the logo, like "No price history".
+  When only the selected range is empty (ALL early in the month), the message sits in the chart's
+  place and the range picker stays, so you can switch back. Overview's empty state is unchanged.
+
 - **Icon-only buttons have names** — buttons that show only an icon were read out by screen
   readers as just "button": the holding panel's close button (Cash included), dialog and toast
   close buttons, the account page's menu and price refresh, each holding's row menu, the

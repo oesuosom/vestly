@@ -16,7 +16,8 @@ import { isProviderOn, isProviderSwitchedOn } from '@/services/providers'
 import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCoverage'
 import { useOpenSettings } from '@/features/settings/openSettings'
 import { AccountInsightPanel, type AiAvailability } from '@/features/accounts/AccountInsightPanel'
-import { MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
+import { ChartMessage, MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
+import { buildChartData, emptyChartMessage } from '@/components/charts/chartData'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
 import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
@@ -239,6 +240,27 @@ export function AccountDetail() {
       .filter((s) => s.accountValues[accountId] !== undefined)
       .map((s) => ({ ...s, totalValue: s.accountValues[accountId] }))
   }, [snapshots, accountId])
+
+  // The chart's points, built once here so the card knows when there's nothing to draw.
+  const chartInput = useMemo(
+    () => ({
+      snapshots: accountSnapshots,
+      accounts: account ? [account] : [],
+      transactions: accountTransactions,
+      historicalPrices: historicalPrices ?? undefined,
+      coverage,
+    }),
+    [accountSnapshots, account, accountTransactions, historicalPrices, coverage],
+  )
+  const chartData = useMemo(() => buildChartData({ ...chartInput, dateRange }), [chartInput, dateRange])
+  const emptyChart = emptyChartMessage(chartData)
+  // Keep the range picker while another range has a line (e.g. ALL is empty early in the month).
+  const otherRangeHasChart = useMemo(
+    () => emptyChart !== null && DATE_RANGES.some(
+      (range) => range !== dateRange && emptyChartMessage(buildChartData({ ...chartInput, dateRange: range })) === null,
+    ),
+    [emptyChart, chartInput, dateRange],
+  )
 
   // IKE / IKZE remaining limit — both figures come from the user's per-year
   // entry in contribution settings (limits change yearly per Polish tax law).
@@ -598,27 +620,36 @@ export function AccountDetail() {
             </button>
           </div>
 
-          {coverage.noHistory || coverage.allFailed ? (
-            // Nothing to draw: the message takes the chart's and range picker's place.
+          {coverage.noHistory || coverage.allFailed || (emptyChart && !otherRangeHasChart) ? (
+            // Nothing to draw in any range: the message takes the chart's and range picker's place.
             <div className="flex-1 min-h-0 flex items-center justify-center px-6 pb-4">
               {coverage.noHistory
                 ? <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
-                : <PriceHistoryLoadFailed onRetry={retryHistory} />}
+                : coverage.allFailed
+                  ? <PriceHistoryLoadFailed onRetry={retryHistory} />
+                  : emptyChart && <ChartMessage title={emptyChart.title} body={emptyChart.body} />}
             </div>
           ) : (
             <>
-              {/* Chart */}
+              {/* Chart, or its message when only this range is empty */}
               <div className="relative h-[180px] shrink-0">
-                <PortfolioAreaChart
-                  snapshots={accountSnapshots}
-                  accounts={[account]}
-                  transactions={accountTransactions}
-                  dateRange={dateRange}
-                  historicalPrices={historicalPrices ?? undefined}
-                  coverage={coverage}
-                  minimal
-                />
-                {missingMessage && (
+                {emptyChart ? (
+                  <div className="h-full flex items-center justify-center px-6">
+                    <ChartMessage title={emptyChart.title} body={emptyChart.body} />
+                  </div>
+                ) : (
+                  <PortfolioAreaChart
+                    snapshots={accountSnapshots}
+                    accounts={[account]}
+                    transactions={accountTransactions}
+                    dateRange={dateRange}
+                    historicalPrices={historicalPrices ?? undefined}
+                    coverage={coverage}
+                    chartData={chartData}
+                    minimal
+                  />
+                )}
+                {!emptyChart && missingMessage && (
                   <MissingHistoryPill message={missingMessage} className="absolute inset-x-0 bottom-0" />
                 )}
               </div>

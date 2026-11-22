@@ -31,6 +31,26 @@ function getCutoffDate(range: DateRange): string | null {
   }
 }
 
+/**
+ * What the chart says when it has nothing to draw: no points at all, or a
+ * single one (a line needs two). Null when there's a line to draw.
+ */
+export function emptyChartMessage(points: ChartPoint[]): { title: string; body: string } | null {
+  if (points.length === 0) {
+    return {
+      title: 'No chart data yet',
+      body: 'Add transactions or open the app daily to start building your portfolio history.',
+    }
+  }
+  if (points.length < 2) {
+    return {
+      title: 'Not enough history yet',
+      body: 'Your chart will appear once you have more than one data point.',
+    }
+  }
+  return null
+}
+
 export function isShortRange(range: DateRange): boolean {
   return range === '1M' || range === '3M' || range === '6M'
 }
