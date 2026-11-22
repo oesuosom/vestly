@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────
 
 import { format, subDays } from 'date-fns'
+import { assertProviderOn, type ProviderSettings } from '@/services/providers'
 
 const CG_BASE = '/api/coingecko/api/v3'
 const CG_PRO_BASE = '/api/coingeckopro/api/v3'
@@ -70,8 +71,10 @@ export function getCoinGeckoId(ticker: string): string | null {
  */
 export async function fetchCoinGeckoSpotPrices(
   tickers: string[],
-  apiKey?: string,
+  settings: ProviderSettings,
 ): Promise<Map<string, number>> {
+  assertProviderOn(settings, 'coingecko')
+  const apiKey = settings.coinGeckoApiKey
   const idToTicker = new Map<string, string>()
   for (const t of tickers) {
     const id = getCoinGeckoId(t)
@@ -116,7 +119,9 @@ export type CoinGeckoPricePoint = { date: string; pricePLN: number }
  * Returns one data point per calendar month (first observation in each month).
  * Free tier returns daily granularity for ranges > 90 days — we down-sample to monthly.
  */
-export async function fetchCoinGeckoHistory(ticker: string, apiKey?: string): Promise<CoinGeckoPricePoint[]> {
+export async function fetchCoinGeckoHistory(ticker: string, settings: ProviderSettings): Promise<CoinGeckoPricePoint[]> {
+  assertProviderOn(settings, 'coingecko')
+  const apiKey = settings.coinGeckoApiKey
   const coinId = getCoinGeckoId(ticker)
   if (!coinId) throw new Error(`No CoinGecko ID for ticker: ${ticker}`)
 

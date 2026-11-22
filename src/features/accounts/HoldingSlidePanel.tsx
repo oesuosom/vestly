@@ -14,6 +14,7 @@ import { formatDate, formatPLNDetail, formatQuantity } from '@/utils/formatters'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import { fetchAllPrices } from '@/services/market-data/priceFetcher'
+import { isProviderOn, isProviderSwitchedOn, PROVIDER_NAMES, type ProviderId } from '@/services/providers'
 import { HoldingIcon } from '@/components/ui/HoldingIcon'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -22,7 +23,7 @@ import { HoldingForm } from './HoldingForm'
 import { DeleteHoldingDialog } from './DeleteHoldingDialog'
 import { ClosePositionDialog } from './ClosePositionDialog'
 import { CashDetails } from './CashDetails'
-import { AlertTriangle, CircleCheck, Loader, SidebarRightBold } from '@/generated/icons'
+import { AlertTriangle, CircleCheck, CircleInfo, Loader, SidebarRightBold } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useScrollLock } from '@/hooks/useScrollLock'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
@@ -231,6 +232,31 @@ function ClosedHoldingDetails({ holding }: { holding: Holding }) {
   )
 }
 
+/** The provider that refreshes a holding's price: CoinGecko for crypto, EODHD for the rest. Null when nothing can. */
+function priceProviderFor(holding: Pick<Holding, 'category' | 'ticker' | 'exchange'>): ProviderId | null {
+  if (!holding.ticker || !holding.exchange) return null
+  return holding.category === 'crypto' || holding.exchange === 'CC' ? 'coingecko' : 'eodhd'
+}
+
+/** Shown in the stats stack while the holding's price provider is off. */
+function PriceNotUpdatedNote({ provider }: { provider: ProviderId }) {
+  return (
+    <div className="flex flex-col rounded-lg overflow-clip" role="note">
+      <div className="flex items-center gap-3 p-3 bg-warningForeground border-b border-surface">
+        <p className="flex-1 min-w-0 text-xs font-medium leading-none text-warning [font-feature-settings:'lnum'_1,'tnum'_1]">
+          This price isn’t updated automatically
+        </p>
+        <CircleInfo size={16} className="shrink-0 text-warning" aria-hidden="true" />
+      </div>
+      <div className="p-3 bg-warningForeground">
+        <p className="text-xs leading-normal text-warning [font-feature-settings:'lnum'_1,'tnum'_1]">
+          {PROVIDER_NAMES[provider]} is off, so the current price is the last one you entered or imported.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────
@@ -298,6 +324,8 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
   const isClosed           = holding.closedAt !== undefined
   const isCash             = holding.isSynthetic === true && !isClosed
   const account            = accounts.find((a) => a.id === holding.accountId)
+  const priceProvider      = priceProviderFor(holding)
+  const priceProviderOn    = priceProvider !== null && isProviderOn(settings, priceProvider)
   // Reopen waits while a rebuy of the same ticker is open (one position per ticker).
   const reopenBlockedBy    = isClosed && account ? findSharedPositionHolding(holding, account) : undefined
 
@@ -332,9 +360,12 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
     const hasTicker     = !!(data.ticker && data.exchange)
 
     if (hasTicker && (data.currentPrice === 0 || tickerChanged)) {
-      // Guard: price provider must be configured (mirrors Dashboard behaviour)
-      if (!settings.priceProvider.enabled || !settings.priceProvider.apiKey) {
-        setPriceStatus('no-provider')
+      // Guard: the holding's price provider must be on. When it's off the panel
+      // already says so, and nothing is requested.
+      const provider = priceProviderFor({ category: data.category, ticker: data.ticker, exchange: data.exchange })
+      if (!provider || !isProviderOn(settings, provider)) {
+        // Switched on but missing its key: say it needs configuring.
+        if (provider && isProviderSwitchedOn(settings, provider)) setPriceStatus('no-provider')
         return
       }
 
@@ -383,10 +414,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
   }
 
   async function handleRefreshPrice() {
-    if (!settings.priceProvider.enabled || !settings.priceProvider.apiKey) {
-      setPriceStatus('no-provider')
-      return
-    }
+    if (!priceProvider || !priceProviderOn) return
     setPriceStatus('fetching')
     // Pass only this holding so we make exactly one API call
     const singleHoldingAccounts = accounts
@@ -561,6 +589,8 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
             </StatCell>
           </div>
 
+          {priceProvider && !priceProviderOn && <PriceNotUpdatedNote provider={priceProvider} />}
+
           {/* ── Purchase history ── */}
           {buyLots.length > 0 && (
             <div>
@@ -711,7 +741,7 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
           <Button variant="secondary" onClick={() => setEditOpen(true)}>
             Edit
           </Button>
-          {holding.ticker && holding.exchange && (
+          {priceProviderOn && (
             <Button
               variant="secondary"
               onClick={handleRefreshPrice}

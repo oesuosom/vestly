@@ -3,6 +3,8 @@ import type { Account, Holding, HistoricalPricesCache, HoldingPriceHistory, Hold
 import { currencyForExchange, toEODHDTicker, toYahooTicker } from './tickerUtils'
 import { getNBPRateRange } from '@/services/nbp'
 import { fetchCoinGeckoHistory, getCoinGeckoId } from './coinGecko'
+import { assertProviderOn, isProviderOn, type ProviderSettings } from '@/services/providers'
+import { canFetchHistory } from '@/domain/historyCoverage'
 
 const EODHD_BASE = '/api/eodhd'
 
@@ -50,7 +52,8 @@ function lookupRate(rateMap: Map<string, number>, date: string): number {
 // Ticker-based: fetch from Yahoo Finance
 // ─────────────────────────────────────────
 
-async function fetchTickerHistory(holding: Holding, range = '5y', retries = 1, attempt = 0): Promise<HoldingPricePoint[]> {
+async function fetchTickerHistory(holding: Holding, settings: ProviderSettings, range = '5y', retries = 1, attempt = 0): Promise<HoldingPricePoint[]> {
+  assertProviderOn(settings, 'yahoo')
   const base = YAHOO_BASES[attempt % YAHOO_BASES.length]
   const symbol = toYahooTicker(holding.ticker!, holding.exchange!)
   const url = `${base}/v8/finance/chart/${symbol}?interval=1d&range=${range}`
@@ -59,7 +62,7 @@ async function fetchTickerHistory(holding: Holding, range = '5y', retries = 1, a
 
   if (res.status === 429 && retries > 0) {
     await new Promise((r) => setTimeout(r, 3000))
-    return fetchTickerHistory(holding, range, retries - 1, attempt + 1)
+    return fetchTickerHistory(holding, settings, range, retries - 1, attempt + 1)
   }
 
   if (!res.ok) throw new Error(`Yahoo historical: HTTP ${res.status} for ${symbol}`)
@@ -95,7 +98,7 @@ async function fetchTickerHistory(holding: Holding, range = '5y', retries = 1, a
   // Fetch NBP FX range for this currency
   const startDate = rawPoints[0].date
   const endDate = rawPoints[rawPoints.length - 1].date
-  const rateMap = await getNBPRateRange(currency, startDate, endDate)
+  const rateMap = await getNBPRateRange(currency, startDate, endDate, settings)
 
   return rawPoints.map(p => ({
     date: p.date,
@@ -111,7 +114,9 @@ type EODHDBar = { date: string; adjusted_close: number; close: number }
 
 // `from` defaults to the holding's purchase date (full history); pass a later date to fetch
 // only the recent tail when extending an already-cached series.
-async function fetchEodhdHistory(holding: Holding, apiKey: string, from = holding.purchaseDate): Promise<HoldingPricePoint[]> {
+async function fetchEodhdHistory(holding: Holding, settings: ProviderSettings, from = holding.purchaseDate): Promise<HoldingPricePoint[]> {
+  assertProviderOn(settings, 'eodhd')
+  const apiKey = settings.priceProvider.apiKey
   const eodhdTicker = toEODHDTicker(holding.ticker!, holding.exchange!)
   const to = format(new Date(), 'yyyy-MM-dd')
   const url = `${EODHD_BASE}/eod/${eodhdTicker}?api_token=${apiKey}&fmt=json&from=${from}&to=${to}`
@@ -133,7 +138,7 @@ async function fetchEodhdHistory(holding: Holding, apiKey: string, from = holdin
     return rawPoints.map((p) => ({ date: p.date, pricePLN: p.priceNative }))
   }
 
-  const rateMap = await getNBPRateRange(currency, rawPoints[0].date, rawPoints[rawPoints.length - 1].date)
+  const rateMap = await getNBPRateRange(currency, rawPoints[0].date, rawPoints[rawPoints.length - 1].date, settings)
   return rawPoints.map((p) => ({ date: p.date, pricePLN: p.priceNative * lookupRate(rateMap, p.date) }))
 }
 
@@ -202,11 +207,15 @@ function rangeForGap(lastDate: string): string {
   return '5y'
 }
 
+/** Which history providers are on — stored with the cache so switching one on refetches. */
+export function historyProviderSignature(settings: ProviderSettings): string {
+  return (['eodhd', 'yahoo', 'nbp', 'coingecko'] as const).filter((id) => isProviderOn(settings, id)).join(',')
+}
+
 export async function buildHistoricalPricesCache(
   accounts: Account[],
-  coinGeckoApiKey?: string,
+  settings: ProviderSettings,
   existingCache?: HistoricalPricesCache | null,
-  eodhdApiKey?: string,
 ): Promise<HistoricalPricesCache> {
   const allHoldings = accounts.flatMap((a) => a.holdings)
   const todayStr = new Date().toISOString().slice(0, 10)
@@ -237,6 +246,12 @@ export async function buildHistoricalPricesCache(
     }
 
     const cachedPrices = reuseMap.get(holding.id)?.prices ?? []
+    if (!canFetchHistory(holding, settings)) {
+      // Its provider is off: no request. Keep what's cached so switching it back
+      // on only has to catch up; the chart leaves it out meanwhile.
+      histories.push({ holdingId: holding.id, prices: cachedPrices })
+      continue
+    }
     if (cachedPrices.length === 0) {
       // New holding, or a previous fetch that failed / was rate-limited — fetch full history.
       fetchTasks.push({ holding, existing: [] })
@@ -283,27 +298,26 @@ export async function buildHistoricalPricesCache(
   // Stocks/ETFs: prefer EODHD when a key is set (keyed, reliable, no 429s) and fall back to
   // the public Yahoo endpoint; with no key, Yahoo is the only option. Either way the loser is
   // a fallback, so a single provider failing never blanks the series.
+  const eodhdOn = isProviderOn(settings, 'eodhd')
+  const yahooOn = isProviderOn(settings, 'yahoo')
   const fetchTicker = async (holding: Holding, range: string, from: string): Promise<HoldingPricePoint[]> => {
     const tryYahoo = async () => {
       await throttle(lastYahooFetch, YAHOO_DELAY_MS)
       lastYahooFetch = Date.now()
-      return fetchTickerHistory(holding, range)
+      return fetchTickerHistory(holding, settings, range)
     }
     const tryEodhd = async () => {
       await throttle(lastEodhdFetch, EODHD_DELAY_MS)
       lastEodhdFetch = Date.now()
-      return fetchEodhdHistory(holding, eodhdApiKey!, from)
+      return fetchEodhdHistory(holding, settings, from)
     }
 
-    if (eodhdApiKey) {
+    if (eodhdOn) {
       try {
         const eodhd = await tryEodhd()
-        if (eodhd.length > 0) return eodhd
-      } catch { /* fall through to Yahoo */ }
-      try {
-        return await tryYahoo()
+        if (eodhd.length > 0 || !yahooOn) return eodhd
       } catch {
-        return []
+        if (!yahooOn) return []
       }
     }
     try {
@@ -326,7 +340,7 @@ export async function buildHistoricalPricesCache(
           lastCoinGeckoFetch = Date.now()
           // CoinGecko's daily endpoint is cheap & key-free; the full series replaces the
           // recent window and merge keeps any older points the existing cache had.
-          fetched = await fetchCoinGeckoHistory(cryptoTicker, coinGeckoApiKey)
+          fetched = await fetchCoinGeckoHistory(cryptoTicker, settings)
         } else if (isCrypto) {
           // Crypto with unknown ticker — leave empty (no interpolation for volatile assets)
           fetched = []
@@ -376,5 +390,6 @@ export async function buildHistoricalPricesCache(
     histories,
     fetchedAt: now.toISOString(),
     expiresAt,
+    providers: historyProviderSignature(settings),
   }
 }

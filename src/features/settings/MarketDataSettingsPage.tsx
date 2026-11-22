@@ -20,6 +20,7 @@ import {
   saveHistoricalPricesCache,
 } from '@/storage/historicalPriceStorage'
 import { buildHistoricalPricesCache } from '@/services/market-data/yahooHistorical'
+import { canFetchHistory } from '@/domain/historyCoverage'
 
 type ProviderRowProps = {
   icon: string
@@ -54,7 +55,7 @@ function ProviderRow({
       <div className="flex flex-col gap-1 flex-1 min-w-0">
         <span className="text-sm font-medium text-foreground tracking-[-0.35px] leading-none">{name}</span>
         <span className="text-xs text-foregroundMuted tracking-[-0.3px] truncate leading-none">
-          {apiKeyMissing && !enabled ? 'Add an API key to enable this provider.' : description}
+          {description}
         </span>
       </div>
       <div className="flex items-center gap-3 pr-1 shrink-0">
@@ -66,7 +67,7 @@ function ProviderRow({
             onClick={onToggleExpand}
           />
         )}
-        <Toggle checked={enabled} onChange={onToggle} disabled={apiKeyMissing && !enabled} />
+        <Toggle checked={enabled} onChange={onToggle} disabled={apiKeyMissing && !enabled} label={name} />
       </div>
     </div>
   )
@@ -193,20 +194,16 @@ export function MarketDataSettingsPage() {
     setFailure(null)
     try {
       clearHistoricalPricesCache()
-      const newCache = await buildHistoricalPricesCache(
-        accounts,
-        coinGeckoApiKey,
-        null,
-        priceProvider.apiKey,
-      )
+      const newCache = await buildHistoricalPricesCache(accounts, settings, null)
       saveHistoricalPricesCache(newCache)
 
       // Fetch errors don't throw either — a holding whose history couldn't be
       // fetched comes back with an empty series. Only holdings with a ticker
       // (or crypto) are fetched; the rest are interpolated and can't fail.
+      // Holdings whose provider is off aren't fetched, so they can't have failed.
       const fetched = accounts
         .flatMap((a) => a.holdings)
-        .filter((h) => (h.ticker && h.exchange) || h.category === 'crypto')
+        .filter((h) => ((h.ticker && h.exchange) || h.category === 'crypto') && canFetchHistory(h, settings))
       const filled = new Set(
         newCache.histories.filter((h) => h.prices.length > 0).map((h) => h.holdingId),
       )
@@ -262,7 +259,7 @@ export function MarketDataSettingsPage() {
           <ProviderRow
             icon={eodhdIcon}
             name="EODHD"
-            description="Real-time, historical, and end-of-day financial data."
+            description="Price updates, price history and dividends for AI insights."
             enabled={priceProvider.enabled}
             onToggle={(v) => updatePriceProvider('eodhd', priceProvider.apiKey, v)}
             hasApiKey
@@ -279,14 +276,14 @@ export function MarketDataSettingsPage() {
           <ProviderRow
             icon={yahooIcon}
             name="Yahoo Finance"
-            description="A leading financial data provider for many markets."
+            description="Price history and news for AI insights."
             enabled={exchangeRateProvider.enabled}
             onToggle={(v) => updateExchangeRateProvider('yahoo', undefined, v)}
           />
           <ProviderRow
             icon={nbpIcon}
             name="Narodowy Bank Polski"
-            description="Historical currency rates and gold prices."
+            description="Exchange rates for history and imports."
             enabled={nbpEnabled}
             onToggle={updateNbpEnabled}
             isLast
@@ -303,11 +300,10 @@ export function MarketDataSettingsPage() {
           <ProviderRow
             icon={coinGeckoIcon}
             name="CoinGecko"
-            description="Cryptocurrency prices."
+            description="Crypto prices and their history."
             enabled={coinGeckoEnabled}
             onToggle={updateCoinGeckoEnabled}
             hasApiKey
-            apiKeyMissing={!coinGeckoApiKey}
             isExpanded={coinGeckoExpanded}
             onToggleExpand={() => toggleExpand('coingecko')}
             isLast={!coinGeckoExpanded}

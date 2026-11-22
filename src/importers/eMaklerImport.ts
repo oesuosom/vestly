@@ -4,7 +4,7 @@
 
 import { getNBPRate, getNBPRateRange, getNBPRateToday } from '@/services/nbp'
 import type { EMaklerOrderRow, EMaklerPortfolioRow } from './eMaklerParser'
-import type { Settings } from '@/types'
+import { isProviderOn, type ProviderSettings } from '@/services/providers'
 
 // ─────────────────────────────────────────
 // localStorage helpers for order deduplication
@@ -90,10 +90,13 @@ const rateCache = new Map<string, Promise<{ rate: number; resolved: boolean }>>(
 function resolveRate(
   currency: string,
   purchaseDate: string,
-  settings?: Settings,
+  settings?: ProviderSettings,
 ): Promise<{ rate: number; resolved: boolean }> {
   if (currency === 'PLN') return Promise.resolve({ rate: 1, resolved: true })
-  const key = `${currency}|${purchaseDate.slice(0, 10)}`
+  // Keyed by which rate providers are on too, so a miss while one was off isn't
+  // reused after it's switched on.
+  const providers = settings ? `${isProviderOn(settings, 'nbp')}|${isProviderOn(settings, 'eodhd')}` : 'none'
+  const key = `${currency}|${purchaseDate.slice(0, 10)}|${providers}`
   const hit = rateCache.get(key)
   if (hit) return hit
   const pending = resolveRateUncached(currency, purchaseDate, settings)
@@ -101,40 +104,25 @@ function resolveRate(
   return pending
 }
 
+/** Whether an import can convert foreign prices: NBP, or EODHD with a key. */
+export function canResolveExchangeRates(settings: ProviderSettings): boolean {
+  return isProviderOn(settings, 'nbp') || isProviderOn(settings, 'eodhd')
+}
+
 async function resolveRateUncached(
   currency: string,
   purchaseDate: string,
-  settings?: Settings,
+  settings?: ProviderSettings,
 ): Promise<{ rate: number; resolved: boolean }> {
-
-  // 1. Historical NBP rate for the purchase date
-  try {
-    const rate = await getNBPRate(currency, purchaseDate)
-    return { rate, resolved: true }
-  } catch { /* fall through */ }
-
-  // 2. Nearest prior trading day — NBP 404s on single-date queries for
-  //    weekends/holidays. Ask for the preceding two weeks and take the
-  //    latest published rate; falling back to today's rate here would
-  //    misprice the cost basis of anything bought on a non-trading day.
-  try {
-    const dateOnly = purchaseDate.slice(0, 10)
-    const from = new Date(dateOnly)
-    from.setDate(from.getDate() - 14)
-    const rates = await getNBPRateRange(currency, from.toISOString().slice(0, 10), dateOnly)
-    const latest = [...rates.keys()].sort().pop()
-    if (latest) return { rate: rates.get(latest)!, resolved: true }
-  } catch { /* fall through */ }
-
-  // 3. Today's NBP rate (last resort, e.g. NBP range endpoint unavailable)
-  try {
-    const rate = await getNBPRateToday(currency)
-    return { rate, resolved: true }
-  } catch { /* fall through */ }
+  // Steps 1–3 need NBP and step 4 needs EODHD; a provider that's off is skipped.
+  if (settings && isProviderOn(settings, 'nbp')) {
+    const nbp = await resolveNbpRate(currency, purchaseDate, settings)
+    if (nbp) return nbp
+  }
 
   // 4. EODHD historical forex (via Vite proxy — requires API key)
-  const eodhdKey = settings?.priceProvider.id === 'eodhd' ? settings.priceProvider.apiKey : ''
-  if (eodhdKey) {
+  if (settings && isProviderOn(settings, 'eodhd')) {
+    const eodhdKey = settings.priceProvider.apiKey
     try {
       const dateOnly = purchaseDate.slice(0, 10)
       const pair = `${currency}PLN.FOREX`
@@ -149,6 +137,39 @@ async function resolveRateUncached(
   }
 
   return { rate: 0, resolved: false }
+}
+
+async function resolveNbpRate(
+  currency: string,
+  purchaseDate: string,
+  settings: ProviderSettings,
+): Promise<{ rate: number; resolved: boolean } | null> {
+  // 1. Historical NBP rate for the purchase date
+  try {
+    const rate = await getNBPRate(currency, purchaseDate, settings)
+    return { rate, resolved: true }
+  } catch { /* fall through */ }
+
+  // 2. Nearest prior trading day — NBP 404s on single-date queries for
+  //    weekends/holidays. Ask for the preceding two weeks and take the
+  //    latest published rate; falling back to today's rate here would
+  //    misprice the cost basis of anything bought on a non-trading day.
+  try {
+    const dateOnly = purchaseDate.slice(0, 10)
+    const from = new Date(dateOnly)
+    from.setDate(from.getDate() - 14)
+    const rates = await getNBPRateRange(currency, from.toISOString().slice(0, 10), dateOnly, settings)
+    const latest = [...rates.keys()].sort().pop()
+    if (latest) return { rate: rates.get(latest)!, resolved: true }
+  } catch { /* fall through */ }
+
+  // 3. Today's NBP rate (last resort, e.g. NBP range endpoint unavailable)
+  try {
+    const rate = await getNBPRateToday(currency, settings)
+    return { rate, resolved: true }
+  } catch { /* fall through */ }
+
+  return null
 }
 
 // ─────────────────────────────────────────
@@ -166,13 +187,14 @@ async function resolveRateUncached(
  * @param portfolioRows         Parsed portfolio snapshot rows (may be empty)
  * @param orderRows             Parsed order-history rows (may be empty)
  * @param existingOrderKeys     Previously processed deduplicationKeys (for skip logic)
- * @param settings              Optional — used for the EODHD NBP fallback
+ * @param settings              Provider switches — exchange rates come from NBP, then
+ *                              EODHD. Without settings, no rates are fetched.
  */
 export async function buildEMaklerImport(
   portfolioRows: EMaklerPortfolioRow[],
   orderRows: EMaklerOrderRow[],
   existingOrderKeys: Set<string>,
-  settings?: Settings,
+  settings?: ProviderSettings,
 ): Promise<EMaklerImportResult> {
   const warnings: string[] = []
   let duplicatesSkipped = 0
@@ -320,7 +342,7 @@ export async function buildEMaklerImport(
 
 async function buildTransactionData(
   orderRows: EMaklerOrderRow[],
-  settings?: Settings,
+  settings?: ProviderSettings,
 ): Promise<EMaklerTransactionData[]> {
   const result: EMaklerTransactionData[] = []
   for (const order of orderRows) {

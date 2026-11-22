@@ -6,6 +6,8 @@
 // fall back to a range query (getNBPRateRange) to find the nearest prior rate.
 // ─────────────────────────────────────────
 
+import { assertProviderOn, type ProviderSettings } from '@/services/providers'
+
 const NBP_BASE = 'https://api.nbp.pl/api/exchangerates/rates/a'
 
 type NBPResponse = { rates: { mid: number }[] }
@@ -15,7 +17,8 @@ type NBPResponse = { rates: { mid: number }[] }
  * @param currency  ISO currency code, e.g. 'USD', 'GBP'
  * @param date      ISO date string — only the first 10 chars (YYYY-MM-DD) are used
  */
-export async function getNBPRate(currency: string, date: string): Promise<number> {
+export async function getNBPRate(currency: string, date: string, settings: ProviderSettings): Promise<number> {
+  assertProviderOn(settings, 'nbp')
   const dateOnly = date.slice(0, 10)
   const url = `${NBP_BASE}/${currency.toLowerCase()}/${dateOnly}/?format=json`
   const res = await fetch(url)
@@ -36,12 +39,15 @@ export async function getNBPRate(currency: string, date: string): Promise<number
  * @param currency  ISO currency code, e.g. 'USD', 'EUR'
  * @param startDate yyyy-MM-dd
  * @param endDate   yyyy-MM-dd
+ * @throws ProviderOffError while NBP is switched off
  */
 export async function getNBPRateRange(
   currency: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  settings: ProviderSettings,
 ): Promise<Map<string, number>> {
+  assertProviderOn(settings, 'nbp')
   type NBPRangeResponse = { rates: { effectiveDate: string; mid: number }[] }
 
   const result = new Map<string, number>()
@@ -84,7 +90,8 @@ export async function getNBPRateRange(
  * Useful as a fallback when the historical date is too recent or unavailable.
  * @param currency  ISO currency code, e.g. 'USD', 'GBP'
  */
-export async function getNBPRateToday(currency: string): Promise<number> {
+export async function getNBPRateToday(currency: string, settings: ProviderSettings): Promise<number> {
+  assertProviderOn(settings, 'nbp')
   const url = `${NBP_BASE}/${currency.toLowerCase()}/today/?format=json`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`NBP today: HTTP ${res.status} for ${currency}`)

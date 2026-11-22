@@ -174,13 +174,14 @@ export const DEFAULT_SETTINGS: Settings = {
     apiKey: '',
     enabled: false,
   },
+  // Providers that need no key start on; Anthropic and EODHD stay off until switched on.
   exchangeRateProvider: {
     id: 'yahoo',
     apiKey: undefined,
-    enabled: false,
+    enabled: true,
   },
-  nbpEnabled: false,
-  coinGeckoEnabled: false,
+  nbpEnabled: true,
+  coinGeckoEnabled: true,
   instrumentAliases: {},
   userName: undefined,
   userAvatar: undefined,
@@ -208,6 +209,8 @@ export type HistoricalPricesCache = {
   histories: HoldingPriceHistory[]
   fetchedAt: string
   expiresAt: string
+  /** History providers that were on when it was built, e.g. "yahoo,nbp,coingecko". */
+  providers?: string
 }
 
 // ─────────────────────────────────────────

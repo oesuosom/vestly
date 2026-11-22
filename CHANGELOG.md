@@ -20,6 +20,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Provider switches are respected; nothing goes to Anthropic while AI is off** — the on/off
+  switches in Settings › Market Data and AI Providers were saved but mostly ignored, so with AI
+  off and a Claude key saved, Overview and the account pages still sent a summary of the
+  portfolio to Anthropic, and EODHD, Yahoo Finance, CoinGecko and NBP were called whatever their
+  switch said. Now a provider that's off is never contacted, key or not — prices, price history,
+  dividends, news for AI insights and eMakler imports included — and switching one back on works
+  without a reload.
+  - **AI insights stay off until you switch Anthropic on, even if a key is saved.** On Overview
+    the insight card is hidden while AI is off or has no key. On an account page the card says
+    AI is off (and that nothing is sent), asks for a key when one is missing, shows a skeleton
+    while it loads, and explains an error in plain words with a way to try again.
+  - **New defaults:** a new install starts with Yahoo Finance, NBP and CoinGecko (free tier, no
+    key needed) on, and Anthropic and EODHD off. Saved switches keep their values; only missing
+    ones take these defaults. Installs that saved every switch off keep them off: switch the
+    providers you want on in Settings › Market Data. The charts say which switch is off.
+  - **History charts** leave out holdings without price history instead of drawing a straight
+    line from purchase to today; the value above the chart still counts them. A note under the
+    chart names what's left out and which provider is off, or says their price history couldn't
+    be loaded when the provider is on. When nothing has history because providers are off, the
+    chart is replaced by a message with a link to Market data; when it all failed to load, by a
+    message with a Try again button that fetches it again without a reload.
+  - **Holding panel:** when the holding's price provider is off, it says the price isn't
+    updated automatically and hides Refresh Price.
+  - Market Data now says what each provider is used for, CoinGecko can be switched on without a
+    key, and eMakler imports warn before they start when NBP and EODHD are both off.
+
 - **Primary buttons are readable in the dark theme** — their label was always white, so on the
   near-white dark-theme button it couldn't be read (Save, Add Account, Continue and the other main
   actions). The label now follows the theme. In dark mode the hover darkens the button and the

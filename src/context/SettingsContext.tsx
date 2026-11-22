@@ -40,7 +40,12 @@ type SettingsContextValue = Settings & SettingsActions
 
 const SettingsContext = createContext<SettingsContextValue | null>(null)
 
-function migrateSettings(raw: string): Settings {
+/**
+ * Parse saved settings. Values that were saved are kept as they are; only
+ * missing ones take the defaults — so a provider someone switched off stays off,
+ * and AI stays off for anyone who never switched it on, even with a key saved.
+ */
+export function migrateSettings(raw: string): Settings {
   const parsed = JSON.parse(raw) as Settings & { allocationTargets?: AllocationTargets }
 
   // Migrate old allocationTargets → allocationGroups
@@ -59,11 +64,12 @@ function migrateSettings(raw: string): Settings {
     ...DEFAULT_SETTINGS,
     ...parsed,
     allocationGroups,
-    priceProvider: parsed.priceProvider ?? DEFAULT_SETTINGS.priceProvider,
-    exchangeRateProvider: parsed.exchangeRateProvider ?? DEFAULT_SETTINGS.exchangeRateProvider,
+    priceProvider: { ...DEFAULT_SETTINGS.priceProvider, ...parsed.priceProvider },
+    exchangeRateProvider: { ...DEFAULT_SETTINGS.exchangeRateProvider, ...parsed.exchangeRateProvider },
     instrumentAliases: parsed.instrumentAliases ?? DEFAULT_SETTINGS.instrumentAliases,
-    nbpEnabled: parsed.nbpEnabled ?? true,
-    coinGeckoEnabled: parsed.coinGeckoEnabled ?? true,
+    anthropicEnabled: parsed.anthropicEnabled ?? DEFAULT_SETTINGS.anthropicEnabled,
+    nbpEnabled: parsed.nbpEnabled ?? DEFAULT_SETTINGS.nbpEnabled,
+    coinGeckoEnabled: parsed.coinGeckoEnabled ?? DEFAULT_SETTINGS.coinGeckoEnabled,
   }
 }
 

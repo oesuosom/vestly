@@ -7,6 +7,10 @@ import { useSettings } from '@/context/SettingsContext'
 import { fetchAllPrices } from '@/services/market-data/priceFetcher'
 import { useHistoricalPrices } from '@/hooks/useHistoricalPrices'
 import { usePortfolioInsight } from '@/hooks/usePortfolioInsight'
+import { isProviderOn } from '@/services/providers'
+import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCoverage'
+import { useOpenSettings } from '@/features/settings/openSettings'
+import { MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
 import {
   getAllTimeSummary,
   getCategoryAllocation,
@@ -54,20 +58,30 @@ export function Overview() {
     setAddModalOpen(false)
   }
 
-  // Auto-refresh prices once on load if provider is configured and cache is stale
+  // Auto-refresh prices once on load if EODHD is on and the cache is stale —
+  // and again if EODHD is switched on later, without a reload.
+  const eodhdOn = isProviderOn(settings, 'eodhd')
   const autoFetchDoneRef = useRef(false)
   useEffect(() => {
     if (isLoading || autoFetchDoneRef.current) return
-    if (!settings.priceProvider.enabled || !settings.priceProvider.apiKey) return
+    if (!eodhdOn) return
     autoFetchDoneRef.current = true
     void fetchAllPrices(accounts, settings).then((result) => {
       if (result.updatedAccounts) {
         replaceAccounts(result.updatedAccounts)
       }
     })
-  }, [isLoading]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoading, eodhdOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { historicalPrices } = useHistoricalPrices(accounts, settings.coinGeckoApiKey, settings.priceProvider.apiKey)
+  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings)
+  const openSettings = useOpenSettings()
+
+  // Which holdings the chart can draw with the providers that are on.
+  const coverage = useMemo(
+    () => getHistoryCoverage(accounts, settings, historicalPrices, { retrying: isRetrying }),
+    [accounts, settings, historicalPrices, isRetrying],
+  )
+  const missingMessage = missingHistoryMessage(coverage)
 
   const totalValue = useMemo(() => getTotalValue(accounts), [accounts])
 
@@ -176,7 +190,7 @@ export function Overview() {
     }
   }, [accounts, totalValue, delta, deltaPercent, period, categoryAllocation, unrealizedPnL, realizedPnL])
 
-  const insight = usePortfolioInsight(insightInput, settings.claudeApiKey, settings.priceProvider.apiKey)
+  const insight = usePortfolioInsight(insightInput, settings)
 
   const earliestDate = useMemo(() => {
     const allHoldings = accounts.flatMap((a) => a.holdings)
@@ -251,25 +265,40 @@ export function Overview() {
         )}
       </div>
 
-      {/* Chart — true full viewport width: escapes ml-24 (left) and pr-24 (right) of <main> */}
-      <div className="-mx-24 w-[calc(100%+12rem)]">
-        <PortfolioAreaChart
-          snapshots={snapshots}
-          accounts={accounts}
-          transactions={transactions}
-          dateRange={dateRange}
-          historicalPrices={historicalPrices ?? undefined}
-          simplified
-        />
-      </div>
+      {coverage.noHistory || coverage.allFailed ? (
+        // Nothing to draw: the message takes the chart's and range picker's place.
+        <div className="h-[384px] flex items-center justify-center">
+          {coverage.noHistory
+            ? <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+            : <PriceHistoryLoadFailed onRetry={retryHistory} />}
+        </div>
+      ) : (
+        <>
+          {/* Chart — true full viewport width: escapes ml-24 (left) and pr-24 (right) of <main> */}
+          <div className="relative -mx-24 w-[calc(100%+12rem)]">
+            <PortfolioAreaChart
+              snapshots={snapshots}
+              accounts={accounts}
+              transactions={transactions}
+              dateRange={dateRange}
+              historicalPrices={historicalPrices ?? undefined}
+              coverage={coverage}
+              simplified
+            />
+            {missingMessage && (
+              <MissingHistoryPill message={missingMessage} surface="background" className="absolute inset-x-0 bottom-0" />
+            )}
+          </div>
 
-      {/* Chart Controls */}
-      <div className="mx-auto max-w-[896px] w-full flex items-center justify-between">
-        <SegmentedControl options={DATE_RANGES} value={dateRange} onChange={setDateRange} />
-        <p className="text-sm leading-none text-[#626262] tracking-[-0.14px]">
-          {getDateRangeLabel(dateRange, earliestDate ?? undefined)}
-        </p>
-      </div>
+          {/* Chart Controls */}
+          <div className="mx-auto max-w-[896px] w-full flex items-center justify-between">
+            <SegmentedControl options={DATE_RANGES} value={dateRange} onChange={setDateRange} />
+            <p className="text-sm leading-none text-[#626262] tracking-[-0.14px]">
+              {getDateRangeLabel(dateRange, earliestDate ?? undefined)}
+            </p>
+          </div>
+        </>
+      )}
 
       {/* Portfolio Stats */}
       <div className="mx-auto max-w-[896px] w-full">
@@ -306,7 +335,8 @@ export function Overview() {
       </div>
 
       {/* Portfolio Insight */}
-      {settings.claudeApiKey && (
+      {/* Hidden unless AI is on with a key: nothing is sent to Anthropic otherwise. */}
+      {isProviderOn(settings, 'anthropic') && (
         <div className="mx-auto max-w-[896px] w-full">
           <PortfolioInsightCard
             summary={insight.summary}

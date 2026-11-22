@@ -3,13 +3,14 @@ import { saveAccounts } from '@/storage/portfolioStore'
 import { eodhdProvider } from './eodhd'
 import { fetchCoinGeckoSpotPrices, getCoinGeckoId } from './coinGecko'
 import type { NormalizedTicker, PriceCache, PriceCacheEntry, PriceProvider, PriceResult } from './types'
+import { describeOff, isProviderOn, type ProviderId, type ProviderSettings } from '@/services/providers'
 
 // ─────────────────────────────────────────
 // CoinGecko spot-price fetcher (all crypto / exchange === 'CC')
 // Free, no API key, returns PLN natively — no rate-limit issues.
 // ─────────────────────────────────────────
 
-async function fetchCryptoPrices(tickers: NormalizedTicker[], apiKey?: string): Promise<PriceResult[]> {
+async function fetchCryptoPrices(tickers: NormalizedTicker[], settings: ProviderSettings): Promise<PriceResult[]> {
   if (tickers.length === 0) return []
   const now = new Date().toISOString()
 
@@ -24,7 +25,7 @@ async function fetchCryptoPrices(tickers: NormalizedTicker[], apiKey?: string): 
   if (known.length === 0) return unknownResults
 
   try {
-    const priceMap = await fetchCoinGeckoSpotPrices(known.map((t) => t.ticker), apiKey)
+    const priceMap = await fetchCoinGeckoSpotPrices(known.map((t) => t.ticker), settings)
     const knownResults: PriceResult[] = known.map((t) => {
       const base = t.ticker.toUpperCase().replace(/-USD$/, '')
       const price = priceMap.get(base)
@@ -73,10 +74,16 @@ function readCache(): PriceCache | null {
   }
 }
 
-function writeCache(entries: PriceCacheEntry[]): PriceCache {
+/** Which price providers are on — a cache written under another set is stale. */
+function providerSignature(settings: ProviderSettings): string {
+  return (['eodhd', 'coingecko'] as const).filter((id) => isProviderOn(settings, id)).join(',')
+}
+
+function writeCache(entries: PriceCacheEntry[], providers: string): PriceCache {
   const cache: PriceCache = {
     entries,
     cachedAt: new Date().toISOString(),
+    providers,
   }
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
   return cache
@@ -132,8 +139,6 @@ export async function fetchAllPrices(
     }
   }
 
-  const apiKey = settings.priceProvider?.apiKey ?? ''
-
   // Build list of eligible tickers
   const tickers: NormalizedTicker[] = []
   for (const account of accounts) {
@@ -169,7 +174,8 @@ export async function fetchAllPrices(
   // Check cache unless force refresh
   if (!options.forceRefresh) {
     const cache = readCache()
-    if (cache && isCacheFresh(cache)) {
+    // A provider switched on since the cache was written hasn't been asked yet.
+    if (cache && isCacheFresh(cache) && cache.providers === providerSignature(settings)) {
       return {
         results: cache.entries.map((e) => ({
           holdingId: e.holdingId,
@@ -186,8 +192,11 @@ export async function fetchAllPrices(
 
   // Separate crypto (CC) tickers — EODHD doesn't cover them, so they go to
   // CoinGecko (see fetchCryptoPrices above), which returns PLN directly.
-  const cryptoTickers = tickers.filter((t) => t.exchange === 'CC')
-  const nonCryptoTickers = tickers.filter((t) => t.exchange !== 'CC')
+  // A provider that's switched off is skipped: its holdings keep their price.
+  const eodhdOn = isProviderOn(settings, 'eodhd')
+  const coinGeckoOn = isProviderOn(settings, 'coingecko')
+  const cryptoTickers = coinGeckoOn ? tickers.filter((t) => t.exchange === 'CC') : []
+  const nonCryptoTickers = eodhdOn ? tickers.filter((t) => t.exchange !== 'CC') : []
 
   // Filter non-crypto tickers by what provider supports (e.g. Polish stocks)
   const supportedTickers = provider.supported.polishStocks
@@ -197,17 +206,25 @@ export async function fetchAllPrices(
   // Fetch prices from main provider (non-crypto) and CoinGecko (crypto) in parallel
   const [providerResults, cryptoResults] = await Promise.all([
     supportedTickers.length > 0
-      ? provider.fetchPrices(supportedTickers, apiKey)
+      ? provider.fetchPrices(supportedTickers, settings)
       : Promise.resolve([] as PriceResult[]),
-    fetchCryptoPrices(cryptoTickers, settings.coinGeckoApiKey),
+    fetchCryptoPrices(cryptoTickers, settings),
   ])
 
   const results = [...providerResults, ...cryptoResults]
 
   if (results.length === 0) {
+    const off: ProviderId[] = []
+    if (!eodhdOn && tickers.some((t) => t.exchange !== 'CC')) off.push('eodhd')
+    if (!coinGeckoOn && tickers.some((t) => t.exchange === 'CC')) off.push('coingecko')
     return {
       results: [],
-      warnings: [...warnings, 'No supported holdings for this provider after filtering.'],
+      warnings: [
+        ...warnings,
+        off.length > 0
+          ? `${describeOff(off)}, so no prices were updated. Switch ${off.length > 1 ? 'them' : 'it'} on in Settings › Market Data.`
+          : 'No supported holdings for this provider after filtering.',
+      ],
       fromCache: false,
       cachedAt: null,
     }
@@ -244,7 +261,7 @@ export async function fetchAllPrices(
       currency: r.currency,
       fetchedAt: r.fetchedAt,
     }))
-  const written = writeCache(cacheEntries)
+  const written = writeCache(cacheEntries, providerSignature(settings))
 
   return {
     results,

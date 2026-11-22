@@ -1,4 +1,5 @@
 import type { NewsCacheEntry } from '@/storage/portfolioStore'
+import { isProviderOn, type ProviderSettings } from '@/services/providers'
 
 type YahooNewsItem = {
   title: string
@@ -41,8 +42,9 @@ async function fetchNewsForTicker(
 
 export async function fetchYahooNews(
   holdings: Array<{ ticker: string; name: string }>,
+  settings: ProviderSettings,
 ): Promise<NewsCacheEntry[]> {
-  if (holdings.length === 0) return []
+  if (holdings.length === 0 || !isProviderOn(settings, 'yahoo')) return []
 
   const sevenDaysAgo = Date.now() / 1000 - 7 * 24 * 60 * 60
   const entries: NewsCacheEntry[] = []

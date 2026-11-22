@@ -15,13 +15,23 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 
 type SettingsDialogProps = {
   isOpen: boolean
+  /** Page to show when the dialog opens; the last one viewed when omitted. */
+  page?: SettingsPage
   onClose: () => void
 }
 
-function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+function SettingsContent({ isOpen, page, onClose }: SettingsDialogProps) {
   // Always rendered (the backdrop fades on `isOpen`), so only `open` is used.
   const { open } = useEnterExit(isOpen)
-  const [activePage, setActivePage] = useState<SettingsPage>('account')
+  const [activePage, setActivePage] = useState<SettingsPage>(page ?? 'account')
+
+  // Jump to the requested page each time the dialog opens — adjusted during
+  // render (store-previous-value pattern) so the old page never paints.
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen)
+    if (isOpen && page) setActivePage(page)
+  }
 
   useScrollLock(isOpen)
 
@@ -80,6 +90,6 @@ function SettingsContent({ isOpen, onClose }: { isOpen: boolean; onClose: () => 
   )
 }
 
-export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  return createPortal(<SettingsContent isOpen={isOpen} onClose={onClose} />, document.body)
+export function SettingsDialog({ isOpen, page, onClose }: SettingsDialogProps) {
+  return createPortal(<SettingsContent isOpen={isOpen} page={page} onClose={onClose} />, document.body)
 }
