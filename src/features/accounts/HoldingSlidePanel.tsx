@@ -485,8 +485,12 @@ export function HoldingSlidePanel({ holding: holdingProp, isOpen, onClose }: Hol
               </span>
             </div>
           </div>
-          <button onClick={onClose} className="ml-3 shrink-0 p-2 rounded-full hover:bg-muted flex items-center justify-center cursor-pointer">
-            <SidebarRightBold size={20} className="text-accent" />
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="ml-3 shrink-0 p-2 rounded-full hover:bg-muted flex items-center justify-center cursor-pointer"
+          >
+            <SidebarRightBold size={20} className="text-accent" aria-hidden="true" />
           </button>
         </div>
 

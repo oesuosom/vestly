@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The holding panel's close button has a name** — the icon-only button that closes a holding
+  panel (Cash included) was read out by screen readers as just "button". It is now announced as
+  "Close", and its icon is hidden from assistive technology. It looks the same, and it still
+  shows the browser's focus ring when you reach it with Tab.
+
 - **Provider switches are respected; nothing goes to Anthropic while AI is off** — the on/off
   switches in Settings › Market Data and AI Providers were saved but mostly ignored, so with AI
   off and a Claude key saved, Overview and the account pages still sent a summary of the
