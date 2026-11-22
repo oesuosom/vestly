@@ -66,16 +66,22 @@ describe('buildCashLedger', () => {
 })
 
 describe('latestCashChanges', () => {
-  it('returns up to five cash transactions, newest first', () => {
+  it('returns up to ten cash transactions, newest first', () => {
+    // Twelve cash rows, January to December, in a shuffled order.
+    const months = [3, 11, 1, 7, 12, 5, 9, 2, 10, 4, 8, 6]
     const log = [
-      tx({ date: '2026-01-01' }), tx({ date: '2026-03-01' }), tx({ date: '2026-02-01T10:00:00.000Z' }),
-      tx({ date: '2026-05-01' }), tx({ date: '2026-04-01' }), tx({ date: '2026-06-01' }),
-      tx({ date: '2026-07-01', source: 'bond_holding' }),
-      tx({ date: '2026-08-01', accountId: 'acc2' }),
+      ...months.map((m) => tx({ date: `2026-${String(m).padStart(2, '0')}-01` })),
+      tx({ date: '2026-12-31', source: 'bond_holding' }),
+      tx({ date: '2026-12-31', accountId: 'acc2' }),
     ]
-    expect(latestCashChanges(log, 'acc1').map((t) => t.date.slice(0, 10))).toEqual([
-      '2026-06-01', '2026-05-01', '2026-04-01', '2026-03-01', '2026-02-01',
+    expect(latestCashChanges(log, 'acc1').map((t) => t.date.slice(5, 7))).toEqual([
+      '12', '11', '10', '09', '08', '07', '06', '05', '04', '03',
     ])
+  })
+
+  it('takes another limit', () => {
+    const log = [tx({ date: '2026-01-01' }), tx({ date: '2026-02-01T10:00:00.000Z' }), tx({ date: '2026-03-01' })]
+    expect(latestCashChanges(log, 'acc1', 2).map((t) => t.date.slice(0, 10))).toEqual(['2026-03-01', '2026-02-01'])
   })
 
   it('does not reorder the log it is given', () => {

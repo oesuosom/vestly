@@ -196,20 +196,35 @@ describe('HoldingSlidePanel — the Cash row', () => {
     ])
   })
 
-  it('lists the five latest changes, newest first, and links to the account’s Activity', () => {
+  /** The "Latest changes" rows' text, "View all →" included. */
+  const latestRows = () =>
+    [...screen.getByText('Latest changes').nextElementSibling!.querySelectorAll('tr')].map((tr) => tr.textContent)
+
+  it('lists the latest changes, newest first, and links to the account’s Activity', () => {
     const { lastLocation } = renderCash(full)
-    const latest = screen.getByText('Latest changes').nextElementSibling!
-    const rows = [...latest.querySelectorAll('tr')].map((tr) => tr.textContent)
-    expect(rows).toEqual([
+    expect(latestRows()).toEqual([
       'Fee25/01/2026−5,00 PLN',
       'Interest21/01/2026+1,60 PLN',
       'DividendAcme Corp · 20/01/2026+12,40 PLN',
       'Withholding taxAcme Corp · 20/01/2026−2,36 PLN',
       'BuyGlobex Industries · 1 unit · 11/01/2026−120,00 PLN',
+      'BuyAcme Corp · 3 units · 10/01/2026−500,00 PLN',
+      'Deposit05/01/2026+2 000,00 PLN',
       'View all →',
     ])
     fireEvent.click(screen.getByRole('button', { name: 'View all →' }))
     expect(lastLocation()).toMatchObject({ pathname: '/activity', search: '?account=a1' })
+  })
+
+  it('stops the latest changes at ten', () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      tx({ type: 'deposit', date: `2026-03-${String(i + 1).padStart(2, '0')}`, amountPLN: 10 }))
+    renderCash(many)
+    const rows = latestRows()
+    expect(rows).toHaveLength(11)
+    expect(rows[0]).toBe('Deposit12/03/2026+10,00 PLN')
+    expect(rows[9]).toBe('Deposit03/03/2026+10,00 PLN')
+    expect(rows[10]).toBe('View all →')
   })
 
   it('has no actions besides closing the panel', () => {

@@ -61,7 +61,7 @@ export function buildCashLedger(transactions: Transaction[], accountId: string):
 }
 
 /** The account's most recent cash-moving transactions, newest first. */
-export function latestCashChanges(transactions: Transaction[], accountId: string, limit = 5): Transaction[] {
+export function latestCashChanges(transactions: Transaction[], accountId: string, limit = 10): Transaction[] {
   return cashTransactions(transactions, accountId)
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, limit)

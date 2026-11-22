@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panel as a stock, with a quantity of 1, a price, "Not yet refreshed" and empty returns. It now
   shows the available cash with the account's name above it, a short table of how it adds up
   (deposits, withdrawals, buys, sales, income, taxes and fees, each with a count and a total),
-  and the five latest changes, with a link to the account's transactions in Activity. Trades
+  and the ten latest changes, with a link to the account's transactions in Activity. Trades
   that didn't come out of the account's cash, such as eMakler imports, are counted and explained
   in a note. A balance below zero comes with a hint that deposits may be missing, and an account
   with no cash transactions yet points to Activity. Activity can now open filtered to one account.
