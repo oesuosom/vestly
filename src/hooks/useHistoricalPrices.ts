@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { differenceInDays, parseISO } from 'date-fns'
 import type { Account, HistoricalPricesCache } from '@/types'
 import { buildHistoricalPricesCache, historyProviderSignature } from '@/services/market-data/yahooHistorical'
@@ -11,10 +11,15 @@ import {
   saveHistoricalPricesCache,
 } from '@/storage/historicalPriceStorage'
 
-// No loading/error state: no consumer shows either (a failed rebuild keeps the
-// previous cache and logs), and setting them when a fetch starts only cost a render.
+// No general loading/error state: a failed rebuild keeps the previous cache and
+// logs, and a series that came back empty is shown as such by the chart. Only an
+// explicit retry is tracked, so the chart can show loading while it runs.
 type UseHistoricalPricesResult = {
   historicalPrices: HistoricalPricesCache | null
+  /** Fetch again whatever has no history yet (e.g. after loading failed). No reload. */
+  retry: () => void
+  /** A retry is running: series that failed count as loading, not failed, meanwhile. */
+  isRetrying: boolean
 }
 
 // A fetched series may legitimately lag a few days behind today (weekends, holidays — the
@@ -72,6 +77,17 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
   // Bumped when providers changed while a build was running, to run once more.
   const [rerun, setRerun] = useState(0)
 
+  // Try again: each request bumps the token; the effect rebuilds once per token.
+  const [retryToken, setRetryToken] = useState(0)
+  const [isRetrying, setIsRetrying] = useState(false)
+  const handledRetryRef = useRef(0)
+  const retryTokenRef = useRef(0)
+  const retry = useCallback(() => {
+    retryTokenRef.current += 1
+    setIsRetrying(true)
+    setRetryToken(retryTokenRef.current)
+  }, [])
+
   // Guard: prevent concurrent fetches (e.g. rapid accounts updates mid-fetch)
   const isFetchingRef = useRef(false)
 
@@ -107,13 +123,17 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
     const providerSwitchedOn = cache !== null &&
       providers.split(',').some((id) => id && !(cache.providers ?? '').split(',').includes(id))
 
-    const shouldRebuild = cacheIsStale || !cacheCoversAll || cacheIsFromPreviousDay || cacheIsBehind || providerSwitchedOn
+    // Try again was pressed: refetch the series that came back empty.
+    const retryRequested = retryToken !== handledRetryRef.current
+
+    const shouldRebuild = cacheIsStale || !cacheCoversAll || cacheIsFromPreviousDay || cacheIsBehind || providerSwitchedOn || retryRequested
 
     // No rebuild: state already matches the cache — it's initialised from it,
     // and every later write is picked up by the listeners below.
     if (!shouldRebuild) return
 
     isFetchingRef.current = true
+    handledRetryRef.current = retryToken
 
     // Pass the existing cache unless it's fully stale (7+ days) — buildHistoricalPricesCache
     // will extend stocks/ETFs with today's price point and re-interpolate bonds cheaply,
@@ -133,9 +153,13 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
       })
       .finally(() => {
         isFetchingRef.current = false
-        if (historyProviderSignature(settingsRef.current) !== builtWith) setRerun((n) => n + 1)
+        if (handledRetryRef.current === retryTokenRef.current) setIsRetrying(false)
+        // Providers changed, or Try again was pressed, while this build ran: run once more.
+        if (historyProviderSignature(settingsRef.current) !== builtWith || handledRetryRef.current !== retryTokenRef.current) {
+          setRerun((n) => n + 1)
+        }
       })
-  }, [holdingIds, providers, keys, rerun]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [holdingIds, providers, keys, rerun, retryToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pick up cache writes made elsewhere in the tree (e.g. the "Rebuild" button in the
   // settings overlay, which stays mounted alongside this hook) without a page reload,
@@ -156,5 +180,5 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
     }
   }, [])
 
-  return { historicalPrices }
+  return { historicalPrices, retry, isRetrying }
 }

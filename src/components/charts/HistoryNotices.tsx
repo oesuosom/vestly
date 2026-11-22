@@ -2,15 +2,44 @@ import { Button } from '@/components/ui/Button'
 import { noHistoryMessage } from '@/domain/historyCoverage'
 import type { ProviderId } from '@/services/providers'
 
-/** Replaces the history chart (and its range picker) when nothing has price history. */
-export function NoPriceHistory({ off, onOpenMarketData }: { off: ProviderId[]; onOpenMarketData: () => void }) {
+/** Centred title, explanation and one action: takes the history chart's (and range picker's) place. */
+function ChartMessage({ title, body, actionLabel, onAction }: {
+  title: string
+  body: string
+  actionLabel: string
+  onAction: () => void
+}) {
   return (
     <div className="flex flex-col items-center gap-2 w-full max-w-[360px] mx-auto text-center">
-      <p className="text-sm font-medium leading-normal tracking-[-0.35px] text-foreground">No price history</p>
-      <p className="text-sm leading-normal tracking-[-0.35px] text-foregroundMuted">{noHistoryMessage(off)}</p>
+      <p className="text-sm font-medium leading-normal tracking-[-0.35px] text-foreground">{title}</p>
+      <p className="text-sm leading-normal tracking-[-0.35px] text-foregroundMuted">{body}</p>
       <div className="h-1" aria-hidden="true" />
-      <Button variant="secondary" onClick={onOpenMarketData}>Open Market data</Button>
+      <Button variant="secondary" onClick={onAction}>{actionLabel}</Button>
     </div>
+  )
+}
+
+/** Replaces the history chart when nothing has price history because providers are off. */
+export function NoPriceHistory({ off, onOpenMarketData }: { off: ProviderId[]; onOpenMarketData: () => void }) {
+  return (
+    <ChartMessage
+      title="No price history"
+      body={noHistoryMessage(off)}
+      actionLabel="Open Market data"
+      onAction={onOpenMarketData}
+    />
+  )
+}
+
+/** Replaces the history chart when every holding's price history failed to load (nothing is off). */
+export function PriceHistoryLoadFailed({ onRetry }: { onRetry: () => void }) {
+  return (
+    <ChartMessage
+      title="Couldn't load price history"
+      body="Price history couldn't be loaded just now. Values today are still correct."
+      actionLabel="Try again"
+      onAction={onRetry}
+    />
   )
 }
 

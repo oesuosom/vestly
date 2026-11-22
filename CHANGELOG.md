@@ -39,7 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     line from purchase to today; the value above the chart still counts them. A note under the
     chart names what's left out and which provider is off, or says their price history couldn't
     be loaded when the provider is on. When nothing has history because providers are off, the
-    chart is replaced by a message with a link to Market data.
+    chart is replaced by a message with a link to Market data; when it all failed to load, by a
+    message with a Try again button that fetches it again without a reload.
   - **Holding panel:** when the holding's price provider is off, it says the price isn't
     updated automatically and hides Refresh Price.
   - Market Data now says what each provider is used for, CoinGecko can be switched on without a

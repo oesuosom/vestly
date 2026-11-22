@@ -68,6 +68,8 @@ export function getHistoryCoverage(
   accounts: Account[],
   settings: ProviderSettings,
   historicalPrices: HistoricalPricesCache | null | undefined,
+  /** A refetch is running: series that came back empty count as loading, not failed. */
+  options: { retrying?: boolean } = {},
 ): HistoryCoverage {
   const cached = new Map((historicalPrices?.histories ?? []).map((h) => [h.holdingId, h.prices]))
   const historiesMap = new Map<string, HoldingPricePoint[]>()
@@ -89,7 +91,8 @@ export function getHistoryCoverage(
       // loaded, a new holding, a rebuild in flight) is pending, not missing: it
       // keeps today's loading behaviour, so it doesn't drop out of the line and
       // come back. An entry with no prices means the fetch ran and found nothing.
-      else if (off.length > 0 || prices !== undefined) missing.push({ holding, off })
+      // While Try again runs, an empty series is loading again too.
+      else if (off.length > 0 || (prices !== undefined && !options.retrying)) missing.push({ holding, off })
     }
     // Closed holdings keep any series cached while they were open; they're never
     // fetched again, so no switch affects them.

@@ -31,3 +31,15 @@ describe('MissingHistoryPill', () => {
     expect(screen.getByRole('status').parentElement!.className).toContain('to-background')
   })
 })
+
+describe('PriceHistoryLoadFailed', () => {
+  it('says history couldn’t be loaded and offers Try again', async () => {
+    const { PriceHistoryLoadFailed } = await import('./HistoryNotices')
+    const onRetry = vi.fn()
+    render(<PriceHistoryLoadFailed onRetry={onRetry} />)
+    expect(screen.getByText("Couldn't load price history")).toBeTruthy()
+    expect(screen.getByText("Price history couldn't be loaded just now. Values today are still correct.")).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+})

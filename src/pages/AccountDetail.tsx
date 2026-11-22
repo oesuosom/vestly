@@ -16,7 +16,7 @@ import { isProviderOn, isProviderSwitchedOn } from '@/services/providers'
 import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCoverage'
 import { useOpenSettings } from '@/features/settings/openSettings'
 import { AccountInsightPanel, type AiAvailability } from '@/features/accounts/AccountInsightPanel'
-import { MissingHistoryPill, NoPriceHistory } from '@/components/charts/HistoryNotices'
+import { MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
 import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
@@ -163,15 +163,15 @@ export function AccountDetail() {
   const contributions = getStore().contributions
   const settings = useSettings()
   const openSettings = useOpenSettings()
-  const { historicalPrices } = useHistoricalPrices(accounts, settings)
+  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings)
 
   const account = accounts.find((a) => slugify(a.name) === accountSlug)
   const accountId = account?.id
 
   // Which holdings the chart can draw with the providers that are on.
   const coverage = useMemo(
-    () => getHistoryCoverage(account ? [account] : [], settings, historicalPrices),
-    [account, settings, historicalPrices],
+    () => getHistoryCoverage(account ? [account] : [], settings, historicalPrices, { retrying: isRetrying }),
+    [account, settings, historicalPrices, isRetrying],
   )
   const missingMessage = missingHistoryMessage(coverage)
 
@@ -591,10 +591,12 @@ export function AccountDetail() {
             </button>
           </div>
 
-          {coverage.noHistory ? (
+          {coverage.noHistory || coverage.allFailed ? (
             // Nothing to draw: the message takes the chart's and range picker's place.
             <div className="flex-1 min-h-0 flex items-center justify-center px-6 pb-4">
-              <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+              {coverage.noHistory
+                ? <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+                : <PriceHistoryLoadFailed onRetry={retryHistory} />}
             </div>
           ) : (
             <>

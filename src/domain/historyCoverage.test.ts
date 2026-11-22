@@ -177,6 +177,12 @@ describe('every holding failed to load', () => {
     expect(buildChartData({ snapshots: [], accounts, transactions: [], dateRange: '1M', historicalPrices, coverage })).toEqual([])
   })
 
+  it('counts empty series as loading again while Try again runs', () => {
+    const coverage = getHistoryCoverage(accounts, on, historicalPrices, { retrying: true })
+    expect(coverage.allFailed).toBe(false)
+    expect(coverage.missing).toEqual([])
+  })
+
   it('is not "all failed" when one is off and the other failed', () => {
     const coverage = getHistoryCoverage(accounts, { ...on, coinGeckoEnabled: false }, historicalPrices)
     expect(coverage.allFailed).toBe(false)

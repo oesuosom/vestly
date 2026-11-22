@@ -10,7 +10,7 @@ import { usePortfolioInsight } from '@/hooks/usePortfolioInsight'
 import { isProviderOn } from '@/services/providers'
 import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCoverage'
 import { useOpenSettings } from '@/features/settings/openSettings'
-import { MissingHistoryPill, NoPriceHistory } from '@/components/charts/HistoryNotices'
+import { MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
 import {
   getAllTimeSummary,
   getCategoryAllocation,
@@ -73,13 +73,13 @@ export function Overview() {
     })
   }, [isLoading, eodhdOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { historicalPrices } = useHistoricalPrices(accounts, settings)
+  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings)
   const openSettings = useOpenSettings()
 
   // Which holdings the chart can draw with the providers that are on.
   const coverage = useMemo(
-    () => getHistoryCoverage(accounts, settings, historicalPrices),
-    [accounts, settings, historicalPrices],
+    () => getHistoryCoverage(accounts, settings, historicalPrices, { retrying: isRetrying }),
+    [accounts, settings, historicalPrices, isRetrying],
   )
   const missingMessage = missingHistoryMessage(coverage)
 
@@ -265,10 +265,12 @@ export function Overview() {
         )}
       </div>
 
-      {coverage.noHistory ? (
+      {coverage.noHistory || coverage.allFailed ? (
         // Nothing to draw: the message takes the chart's and range picker's place.
         <div className="h-[384px] flex items-center justify-center">
-          <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+          {coverage.noHistory
+            ? <NoPriceHistory off={coverage.offProviders} onOpenMarketData={() => openSettings('market-data')} />
+            : <PriceHistoryLoadFailed onRetry={retryHistory} />}
         </div>
       ) : (
         <>
