@@ -334,7 +334,7 @@ function PreviewStep({
           )}
           {dateRange && (
             <div className="flex justify-between text-sm">
-              <span className="text-accent tracking-[-0.35px]">Date range</span>
+              <span className="text-accent tracking-[-0.35px]">Transactions</span>
               <span className="text-foreground font-medium tracking-[-0.35px]">
                 {formatMonthYear(dateRange.from)} – {formatMonthYear(dateRange.to)}
               </span>

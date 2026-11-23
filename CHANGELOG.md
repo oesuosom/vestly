@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file showed as an unknown CSV and you had to copy Cash Operations into its own CSV by hand.
   Now the Cash Operations sheet is found by its name and header row, wherever it is in the file,
   and read cell by cell: times are read as UTC to the millisecond, amounts as numbers and ids as
-  text. The import shows the statement's period ("1 Jan 2006 – 20 Nov 2026"), and the rows are
-  still checked against the file's Total row. The account number in the file is never read,
+  text. The import shows the statement's period ("1 Jan 2006 – 20 Nov 2026"); the row below it,
+  the span of the transactions themselves, is now called "Transactions" instead of "Date range".
+  The rows are still checked against the file's Total row. The account number in the file is never read,
   stored or shown. SheetJS's "Bad uncompressed size" messages about XTB's zip no longer appear
   in the console; the file was always read correctly.
   - **A statement in another currency is refused.** Vestly keeps amounts in PLN, so when the
