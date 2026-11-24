@@ -85,7 +85,7 @@ export type HoldingsCheckApplied = {
   transactions: Transaction[]
   /** Holdings the person chose to close: the Close position dialog opens for each. */
   toClose: Holding[]
-  /** Done-screen clauses: "Spinco Example added at cost 0", "2 shares of SMPL added". */
+  /** Done-screen clauses: "Spinco Example added at cost 0", "2 shares of Sample Holdings added". */
   parts: string[]
   /** Instruments that match the statement now, and took its price and category. */
   matching: number
@@ -221,7 +221,7 @@ export async function applyHoldingsCheck({
   if (free.length === 1) parts.push(`${free[0].statement.name} added at cost 0`)
   else if (free.length > 1) parts.push(`${free.length} holdings added at cost 0`)
   for (const d of rows) {
-    if (d.kind === 'broker_more') parts.push(`${fmt(d.missing)} ${d.missing === 1 ? 'share' : 'shares'} of ${d.statement.ticker} added at XTB’s open price`)
+    if (d.kind === 'broker_more') parts.push(`${fmt(d.missing)} ${d.missing === 1 ? 'share' : 'shares'} of ${d.statement.name} added at XTB’s open price`)
   }
 
   const toClose = rows.flatMap((d: HoldingDifference) => (d.kind === 'gone' && d.holding ? [d.holding] : []))
