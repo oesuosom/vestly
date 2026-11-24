@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-11-24
+
+Imports that work as downloaded, and switches that mean what they say. XTB's original .xlsx
+statement imports without editing, and its holdings are checked against XTB's own list, free
+shares included. The Cash row explains its balance. A provider that's switched off is never
+contacted, so nothing reaches Anthropic while AI is off. London, German and Dutch listings are
+priced in their own currency and market, for XTB and eMakler imports alike. Primary buttons are
+readable in the dark theme, icon-only controls and the sidebar are named for screen readers, and
+the history chart no longer mixes up instruments with similar names.
+
 ### Added
 
 - **An XTB .xlsx import checks your holdings against XTB's Open Positions** — the statement's
@@ -371,6 +381,7 @@ First tagged release. Everything runs client-side; no backend, no sign-up, no te
   proxy, so price refresh and AI insights need an equivalent host to work.
 - All portfolio data lives in `localStorage` (~47 KB in typical use).
 
-[Unreleased]: https://github.com/oesuosom/vestly/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/oesuosom/vestly/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/oesuosom/vestly/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/oesuosom/vestly/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/oesuosom/vestly/releases/tag/v0.0.1
