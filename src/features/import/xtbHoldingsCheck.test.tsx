@@ -127,7 +127,7 @@ describe('the holdings check after an XTB .xlsx import', () => {
       'https://api.nbp.pl/api/exchangerates/tables/a/2026-11-10/2026-11-20/?format=json',
       'https://api.nbp.pl/api/exchangerates/rates/a/usd/2026-01-05/2026-01-19/?format=json',
     ])
-    expect(screen.getByText(/SPIN holding added at cost 0\. 2 shares of SMPL added at XTB’s open price\./)).toBeTruthy()
+    expect(screen.getByText(/Spinco Example added at cost 0\. 2 shares of SMPL added at XTB’s open price\./)).toBeTruthy()
     expect(screen.getByText('6 holdings match XTB’s statement of 20 Nov 2026. Their prices and categories are updated from it.')).toBeTruthy()
   })
 

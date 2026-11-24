@@ -85,7 +85,7 @@ export type HoldingsCheckApplied = {
   transactions: Transaction[]
   /** Holdings the person chose to close: the Close position dialog opens for each. */
   toClose: Holding[]
-  /** Done-screen clauses: "SPIN holding added at cost 0", "2 shares of SMPL added". */
+  /** Done-screen clauses: "Spinco Example added at cost 0", "2 shares of SMPL added". */
   parts: string[]
   /** Instruments that match the statement now, and took its price and category. */
   matching: number
@@ -218,7 +218,7 @@ export async function applyHoldingsCheck({
   nextAccounts = applyStatementPrices(nextAccounts, accountId, matches, now)
 
   const free = rows.filter((d) => d.kind === 'free_shares')
-  if (free.length === 1) parts.push(`${free[0].statement.ticker} holding added at cost 0`)
+  if (free.length === 1) parts.push(`${free[0].statement.name} added at cost 0`)
   else if (free.length > 1) parts.push(`${free.length} holdings added at cost 0`)
   for (const d of rows) {
     if (d.kind === 'broker_more') parts.push(`${fmt(d.missing)} ${d.missing === 1 ? 'share' : 'shares'} of ${d.statement.ticker} added at XTB’s open price`)

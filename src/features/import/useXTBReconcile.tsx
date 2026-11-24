@@ -9,6 +9,7 @@
  * Positions — check the holdings against what XTB holds (HoldingsCheckStep.tsx).
  */
 import { useRef, useState, type ReactElement } from 'react'
+import { format } from 'date-fns'
 import { ClosePositionDialog } from '@/features/accounts/ClosePositionDialog'
 import { applyStatementPrices, checkHoldings, type HoldingsCheck, type HoldingsStatement } from '@/domain/holdingsCheck'
 import { recalculateCostBases } from '@/domain/calculations'
@@ -413,7 +414,7 @@ export function useXTBReconcile({
             isOpen={closeQueue.length > 0}
             onClose={handleCloseDialogDone}
             onClosed={() => { closedRef.current = true }}
-            defaultDate={holdingsCheck.asOf.slice(0, 10)}
+            defaultDate={format(new Date(holdingsCheck.asOf), 'yyyy-MM-dd')}
           />
         </>
       )

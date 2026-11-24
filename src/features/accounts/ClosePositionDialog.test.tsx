@@ -71,6 +71,24 @@ describe('ClosePositionDialog', () => {
     expect(onClosed).toHaveBeenCalled()
   })
 
+  it('starts on a given default date instead of today, kept between the earliest allowed day and today', async () => {
+    const { unmount } = render(<ClosePositionDialog holding={apple} isOpen onClose={() => {}} defaultDate="2026-01-20" />)
+    fireEvent.change(amount(), { target: { value: '1600' } })
+    fireEvent.click(confirm())
+    await waitFor(() => expect(portfolio.closePosition).toHaveBeenCalledWith('aapl', {
+      date: '2026-01-20', saleAmountPLN: 1600, feePLN: 0,
+    }))
+    unmount()
+
+    // Before the purchase date: the earliest day the holding can be closed on.
+    render(<ClosePositionDialog holding={apple} isOpen onClose={() => {}} defaultDate="2025-12-01" />)
+    fireEvent.change(amount(), { target: { value: '1600' } })
+    fireEvent.click(confirm())
+    await waitFor(() => expect(portfolio.closePosition).toHaveBeenLastCalledWith('aapl', {
+      date: '2026-01-10', saleAmountPLN: 1600, feePLN: 0,
+    }))
+  })
+
   it('says Cash won’t change for a holding entered by hand', () => {
     setAccount('brokerage', [apple], [])
     render(<ClosePositionDialog holding={apple} isOpen onClose={() => {}} />)

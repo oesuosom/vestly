@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { format } from 'date-fns'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -102,7 +103,7 @@ export function HoldingsCheckStep({
     <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
       <div className="p-5 flex flex-col gap-5">
         <p className="text-sm leading-normal text-foregroundMuted tracking-[-0.35px]">
-          XTB’s statement shows what you held on {formatDate(check.asOf.slice(0, 10))}.
+          XTB’s statement shows what you held on {formatDate(format(new Date(check.asOf), 'yyyy-MM-dd'))}.
           <br />
           {intro(check)}
         </p>

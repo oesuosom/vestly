@@ -9,6 +9,7 @@
  *     and falls back to a count otherwise → "BTC holding created" / "2 holdings created"
  */
 
+import { format } from 'date-fns'
 import { formatDate } from '@/utils/formatters'
 
 /** Pluralize `noun` by `n` ("1 buy", "2 buys"). */
@@ -57,7 +58,7 @@ export function doneMessage(
   accountName: string,
 ): { message: string; detail?: string } {
   if (!summary || summary.matching === 0) return { message: joinDoneParts(parts) }
-  const date = formatDate(summary.asOf.slice(0, 10))
+  const date = formatDate(format(new Date(summary.asOf), 'yyyy-MM-dd'))
   const updated = summary.matching === 1 ? 'Its price and category are updated from it.' : 'Their prices and categories are updated from it.'
   if (summary.allMatch) {
     const lead = `Imported ${added} transaction${added !== 1 ? 's' : ''} into ${accountName}`
