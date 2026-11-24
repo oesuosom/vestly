@@ -13,6 +13,7 @@
  * separator and number format the spreadsheet app saved it with.
  */
 import type { HoldingsStatement, StatementHolding, StatementLot } from '@/domain/holdingsCheck'
+import { exchangeFromXTBSuffix } from '@/domain/exchanges'
 import { excelSerialToISO, type CellValue, type Workbook, type WorkbookSheet } from './xlsReader'
 
 /** A cell the parser reads: text stays text, numbers stay numbers. */
@@ -182,12 +183,12 @@ export function openPositionsHeaderIndex(rows: readonly (readonly Cell[])[]): nu
   })
 }
 
-/** "ACME.US" → ACME on US; a bare "ACME" has no market. */
+/** "ACME.US" → ACME on US, "ACME.DE" → ACME on XETRA; a bare "ACME" has no market. */
 function splitTicker(value: string): { ticker: string; exchange?: string } | null {
   const v = value.trim().toUpperCase()
   if (!v) return null
   const m = v.match(/^([A-Z0-9][A-Z0-9-]*)\.([A-Z]+)$/)
-  return m ? { ticker: m[1], exchange: m[2] } : { ticker: v }
+  return m ? { ticker: m[1], exchange: exchangeFromXTBSuffix(m[2]) ?? m[2] } : { ticker: v }
 }
 
 const CATEGORIES: Record<string, 'stock' | 'etf'> = { stock: 'stock', etf: 'etf' }

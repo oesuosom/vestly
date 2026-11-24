@@ -59,6 +59,12 @@ export type StatementHolding = {
    * the statement (value ÷ (quantity × current price)). 1 for PLN.
    */
   rateToPLN?: number
+  /**
+   * The currency it's priced in (ISO code, 'GBX' for pence), worked out from
+   * {@link rateToPLN} with NBP's table (`withStatementCurrencies` in
+   * features/import/holdingsCheckApply.ts). Absent while unknown.
+   */
+  currency?: string
 }
 
 export type HoldingsStatement = {
@@ -255,6 +261,35 @@ export function applyStatementPrices(accounts: Account[], accountId: string, mat
       }),
     }
   })
+}
+
+/**
+ * The accounts with each instrument's price currency from the statement saved
+ * on the account's holdings of it: the statement knows the currency better
+ * than the market or the price data does, so it overwrites what's there.
+ * Every holding of an instrument in the statement gets it, whether its
+ * quantity matches or not. Returns `accounts` itself when nothing changes.
+ */
+export function applyStatementCurrencies(accounts: Account[], accountId: string, statement: HoldingsStatement): Account[] {
+  const byKey = new Map<string, string>()
+  for (const s of statement.holdings) if (s.currency) byKey.set(s.key, s.currency)
+  if (byKey.size === 0) return accounts
+  let changed = false
+  const next = accounts.map((a) => {
+    if (a.id !== accountId) return a
+    let touched = false
+    const holdings = a.holdings.map((h) => {
+      if (h.isSynthetic || h.category === 'bond') return h
+      const currency = byKey.get(holdingPositionKey(h))
+      if (!currency || h.currency === currency) return h
+      touched = true
+      return { ...h, currency }
+    })
+    if (!touched) return a
+    changed = true
+    return { ...a, holdings }
+  })
+  return changed ? next : accounts
 }
 
 /** How a price in some currency becomes PLN: × `rate` ÷ `divisor` (100 for prices in pence). */

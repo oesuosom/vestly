@@ -94,7 +94,7 @@ describe('importing XTB’s .xlsx statement', () => {
     const r = await parseFile(xtbStatementFile())
     const buys = r.transactions.filter((t) => t.type === 'buy').map((t) => [t.ticker, t.exchange, t.quantity, t.pricePerUnitOriginal])
     expect(buys).toEqual([
-      ['EXGL', 'DE', 0.25, 400],
+      ['EXGL', 'XETRA', 0.25, 400],
       ['SMPL', 'UK', 4, 2.5],
       ['VBLD', 'NL', 1, 20],
       ['PRZK', 'PL', 10, 10.5],

@@ -40,7 +40,15 @@ import { RecoveryScreen } from '@/components/layout/RecoveryScreen'
 
 // No action deletes a holding: an import closes holdings instead (see ImportClose).
 export type ImportAction =
-  | { type: 'update'; existingId: string; quantity: number; currentPrice: number; purchasePrice?: number }
+  | {
+      type: 'update'
+      existingId: string
+      quantity: number
+      currentPrice: number
+      purchasePrice?: number
+      /** The file's price currency; replaces what price data reported, as a statement does. */
+      currency?: string
+    }
   | { type: 'add'; holding: Omit<Holding, 'id' | 'accountId' | 'createdAt' | 'updatedAt'> }
 
 /**
@@ -653,6 +661,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
                     quantity: action.quantity,
                     currentPrice: action.currentPrice,
                     ...(action.purchasePrice !== undefined && { purchasePrice: action.purchasePrice }),
+                    ...(action.currency && { currency: action.currency }),
                     updatedAt: now,
                   }
                 : h

@@ -28,7 +28,7 @@ describe('reading Open Positions', () => {
     expect(op.asOf).toBe('2026-11-20T12:00:00.000Z')
     expect(op.holdings.map((h) => [h.key, h.exchange, h.name, h.category, h.quantity])).toEqual([
       ['ACME', 'US', 'Acme Corp', 'stock', 7],
-      ['EXGL', 'DE', 'Example Global ETF', 'etf', 0.25],
+      ['EXGL', 'XETRA', 'Example Global ETF', 'etf', 0.25],
       ['PRZK', 'PL', 'Przyklad SA', 'stock', 10],
       ['SMPL', 'UK', 'Sample Holdings', 'stock', 4],
       ['VBLD', 'NL', 'Voorbeeld NV', 'stock', 1],

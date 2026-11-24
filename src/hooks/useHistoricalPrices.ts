@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { differenceInDays, parseISO } from 'date-fns'
 import type { Account, HistoricalPricesCache } from '@/types'
 import { buildHistoricalPricesCache, historyProviderSignature } from '@/services/market-data/yahooHistorical'
+import { invalidatePriceCache } from '@/services/market-data/priceFetcher'
+import { withReportedCurrencies } from '@/domain/priceCurrency'
 import type { ProviderSettings } from '@/services/providers'
 import {
   HISTORICAL_PRICES_STORAGE_KEY,
@@ -58,7 +60,16 @@ function cacheDataIsBehind(cache: HistoricalPricesCache | null, accounts: Accoun
  * NOTE: Only reruns when holding *IDs* change, not on currentPrice updates.
  * This prevents a cascade of Yahoo requests every time "Refresh All Prices" fires.
  */
-export function useHistoricalPrices(accounts: Account[], settings: ProviderSettings): UseHistoricalPricesResult {
+export function useHistoricalPrices(
+  accounts: Account[],
+  settings: ProviderSettings,
+  /**
+   * Called with the accounts once price data reported currencies for holdings
+   * that had none (Yahoo's chart response): save them, so price refresh
+   * converts from the right currency too.
+   */
+  onReportedCurrencies?: (accounts: Account[]) => void,
+): UseHistoricalPricesResult {
   const [historicalPrices, setHistoricalPrices] = useState<HistoricalPricesCache | null>(() =>
     loadHistoricalPricesCache()
   )
@@ -70,8 +81,13 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
 
   // Latest settings for the effect below, which only re-runs on the strings above.
   const settingsRef = useRef(settings)
+  // Latest accounts and callback, for when a build finishes.
+  const accountsRef = useRef(accounts)
+  const onReportedRef = useRef(onReportedCurrencies)
   useEffect(() => {
     settingsRef.current = settings
+    accountsRef.current = accounts
+    onReportedRef.current = onReportedCurrencies
   })
 
   // Bumped when providers changed while a build was running, to run once more.
@@ -145,6 +161,12 @@ export function useHistoricalPrices(accounts: Account[], settings: ProviderSetti
       .then((newCache) => {
         saveHistoricalPricesCache(newCache)
         setHistoricalPrices(newCache)
+        const withCurrencies = withReportedCurrencies(accountsRef.current, newCache.histories)
+        if (withCurrencies !== accountsRef.current && onReportedRef.current) {
+          // Prices cached before the currency was known were converted from the market's default.
+          invalidatePriceCache()
+          onReportedRef.current(withCurrencies)
+        }
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : 'Failed to fetch historical prices'

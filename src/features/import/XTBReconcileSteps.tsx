@@ -42,7 +42,7 @@ export type UnmatchedConfirmPayload = {
 }
 const ASSET_CATEGORIES: AssetCategory[] = ['stock', 'etf', 'bond', 'crypto', 'cash']
 // Bare codes: the Exchange column is 96px wide.
-const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({ US: 'US', PL: 'PL', UK: 'UK', XETRA: 'XETRA' })
+const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({ US: 'US', PL: 'PL', UK: 'UK', XETRA: 'XETRA', NL: 'NL' })
 
 function formatQty(qty: number): string {
   return formatQuantity(qty)

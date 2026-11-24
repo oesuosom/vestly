@@ -8,15 +8,23 @@
 // Both files are CP1250-encoded and semicolon-separated.
 // ─────────────────────────────────────────
 
+import type { ExchangeCode } from '@/domain/exchanges'
+
 // ─────────────────────────────────────────
 // Exchange normalisation
 // ─────────────────────────────────────────
 
-const EXCHANGE_MAP: Record<string, string> = {
-  'WWA-GPW': 'PL',
-  'GBR-LSE': 'UK',  // EODHD uses 'UK' for London Stock Exchange (e.g. ISAC.UK)
+const EXCHANGE_MAP: Record<string, ExchangeCode> = {
+  'WWA-GPW':   'PL',
+  'GBR-LSE':   'UK',     // London Stock Exchange
+  'DEU-XETRA': 'XETRA',  // Frankfurt / XETRA
 }
 
+/**
+ * Our exchange code for eMakler's market ("GBR-LSE" → UK). A market eMakler
+ * writes that isn't listed above is kept as it is: guessing would fetch
+ * another listing's prices. `buildEMaklerImport` warns about it once.
+ */
 export function normalizeEMaklerExchange(raw: string): string {
   return EXCHANGE_MAP[raw.trim()] ?? raw.trim()
 }
@@ -54,7 +62,7 @@ function parseDDMMYYYY(raw: string): string | null {
 
 export type EMaklerPortfolioRow = {
   name: string
-  exchange: string        // normalised (PL, GB, …)
+  exchange: string        // normalised (PL, UK, XETRA, …)
   quantity: number
   currentPrice: number   // in priceCurrency
   priceCurrency: string  // 'USD' | 'GBP' | 'PLN' | …
@@ -193,7 +201,8 @@ export async function parseEMaklerPortfolio(file: File): Promise<EMaklerPortfoli
  * Parse an eMakler order-history CSV (CP1250-encoded, semicolon-separated).
  *
  * Expected column-header row (after metadata block):
- *   Stan;Papier;Giełda;K/S;Liczba zlecona;Liczba zrealizowana;Limit ceny;Waluta;Limit aktywacji;Data zlecenia
+ *   Stan;Papier;Giełda;K/S;Liczba zlecona;Liczba zrealizowana;Limit ceny;Walute;Limit aktywacji;Data zlecenia
+ * ("Walute" is how eMakler spells the currency column here.)
  *
  * Only rows where Stan === 'Zrealizowane' (executed) are returned.
  * K = buy, S = sell.
@@ -218,8 +227,10 @@ export async function parseEMaklerOrderHistory(file: File): Promise<EMaklerOrder
 
   const headers = splitSemi(lines[headerIdx])
 
+  /** The first column whose header contains `fragment`, ignoring case. */
   function hIdx(fragment: string): number {
-    return headers.findIndex((h) => h.includes(fragment))
+    const f = fragment.toLowerCase()
+    return headers.findIndex((h) => h.toLowerCase().includes(f))
   }
 
   const iStan    = hIdx('Stan')     // e.g. 'Zrealizowane'
@@ -229,7 +240,7 @@ export async function parseEMaklerOrderHistory(file: File): Promise<EMaklerOrder
   const iZlec    = hIdx('zlecona')
   const iZreal   = hIdx('zrealizowana')
   const iLimit   = hIdx('Limit ceny')
-  const iWaluta  = hIdx('Waluta')
+  const iWaluta  = hIdx('Walut')    // eMakler's order history writes "Walute", not "Waluta"
   const iData    = hIdx('Data')
 
   const rows: EMaklerOrderRow[] = []

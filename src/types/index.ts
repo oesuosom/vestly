@@ -57,7 +57,13 @@ export type Holding = {
   accountId: string
   name: string
   ticker?: string
-  exchange?: string        // e.g. 'US', 'PL' — used for price fetching
+  exchange?: string        // e.g. 'US', 'PL', 'XETRA', 'NL' — used for price fetching
+  /**
+   * The currency the price is quoted in: an ISO code, or 'GBX' for pence.
+   * From the broker's statement or the price data; absent when unknown, and
+   * the market's default applies (see domain/priceCurrency.ts).
+   */
+  currency?: string
   category: AssetCategory
   bondSubType?: BondSubType // only relevant when category === 'bond'
   quantity: number
@@ -203,6 +209,13 @@ export type HoldingPricePoint = {
 export type HoldingPriceHistory = {
   holdingId: string
   prices: HoldingPricePoint[]   // sorted ascending by date
+  /** The currency the prices were converted to PLN from. Absent on caches built before it was stored. */
+  currency?: string
+  /**
+   * The currency the price data itself reported (Yahoo's chart response), when
+   * it did. Saved on a holding that has no currency yet.
+   */
+  reportedCurrency?: string
 }
 
 export type HistoricalPricesCache = {

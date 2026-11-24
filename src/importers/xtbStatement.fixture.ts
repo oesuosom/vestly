@@ -196,6 +196,55 @@ export const DIFFERENCES_POSITIONS: OpenPosition[] = [
     lots: [{ id: '70000010', volume: 3, openPrice: 12, openTime: '2026-02-11 09:30:00' }] },
 ]
 
+/**
+ * Purchases for a statement shaped like a current XTB export's market mix
+ * (structure only, made-up instruments): ".UK" ETFs priced in USD, ".DE"
+ * instruments in EUR, a ".NL" one in USD, plus a London share quoted in pounds
+ * and one quoted in pence, next to US and Warsaw shares.
+ */
+export const MIXED_MARKET_CASH_OPERATIONS: CashOpRow[] = [
+  op('Stock purchase', 'Pence Example plc', 'PNCE.UK', 'STOCK', '2026-02-18 10:00:00', -125, '90000108', 'OPEN BUY 10 @ 250.00', '70000108'),
+  op('Stock purchase', 'Pound Example plc', 'GBPS.UK', 'STOCK', '2026-02-17 10:00:00', -125, '90000107', 'OPEN BUY 10 @ 2.50', '70000107'),
+  op('Stock purchase', 'Voorbeeld Tech NV', 'VBTK.NL', 'STOCK', '2026-02-16 10:00:00', -80, '90000106', 'OPEN BUY 1 @ 20.00', '70000106'),
+  op('Stock purchase', 'Muster Werke AG', 'MSTW.DE', 'STOCK', '2026-02-13 10:00:00', -85, '90000105', 'OPEN BUY 2 @ 10.00', '70000105'),
+  op('Stock purchase', 'Example Europe ETF', 'EXEU.DE', 'ETF', '2026-02-12 10:00:00', -170, '90000104', 'OPEN BUY 4 @ 10.00', '70000104'),
+  op('Stock purchase', 'Sample Bond ETF', 'SBND.UK', 'ETF', '2026-02-11 10:00:00', -200, '90000103', 'OPEN BUY 5 @ 10.00', '70000103'),
+  op('Stock purchase', 'Sample World ETF', 'SWLD.UK', 'ETF', '2026-02-10 10:00:00', -400, '90000102', 'OPEN BUY 10 @ 10.00', '70000102'),
+  op('Stock purchase', 'Przyklad SA', 'PRZK.PL', 'STOCK', '2026-02-05 10:00:00', -105, '90000101', 'OPEN BUY 10 @ 10.50', '70000101'),
+  op('Stock purchase', 'Acme Corp', 'ACME.US', 'STOCK', '2026-01-05 10:00:00', -80, '90000100', 'OPEN BUY 2 @ 10.00', '70000100'),
+  op('Deposit', '', '', '', '2026-01-02 08:00:00', 1500, '90000099', 'Deposit'),
+]
+
+/** Made-up PLN rates for the mixed statement: USD 4, EUR 4.25, GBP 5 (a penny is 0.05). */
+export const MIXED_MARKET_RATES = { USD: 4, EUR: 4.25, GBP: 5 } as const
+
+/** What XTB holds for {@link MIXED_MARKET_CASH_OPERATIONS}: everything still open. */
+export const MIXED_MARKET_POSITIONS: OpenPosition[] = [
+  { instrument: 'Acme Corp', ticker: 'ACME.US', category: 'STOCK', currentPrice: 11, rate: 4,
+    lots: [{ id: '70000100', volume: 2, openPrice: 10, openTime: '2026-01-05 10:00:00' }] },
+  { instrument: 'Przyklad SA', ticker: 'PRZK.PL', category: 'STOCK', currentPrice: 11, rate: 1,
+    lots: [{ id: '70000101', volume: 10, openPrice: 10.5, openTime: '2026-02-05 10:00:00' }] },
+  { instrument: 'Sample World ETF', ticker: 'SWLD.UK', category: 'ETF', currentPrice: 10.5, rate: 4,
+    lots: [{ id: '70000102', volume: 10, openPrice: 10, openTime: '2026-02-10 10:00:00' }] },
+  { instrument: 'Sample Bond ETF', ticker: 'SBND.UK', category: 'ETF', currentPrice: 10.1, rate: 4,
+    lots: [{ id: '70000103', volume: 5, openPrice: 10, openTime: '2026-02-11 10:00:00' }] },
+  { instrument: 'Example Europe ETF', ticker: 'EXEU.DE', category: 'ETF', currentPrice: 10.2, rate: 4.25,
+    lots: [{ id: '70000104', volume: 4, openPrice: 10, openTime: '2026-02-12 10:00:00' }] },
+  { instrument: 'Muster Werke AG', ticker: 'MSTW.DE', category: 'STOCK', currentPrice: 10.4, rate: 4.25,
+    lots: [{ id: '70000105', volume: 2, openPrice: 10, openTime: '2026-02-13 10:00:00' }] },
+  { instrument: 'Voorbeeld Tech NV', ticker: 'VBTK.NL', category: 'STOCK', currentPrice: 21, rate: 4,
+    lots: [{ id: '70000106', volume: 1, openPrice: 20, openTime: '2026-02-16 10:00:00' }] },
+  { instrument: 'Pound Example plc', ticker: 'GBPS.UK', category: 'STOCK', currentPrice: 2.6, rate: 5,
+    lots: [{ id: '70000107', volume: 10, openPrice: 2.5, openTime: '2026-02-17 10:00:00' }] },
+  { instrument: 'Pence Example plc', ticker: 'PNCE.UK', category: 'STOCK', currentPrice: 260, rate: 0.05,
+    lots: [{ id: '70000108', volume: 10, openPrice: 250, openTime: '2026-02-18 10:00:00' }] },
+]
+
+/** The mixed-market statement: see {@link MIXED_MARKET_POSITIONS}. */
+export function mixedMarketStatementSheets(): Sheet[] {
+  return [closedPositionsSheet(), cashOperationsSheet(MIXED_MARKET_CASH_OPERATIONS), openPositionsSheet('PLN', MIXED_MARKET_POSITIONS)]
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**

@@ -1,5 +1,5 @@
 import type { Account, HistoricalPricesCache, Holding, HoldingPricePoint } from '@/types'
-import { currencyForExchange } from '@/services/market-data/tickerUtils'
+import { holdingPriceCurrency } from './priceCurrency'
 import { describeOff, isProviderOn, type ProviderId, type ProviderSettings } from '@/services/providers'
 
 // ─────────────────────────────────────────
@@ -45,7 +45,7 @@ export function canFetchHistory(holding: Holding, settings: ProviderSettings): b
   if (holding.category === 'crypto') return isProviderOn(settings, 'coingecko')
   if (!holding.ticker || !holding.exchange) return true // interpolated, nothing to fetch
   const hasSource = isProviderOn(settings, 'eodhd') || isProviderOn(settings, 'yahoo')
-  const needsFx = currencyForExchange(holding.exchange) !== 'PLN'
+  const needsFx = holdingPriceCurrency(holding) !== 'PLN'
   return hasSource && (!needsFx || isProviderOn(settings, 'nbp'))
 }
 
@@ -60,7 +60,7 @@ export function offProvidersFor(holding: Holding, settings: ProviderSettings): P
   if (canFetchHistory(holding, settings)) return []
   if (holding.category === 'crypto') return ['coingecko']
   if (!isProviderOn(settings, 'eodhd') && !isProviderOn(settings, 'yahoo')) return ['yahoo', 'eodhd']
-  if (holding.exchange && currencyForExchange(holding.exchange) !== 'PLN' && !isProviderOn(settings, 'nbp')) return ['nbp']
+  if (holding.exchange && holdingPriceCurrency(holding) !== 'PLN' && !isProviderOn(settings, 'nbp')) return ['nbp']
   return []
 }
 

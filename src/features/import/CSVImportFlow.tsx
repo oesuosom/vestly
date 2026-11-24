@@ -111,6 +111,7 @@ const EXCHANGE_OPTIONS: DropdownOption[] = exchangeOptions({
   PL: 'PL',
   UK: 'UK (LSE)',
   XETRA: 'XETRA',
+  NL: 'NL (Amsterdam)',
 })
 
 type RowAction = 'update' | 'new'

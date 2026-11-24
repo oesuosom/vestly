@@ -168,7 +168,7 @@ export function AccountDetail() {
   const contributions = getStore().contributions
   const settings = useSettings()
   const openSettings = useOpenSettings()
-  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings)
+  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings, replaceAccounts)
 
   const account = accounts.find((a) => slugify(a.name) === accountSlug)
   const accountId = account?.id

@@ -21,6 +21,7 @@ import { doneMessage } from './doneSummary'
 import { useXTBReconcile, type HoldingsCheckSummary, type ReconcileStage } from './useXTBReconcile'
 import type { HoldingsCheck } from '@/domain/holdingsCheck'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
+import { canConvertOpenPrice, nbpRates, withStatementCurrencies } from './holdingsCheckApply'
 import type { DevSeed } from './devSeed'
 import type { HoldingSyncRow } from '@/domain/holdingSync'
 import type { Transaction } from '@/types'
@@ -91,7 +92,8 @@ export function XTBTransactionFlow({
   devSeed,
 }: XTBTransactionFlowProps) {
   const { transactions, accounts, importTransactions } = usePortfolio()
-  const { instrumentAliases } = useSettings()
+  const settings = useSettings()
+  const { instrumentAliases } = settings
 
   const accountName = useMemo(
     () => accounts.find((a) => a.id === accountId)?.name ?? 'Account',
@@ -139,7 +141,11 @@ export function XTBTransactionFlow({
     async function parse() {
       try {
         const existingIds = new Set(transactions.map((t) => t.externalId))
-        const result = await parseXTBCashOperations(file, accountId, existingIds, accounts, instrumentAliases, transactions)
+        const parsed = await parseXTBCashOperations(file, accountId, existingIds, accounts, instrumentAliases, transactions)
+        // Each instrument's price currency, from its PLN rate in Open Positions (NBP's table; never asked while NBP is off).
+        const result = parsed.openPositions
+          ? { ...parsed, openPositions: await withStatementCurrencies(parsed.openPositions, canConvertOpenPrice(settings) ? nbpRates(settings) : null) }
+          : parsed
         setParseResult(result)
         setStep('preview')
       } catch (err) {

@@ -25,6 +25,7 @@
  */
 import { v4 as uuidv4 } from 'uuid'
 import type { Transaction } from '@/types'
+import { exchangeFromXTBSuffix } from '@/domain/exchanges'
 import { extractPDFLayout, hueOf, type LayoutLine, type LayoutPage } from './pdfText'
 
 // ─────────────────────────────────────────
@@ -312,7 +313,7 @@ function buildTrade(
       direction,
       orderNo,
       ticker: symbolMatch[1],
-      exchange: symbolMatch[2],
+      exchange: exchangeFromXTBSuffix(symbolMatch[2]) ?? symbolMatch[2],
       instrument: (row.instrument ?? '').trim() || symbolMatch[1],
       quantity,
       unitPriceOriginal,
