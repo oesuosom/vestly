@@ -1,4 +1,5 @@
-import { fileToCSVText, isSupportedImportFile } from './xlsReader'
+import { fileToCSVText, isSupportedImportFile, isWorkbookFile, readWorkbook } from './xlsReader'
+import { cashOperationsHeaderIndex, detectSeparator, findCashOperationsSheet, splitCSVLine } from './xtbStatement'
 import { detectFormat, parseCSVRaw } from './csvParser'
 import { detectEMaklerFileType } from './eMaklerParser'
 import { extractPDFLayout } from './pdfText'
@@ -32,8 +33,9 @@ export type DetectedFormatType = DetectedFormat['type']
  * 1. Reject unsupported extensions outright
  * 2. PDFs — Revolut by filename, XTB confirmations by table headers
  * 3. eMakler (CP1250-encoded CSV with characteristic Polish strings)
- * 4. Decode to CSV text (handles CSV, XLS, XLSX)
- * 5. XTB Cash Operations (metadata rows 1-4, header at row 5)
+ * 4. XTB's .xlsx statement: a sheet with the Cash Operations header row, wherever it is
+ * 5. Decode to CSV text (handles CSV, and the first sheet of other XLS/XLSX files)
+ *    and look for a Cash Operations CSV: its header row, found by names
  * 6. Known holdings formats via csvParser (PKO IKE, XTB holdings)
  * 7. Fallback: unknown CSV with extracted headers
  */
@@ -76,22 +78,22 @@ export async function detectFileFormat(file: File): Promise<DetectedFormat> {
     if (emaklerType === 'order_history') return { type: 'emakler_order_history' }
   }
 
-  // 4. Read as UTF-8 CSV text (handles CSV, XLS, XLSX)
-  const text = await fileToCSVText(file)
-  const lines = text.trim().split('\n')
+  // 4. XTB's account statement: one workbook with Closed Positions, Cash
+  //    Operations and Open Positions sheets. Its Cash Operations sheet is found
+  //    by name and header row, not by position.
+  if (isWorkbookFile(file)) {
+    const workbook = await readWorkbook(file).catch(() => null)
+    if (workbook && findCashOperationsSheet(workbook)) return { type: 'xtb_transactions' }
+  }
 
-  // 5. Try XTB Cash Operations: header row at line index 4
-  //    Expected columns: Type, Instrument, Time, Amount, ID, Comment, Product
-  if (lines.length >= 5) {
-    const headerLine = lines[4].replace(/"/g, '').trim()
-    if (
-      headerLine.includes('Type') &&
-      headerLine.includes('Instrument') &&
-      headerLine.includes('Amount') &&
-      headerLine.includes('Comment')
-    ) {
-      return { type: 'xtb_transactions' }
-    }
+  // 5. Read as CSV text (a CSV, or the first sheet of any other workbook), then
+  //    look for a Cash Operations CSV: XTB's, or the sheet saved by hand with
+  //    either separator. Its header row names Type, Instrument, Amount and Comment.
+  const text = await fileToCSVText(file)
+  const lines = text.split(/\r?\n/).slice(0, 20)
+  const separator = detectSeparator(lines)
+  if (cashOperationsHeaderIndex(lines.map((l) => splitCSVLine(l, separator)), true) >= 0) {
+    return { type: 'xtb_transactions' }
   }
 
   // 6. Try known holdings formats (PKO IKE, XTB holdings)

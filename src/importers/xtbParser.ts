@@ -1,6 +1,16 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { Account, InstrumentAlias, Transaction, TransactionType } from '@/types'
-import { fileToCSVText } from './xlsReader'
+import { excelSerialToISO, isWorkbookFile, readTextFile, readWorkbook, type WorkbookSheet } from './xlsReader'
+import {
+  assertHomeCurrency,
+  cashOperationsHeaderIndex,
+  detectSeparator,
+  findCashOperationsSheet,
+  parseCSVNumber,
+  sheetCells,
+  splitCSVLine,
+  type Cell,
+} from './xtbStatement'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { feesChargedWith, findClosedByHandSales, findDuplicateTradeGroups, type TradeDuplicate } from './tradeDedup'
 
@@ -53,6 +63,8 @@ export type ParseResult = {
    */
   closedByHand: ClosedByHandMatch[]
   warnings: ParseWarning[]
+  /** The statement's period, from the file's header block, when it has one. */
+  period?: StatementPeriod
 }
 
 // ─────────────────────────────────────────
@@ -177,79 +189,71 @@ function parseTickerCell(cell: string): { ticker: string; exchange?: string } | 
 }
 
 // ─────────────────────────────────────────
-// CSV structure helpers
+// The Cash Operations table
 // ─────────────────────────────────────────
 
 /** Cash amounts in whole grosze, so sums of many rows don't pick up float noise. */
 const toCents = (amount: number) => Math.round(amount * 100)
 
-function splitLine(line: string): string[] {
-  const result: string[] = []
-  let current = ''
-  let inQuotes = false
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (ch === ',' && !inQuotes) {
-      result.push(current.trim())
-      current = ''
-    } else {
-      current += ch
-    }
-  }
-  result.push(current.trim())
-  return result
-}
-
 type RawRow = {
-  /** 1-based line number in the file, as a spreadsheet shows it. */
+  /** 1-based row number in the file, as a spreadsheet shows it. */
   line: number
-  cells: Record<string, string>
+  /** Column name (lowercase) → value. Text stays text and numbers stay numbers; times are ISO text. */
+  cells: Record<string, Cell>
   raw: string
 }
 
+/** The statement's period, from its header block: UTC ISO timestamps (or dates). */
+export type StatementPeriod = { from: string; to: string }
+
+/** The Cash Operations table, read from a CSV or from the workbook's sheet. Everything after this is shared. */
+type CashOperationsTable = {
+  rows: RawRow[]
+  total: RawRow | null
+  period?: StatementPeriod
+  /** Reads a number the source wrote as text, the way that source writes numbers. */
+  toNumber: (value: string) => number
+}
+
 /**
- * XTB Cash Operations CSV structure:
- *   A few metadata rows (account number, "Cash Operations", date from / to in UTC)
+ * XTB Cash Operations structure, the same in the .xlsx sheet and in a CSV:
+ *   A header block (account number, "Cash Operations", date from / to in UTC)
  *   A header row naming the columns: Type, Instrument, Time, Amount, ID, Comment, …
- *   Transaction rows
+ *   Transaction rows, newest first
  *   A "Total" row: the sum of the Amount column
  *
  * XTB has shipped several layouts (7, 8 and 10 columns, some with a `Ticker`
  * column), so the header row is found by its names, not its position, and
  * columns are read by name. Names are matched case-insensitively and stored
- * lowercase. Separator: comma. Fields may be quoted.
+ * lowercase. The account number in the header block is never read.
+ *
+ * @param grid  The rows from row 1, as cells.
+ * @param time  A `Time` or period cell as text that {@link parseCashOperationsTime} reads.
+ * @param raw   The source text of row `i`, for warnings.
  */
-function parseXTBCSVRaw(text: string): { rows: RawRow[]; total: RawRow | null } {
-  const lines = text.split(/\r?\n/)
-  const headerIndex = lines.findIndex((line) => {
-    const names = splitLine(line).map((c) => c.toLowerCase())
-    return names.includes('type') && names.includes('amount')
-  })
-  if (headerIndex < 0) return { rows: [], total: null }
+function cashOperationsTable(
+  grid: Cell[][],
+  { toNumber, time, raw }: { toNumber: (value: string) => number; time: (value: Cell) => string; raw?: (i: number) => string },
+): CashOperationsTable {
+  const headerIndex = cashOperationsHeaderIndex(grid)
+  if (headerIndex < 0) return { rows: [], total: null, toNumber }
 
-  const headers = splitLine(lines[headerIndex]).map((h) => h.toLowerCase())
+  const headers = grid[headerIndex].map((h) => String(h).trim().toLowerCase())
+  const timeAt = headers.indexOf('time')
+  const number = (v: Cell | undefined) => (typeof v === 'number' ? v : toNumber(v ?? ''))
   const rows: RawRow[] = []
   let total: RawRow | null = null
 
-  for (let i = headerIndex + 1; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-    const values = splitLine(line)
+  for (let i = headerIndex + 1; i < grid.length; i++) {
+    const values = grid[i].map((v, j) => (j === timeAt && v !== '' ? time(v) : v))
     if (values.every((v) => v === '')) continue
-    const cells: Record<string, string> = {}
+    const cells: Record<string, Cell> = {}
     headers.forEach((h, j) => { if (h) cells[h] = values[j] ?? '' })
-    const row = { line: i + 1, cells, raw: line }
-    if (values[0].toLowerCase() === 'total' || (cells['type'] ?? '').toLowerCase() === 'total') {
+    const row = { line: i + 1, cells, raw: raw?.(i) ?? values.join(',') }
+    if (String(values[0]).trim().toLowerCase() === 'total' || String(cells['type'] ?? '').trim().toLowerCase() === 'total') {
       // The Total value sits under Amount; if a layout puts it elsewhere, it is the row's last number.
-      if (!Number.isFinite(parseFloat(cells['amount'] ?? ''))) {
-        const last = values.filter((v) => v !== '' && Number.isFinite(Number(v))).at(-1)
+      if (!Number.isFinite(number(cells['amount']))) {
+        const last = values.filter((v) => v !== '' && Number.isFinite(number(v))).at(-1)
         if (last !== undefined) cells['amount'] = last
       }
       total = row
@@ -258,7 +262,38 @@ function parseXTBCSVRaw(text: string): { rows: RawRow[]; total: RawRow | null } 
     rows.push(row)
   }
 
-  return { rows, total }
+  return { rows, total, period: statementPeriod(grid.slice(0, headerIndex), time), toNumber }
+}
+
+/** "Date from (UTC)" and "Date to (UTC)" in the header block. Only those two rows are read. */
+function statementPeriod(block: Cell[][], time: (value: Cell) => string): StatementPeriod | undefined {
+  const find = (label: string) => {
+    const row = block.find((r) => String(r[0] ?? '').trim().toLowerCase().startsWith(label))
+    return row && row[1] !== undefined && row[1] !== '' ? parseCashOperationsTime(time(row[1])) : null
+  }
+  const from = find('date from')
+  const to = find('date to')
+  return from && to ? { from, to } : undefined
+}
+
+/** A Cash Operations CSV, saved by XTB or by hand from the .xlsx. */
+function cashOperationsFromCSV(text: string): CashOperationsTable {
+  const lines = (text.startsWith('\uFEFF') ? text.slice(1) : text).split(/\r?\n/)
+  const separator = detectSeparator(lines)
+  const grid = lines.map((line) => (line.trim() ? splitCSVLine(line, separator) : []))
+  return cashOperationsTable(grid, {
+    toNumber: (v) => parseCSVNumber(v, separator),
+    time: (v) => String(v),
+    raw: (i) => lines[i].trim(),
+  })
+}
+
+/** The Cash Operations sheet of XTB's .xlsx. `Time` cells are Excel date serials, read as UTC. */
+function cashOperationsFromSheet(sheet: WorkbookSheet, date1904: boolean): CashOperationsTable {
+  return cashOperationsTable(sheetCells(sheet), {
+    toNumber: (v) => parseFloat(v),
+    time: (v) => (typeof v === 'number' ? excelSerialToISO(v, date1904) ?? String(v) : v),
+  })
 }
 
 /** XTB types that move money between XTB accounts, keyed lowercase. */
@@ -273,20 +308,21 @@ const TRANSFER_TYPES = new Set(['transfer', 'subaccount transfer'])
  * are left out. A transfer with no partner in the file moves money in or out
  * of it, and imports by its sign.
  */
-function pairInternalTransfers(rows: RawRow[]): Set<RawRow> {
+function pairInternalTransfers(rows: RawRow[], amountOf: (row: RawRow) => number): Set<RawRow> {
   const paired = new Set<RawRow>()
-  const transfers = rows.filter((r) => TRANSFER_TYPES.has((r.cells['type'] ?? '').trim().toLowerCase()))
+  const text = (row: RawRow, name: string) => String(row.cells[name] ?? '')
+  const transfers = rows.filter((r) => TRANSFER_TYPES.has(text(r, 'type').trim().toLowerCase()))
   for (const a of transfers) {
     if (paired.has(a)) continue
-    const amountA = toCents(parseFloat(a.cells['amount'] ?? ''))
+    const amountA = toCents(amountOf(a))
     if (!Number.isFinite(amountA) || amountA === 0) continue
     const b = transfers.find((r) =>
       r !== a &&
       !paired.has(r) &&
-      (r.cells['time'] ?? '') === (a.cells['time'] ?? '') &&
-      (r.cells['comment'] ?? '') === (a.cells['comment'] ?? '') &&
-      (r.cells['product'] ?? '') !== (a.cells['product'] ?? '') &&
-      toCents(parseFloat(r.cells['amount'] ?? '')) === -amountA,
+      text(r, 'time') === text(a, 'time') &&
+      text(r, 'comment') === text(a, 'comment') &&
+      text(r, 'product') !== text(a, 'product') &&
+      toCents(amountOf(r)) === -amountA,
     )
     if (b) {
       paired.add(a)
@@ -301,7 +337,12 @@ function pairInternalTransfers(rows: RawRow[]): Set<RawRow> {
 // ─────────────────────────────────────────
 
 /**
- * Parse an XTB Cash Operations CSV file into Transaction objects.
+ * Parse an XTB Cash Operations file into Transaction objects: XTB's original
+ * .xlsx statement (its Cash Operations sheet, wherever it is in the file) or a
+ * CSV of that sheet.
+ *
+ * Throws {@link StatementCurrencyError} and imports nothing when the statement
+ * is for an account in another currency than PLN (see `statementCurrency`).
  *
  * @param file                  The File object from the file picker
  * @param accountId             The account this import belongs to
@@ -321,11 +362,21 @@ export async function parseXTBCashOperations(
   instrumentAliases?: Record<string, InstrumentAlias>,
   existingTransactions?: Transaction[]
 ): Promise<ParseResult> {
-  const text = await fileToCSVText(file)
-  return parseXTBCashOperationsText(text, accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
+  let table: CashOperationsTable
+  if (isWorkbookFile(file)) {
+    const workbook = await readWorkbook(file)
+    assertHomeCurrency(workbook, file.name)
+    const sheet = findCashOperationsSheet(workbook)
+    if (!sheet) throw new Error('This file has no Cash Operations sheet.')
+    table = cashOperationsFromSheet(sheet, workbook.date1904)
+  } else {
+    assertHomeCurrency(null, file.name)
+    table = cashOperationsFromCSV(await readTextFile(file))
+  }
+  return parseCashOperationsTable(table, accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
 }
 
-/** {@link parseXTBCashOperations} on the file's text. */
+/** {@link parseXTBCashOperations} on a CSV's text. */
 export function parseXTBCashOperationsText(
   text: string,
   accountId: string,
@@ -334,8 +385,23 @@ export function parseXTBCashOperationsText(
   instrumentAliases?: Record<string, InstrumentAlias>,
   existingTransactions?: Transaction[]
 ): ParseResult {
-  const { rows, total } = parseXTBCSVRaw(text)
-  const cell = (row: RawRow, name: string) => row.cells[name] ?? ''
+  return parseCashOperationsTable(cashOperationsFromCSV(text), accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
+}
+
+/** The parser proper, on the table from either source. */
+function parseCashOperationsTable(
+  { rows, total, period, toNumber }: CashOperationsTable,
+  accountId: string,
+  existingExternalIds: Set<string>,
+  accounts?: Account[],
+  instrumentAliases?: Record<string, InstrumentAlias>,
+  existingTransactions?: Transaction[]
+): ParseResult {
+  const cell = (row: RawRow, name: string) => String(row.cells[name] ?? '')
+  const amountOf = (row: RawRow) => {
+    const v = row.cells['amount']
+    return typeof v === 'number' ? v : toNumber(v ?? '')
+  }
   const tickerCell = (row: RawRow) => parseTickerCell(cell(row, 'ticker') || cell(row, 'symbol'))
 
   // Pass 1: build instrument name → ticker map from the rows that name one:
@@ -376,7 +442,7 @@ export function parseXTBCashOperationsText(
   let skipped = 0
   /** Amount of every row imported, or left out on purpose (duplicates, CFD), in grosze. */
   let accountedCents = 0
-  const internalTransfers = pairInternalTransfers(rows)
+  const internalTransfers = pairInternalTransfers(rows, amountOf)
   const warn = (row: RawRow, message: string) =>
     warnings.push({ row: row.line, message, rawData: JSON.stringify(row.cells) })
 
@@ -387,7 +453,7 @@ export function parseXTBCashOperationsText(
     const rawAmount = cell(row, 'amount')
     const rawId = cell(row, 'id')
     const rawComment = cell(row, 'comment')
-    const amountPLN = parseFloat(rawAmount)
+    const amountPLN = amountOf(row)
 
     // 1. Deduplication: skip if externalId already exists
     if (rawId && existingExternalIds.has(rawId)) {
@@ -543,7 +609,7 @@ export function parseXTBCashOperationsText(
   // Amount column). A gap means rows were dropped — a row type this parser
   // doesn't know yet, or a row it couldn't read.
   if (total) {
-    const totalAmount = parseFloat(cell(total, 'amount'))
+    const totalAmount = amountOf(total)
     if (Number.isFinite(totalAmount) && toCents(totalAmount) !== accountedCents) {
       const gap = (toCents(totalAmount) - accountedCents) / 100
       // First: it is the one that says how much is missing.
@@ -563,6 +629,7 @@ export function parseXTBCashOperationsText(
     internalTransfersSkipped: internalTransfers.size,
     closedByHand,
     warnings,
+    ...(period && { period }),
   }
 }
 
@@ -578,15 +645,18 @@ export function parseXTBCashOperationsText(
  * The stored day (`date.slice(0, 10)`) is the day the file shows. Accepts:
  *   "2026-02-10 10:59:02"         — YYYY-MM-DD HH:MM:SS (real exports)
  *   "2026-02-10 10:59:02.277000"  — with fractional seconds, kept to the millisecond
+ *   "2026-02-10T10:59:02.277Z"    — the .xlsx sheet's date cells, already converted
  *   "10.02.2026 10:59:02"         — DD.MM.YYYY HH:MM:SS
+ *   "2026-02-10 9:59"             — a CSV saved by hand: one-digit hours, no seconds
  * A bare date ("2026-02-10") stays date-only: the time is unknown.
  *
  * Returns null if unparseable.
  */
 export function parseCashOperationsTime(raw: string): string | null {
   const value = raw.trim()
-  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?$/)
-  const dot = value.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?)?$/)
+  const clock = String.raw`(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?Z?)?`
+  const iso = value.match(new RegExp(String.raw`^(\d{4})-(\d{2})-(\d{2})${clock}$`))
+  const dot = value.match(new RegExp(String.raw`^(\d{2})\.(\d{2})\.(\d{4})${clock}$`))
   const parts = iso
     ? [iso[1], iso[2], iso[3], iso[4], iso[5], iso[6], iso[7]]
     : dot
@@ -596,9 +666,10 @@ export function parseCashOperationsTime(raw: string): string | null {
 
   const [y, mo, d, h, mi, s, frac] = parts
   const ms = frac ? Number(frac.padEnd(3, '0').slice(0, 3)) : 0
-  const when = new Date(Date.UTC(+y, +mo - 1, +d, h ? +h : 0, mi ? +mi : 0, s ? +s : 0, ms))
+  const sec = s ? +s : 0
+  const when = new Date(Date.UTC(+y, +mo - 1, +d, h ? +h : 0, mi ? +mi : 0, sec, ms))
   // Date.UTC rolls 2026-02-30 over into March; that is not a real date.
   if (when.getUTCFullYear() !== +y || when.getUTCMonth() !== +mo - 1 || when.getUTCDate() !== +d) return null
-  if (h && (when.getUTCHours() !== +h || when.getUTCMinutes() !== +mi || when.getUTCSeconds() !== +s)) return null
+  if (h && (when.getUTCHours() !== +h || when.getUTCMinutes() !== +mi || when.getUTCSeconds() !== sec)) return null
   return h ? when.toISOString() : `${y}-${mo}-${d}`
 }

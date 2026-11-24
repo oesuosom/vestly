@@ -1,0 +1,167 @@
+/**
+ * The structure of XTB's account statement, shared by the format detector and
+ * the Cash Operations parser.
+ *
+ * XTB exports one .xlsx with a sheet each for Closed Positions, Cash
+ * Operations and Open Positions. Every sheet starts with a header block in
+ * columns A–B (account number, sheet name, then the period or "Data as of
+ * report generated"), followed by a header row naming the columns. Sheets are
+ * found by name and confirmed by that header row, never by position.
+ *
+ * Some people still copy the Cash Operations sheet into its own file and save
+ * it as CSV, so the same structure is also read from CSV text, whatever
+ * separator and number format the spreadsheet app saved it with.
+ */
+import type { CellValue, Workbook, WorkbookSheet } from './xlsReader'
+
+/** A cell the parser reads: text stays text, numbers stay numbers. */
+export type Cell = string | number
+
+/** Lowercased, trimmed column names of a row. */
+const names = (row: readonly Cell[]) => row.map((c) => String(c).trim().toLowerCase())
+
+/**
+ * Index of the Cash Operations header row in `rows`, or -1. It is the row that
+ * names a `Type` and an `Amount` column (XTB has shipped 7-, 8- and 10-column
+ * layouts, so nothing else is assumed). `strict` also asks for `Instrument`
+ * and `Comment`, which together tell it apart from any other table with a type
+ * and an amount: the detector uses it.
+ */
+export function cashOperationsHeaderIndex(rows: readonly (readonly Cell[])[], strict = false): number {
+  return rows.findIndex((row) => {
+    const n = names(row)
+    return n.includes('type') && n.includes('amount') && (!strict || (n.includes('instrument') && n.includes('comment')))
+  })
+}
+
+// ─────────────────────────────────────────
+// CSV
+// ─────────────────────────────────────────
+
+export type Separator = ',' | ';'
+
+/** Split one CSV line. Fields may be quoted; `""` inside quotes is a quote. */
+export function splitCSVLine(line: string, separator: Separator = ','): string[] {
+  const result: string[] = []
+  let current = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+    } else if (ch === separator && !inQuotes) {
+      result.push(current.trim())
+      current = ''
+    } else {
+      current += ch
+    }
+  }
+  result.push(current.trim())
+  return result
+}
+
+/**
+ * The separator a saved CSV uses. Spreadsheet apps set to a language that
+ * writes decimal commas (Polish among them) save with `;`. It is `;` when the
+ * Cash Operations header row only splits into columns with `;`.
+ */
+export function detectSeparator(lines: readonly string[]): Separator {
+  const header = (sep: Separator) => cashOperationsHeaderIndex(lines.slice(0, 50).map((l) => splitCSVLine(l, sep)))
+  return header(',') < 0 && header(';') >= 0 ? ';' : ','
+}
+
+/**
+ * Read a number from a CSV field.
+ *
+ * Comma-separated files are written by XTB or by an app set to English: a
+ * plain "-1234.56", read as it always was. Semicolon-separated files come from
+ * an app that writes numbers the local way: "-1 234,56" (space, non-breaking or
+ * narrow non-breaking space between thousands, decimal comma), or "-1.234,56".
+ * A field with no comma keeps its dot as the decimal point.
+ */
+export function parseCSVNumber(value: string, separator: Separator): number {
+  if (separator === ',') return parseFloat(value)
+  let v = value.trim().replace(/[\s\u00A0\u202F]/g, '')
+  if (!v) return NaN
+  if (v.includes(',')) v = v.replace(/\./g, '').replace(',', '.')
+  // A minus sign some apps write as U+2212.
+  v = v.replace(/^\u2212/, '-')
+  return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(v) ? Number(v) : NaN
+}
+
+// ─────────────────────────────────────────
+// Workbook
+// ─────────────────────────────────────────
+
+const sheetNamed = (wb: Workbook, name: string) =>
+  wb.sheets.filter((s) => s.name.trim().toLowerCase() === name)
+
+/** A sheet's rows as parser cells: empty cells are `''`. */
+export function sheetCells(sheet: WorkbookSheet): Cell[][] {
+  return sheet.rows.map((row) => Array.from(row, (v: CellValue | undefined) =>
+    v === null || v === undefined ? '' : typeof v === 'boolean' ? String(v).toUpperCase() : v))
+}
+
+/**
+ * The workbook's Cash Operations sheet, wherever it is in the file: the one
+ * named "Cash Operations" if it has the Cash Operations header row, else any
+ * sheet that has it. Null when none does.
+ */
+export function findCashOperationsSheet(wb: Workbook): WorkbookSheet | null {
+  const hasHeader = (s: WorkbookSheet) => cashOperationsHeaderIndex(sheetCells(s), true) >= 0
+  return sheetNamed(wb, 'cash operations').find(hasHeader) ?? wb.sheets.find(hasHeader) ?? null
+}
+
+// ─────────────────────────────────────────
+// Account currency
+// ─────────────────────────────────────────
+
+/** The currency Vestly keeps amounts in. */
+export const HOME_CURRENCY = 'PLN'
+
+/** Currencies XTB offers accounts in, plus a few neighbours: a filename prefix outside this list is not a currency. */
+const ACCOUNT_CURRENCIES = new Set(['PLN', 'EUR', 'USD', 'GBP', 'CZK', 'HUF', 'CHF', 'RON', 'SEK', 'NOK', 'DKK'])
+
+/**
+ * The statement's account currency, when the file says it. Sources, in order:
+ *   1. Open Positions: the Currency column of its summary table
+ *      ("Product | Metric | Amount | Currency").
+ *   2. The file name, when it starts with a currency code: "USD_…".
+ * Undefined when neither does, e.g. a CSV saved under any other name.
+ */
+export function statementCurrency(wb: Workbook | null, fileName: string): string | undefined {
+  for (const sheet of wb ? [...sheetNamed(wb, 'open positions'), ...wb.sheets] : []) {
+    const rows = sheetCells(sheet)
+    const header = rows.findIndex((r) => { const n = names(r); return n.includes('metric') && n.includes('currency') })
+    if (header < 0) continue
+    const col = names(rows[header]).indexOf('currency')
+    for (const row of rows.slice(header + 1)) {
+      const value = String(row[col] ?? '').trim().toUpperCase()
+      if (/^[A-Z]{3}$/.test(value)) return value
+      if (row.every((c) => c === '')) break
+    }
+  }
+  const prefix = fileName.match(/^([A-Za-z]{3})_/)?.[1].toUpperCase()
+  return prefix && ACCOUNT_CURRENCIES.has(prefix) ? prefix : undefined
+}
+
+/** The statement is for an account in another currency; nothing was imported. */
+export class StatementCurrencyError extends Error {
+  readonly currency: string
+  constructor(currency: string) {
+    super(`This is a ${currency} statement. Vestly imports ${HOME_CURRENCY} accounts only, so nothing was imported.`)
+    this.name = 'StatementCurrencyError'
+    this.currency = currency
+  }
+}
+
+/** Throws {@link StatementCurrencyError} when the statement is known to be in another currency. */
+export function assertHomeCurrency(wb: Workbook | null, fileName: string): void {
+  const currency = statementCurrency(wb, fileName)
+  if (currency && currency !== HOME_CURRENCY) throw new StatementCurrencyError(currency)
+}

@@ -44,9 +44,22 @@ So the field holds a mix of `"2026-02-10"` and `"2026-02-10T10:59:02.277Z"`. Lex
 
 ---
 
-## XTB Cash Operations (CSV / XLS)
+## XTB Cash Operations (XLSX / CSV)
 
-Parser: [`src/importers/xtbParser.ts`](../src/importers/xtbParser.ts)
+Parser: [`src/importers/xtbParser.ts`](../src/importers/xtbParser.ts). Statement structure (finding sheets, separators, account currency): [`src/importers/xtbStatement.ts`](../src/importers/xtbStatement.ts).
+
+### Sources
+
+- **XTB's original .xlsx statement.** One workbook with **Closed Positions**, **Cash Operations** and **Open Positions** sheets. The Cash Operations sheet is found by name and confirmed by its header row (any sheet with that header row will do), wherever it is in the file. It is read cell by cell ([`xlsReader.ts`](../src/importers/xlsReader.ts) `readWorkbook`), not through CSV: amounts are numbers, ids text, and `Time` cells Excel date serials, converted to UTC with `excelSerialToISO` (to the millisecond, no local time). SheetJS logs "Bad uncompressed size" while unzipping XTB's file; the reader drops that message, as the file reads correctly.
+- **The sheet saved as CSV by hand.** Comma or semicolon separated (found from the header row); with `;`, numbers may use decimal commas and space / non-breaking space thousands separators. A byte-order mark is stripped; text that isn't valid UTF-8 is read as windows-1250.
+
+Both sources become the same table of typed rows, and everything after that (type mapping, dedup, transfer pairing, the confirmation and Close position passes, the Total check) is shared.
+
+**Account number.** Row 1 of every sheet holds it. The workbook reader blanks it as it reads, and the CSV route never reads the header block beyond the period, so it is never stored, logged or shown.
+
+**Account currency.** Vestly stores PLN. When the statement says its account is in another currency, the import is refused before anything is parsed (`StatementCurrencyError`). Sources, in order: the Currency column of Open Positions' summary table, then a file name starting with a currency code (`USD_…`). When neither says, the import proceeds.
+
+**Statement period.** "Date from (UTC)" and "Date to (UTC)" from the header block are returned as `ParseResult.period` and shown in the preview.
 
 ### File layout
 
@@ -68,7 +81,9 @@ XTB has shipped several layouts (7, 8 and 10 columns, some with a `Ticker` colum
 `parseCashOperationsTime` reads the time as UTC and returns a full ISO timestamp (`2026-01-02 14:37:04` → `2026-01-02T14:37:04.000Z`). It accepts:
 
 1. `2026-02-10 10:59:02`, optionally with fractional seconds (`.277000`, kept to the millisecond) — the format real exports use
-2. `10.02.2026 10:59:02` — `DD.MM.YYYY` fallback
+2. `2026-02-10T10:59:02.277Z` — the .xlsx sheet's date cells, once converted
+3. `10.02.2026 10:59:02` — `DD.MM.YYYY` fallback
+4. One-digit hours and no seconds (`2026-02-10 9:59`), as a spreadsheet app may save them
 
 A bare date stays date-only.
 

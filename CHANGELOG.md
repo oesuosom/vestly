@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **XTB's original .xlsx statement imports as it is** — XTB exports one Excel file with Closed
+  Positions, Cash Operations and Open Positions sheets. Vestly read only the first sheet, so the
+  file showed as an unknown CSV and you had to copy Cash Operations into its own CSV by hand.
+  Now the Cash Operations sheet is found by its name and header row, wherever it is in the file,
+  and read cell by cell: times are read as UTC to the millisecond, amounts as numbers and ids as
+  text. The import shows the statement's period ("1 Jan 2006 – 20 Nov 2026"); the row below it,
+  the span of the transactions themselves, is now called "Transactions" instead of "Date range".
+  The rows are still checked against the file's Total row. The account number in the file is never read,
+  stored or shown. SheetJS's "Bad uncompressed size" messages about XTB's zip no longer appear
+  in the console; the file was always read correctly.
+  - **A statement in another currency is refused.** Vestly keeps amounts in PLN, so when the
+    file says its account is in another currency (Open Positions' summary, or a name starting
+    with "USD_" and the like), the import stops with "This is a USD statement. Vestly imports
+    PLN accounts only, so nothing was imported." When the file doesn't say, it imports as before.
+  - **A Cash Operations CSV saved by hand still imports**, now also when the spreadsheet app saved
+    it with `;` between fields, decimal commas, spaces between thousands, a byte-order mark,
+    windows-1250 encoding, or times without seconds.
+  - Other Excel files are read as before.
+
 - **The Cash panel explains the balance** — clicking an account's Cash row used to open the same
   panel as a stock, with a quantity of 1, a price, "Not yet refreshed" and empty returns. It now
   shows the available cash with the account's name above it, a short table of how it adds up
