@@ -413,6 +413,7 @@ export function useXTBReconcile({
             isOpen={closeQueue.length > 0}
             onClose={handleCloseDialogDone}
             onClosed={() => { closedRef.current = true }}
+            defaultDate={holdingsCheck.asOf.slice(0, 10)}
           />
         </>
       )

@@ -4,6 +4,7 @@ import { holdingPositionKey } from '@/domain/closePosition'
 import {
   applyStatementPrices,
   currencyForRate,
+  lotExternalId,
   type HoldingDifference,
   type HoldingMatch,
   type HoldingsCheck,
@@ -21,8 +22,8 @@ import type { Account, Holding, Transaction } from '@/types'
  * - **Add at cost 0** (free shares): a `receive` per lot, at 0 PLN, with the
  *   note below, so the position walk explains the shares from now on.
  * - **Add N shares at XTB's open price**: a `buy` per missing lot, at its open
- *   price and open date, converted to PLN with NBP's rate for that day (or the
- *   last one before it). The instrument's currency comes from the statement's
+ *   price and open date, converted to PLN with NBP's rate from the last
+ *   business day before it (the rule for a purchase's cost in PLN). The instrument's currency comes from the statement's
  *   own PLN rate, matched against NBP's table for the report date.
  * - Then the holding: its quantity and average cost from the walk, its
  *   category and price from the statement. Created when there is none.
@@ -35,13 +36,11 @@ import type { Account, Holding, Transaction } from '@/types'
 /** The note on shares received without a purchase. */
 export const FREE_SHARES_NOTE = 'Received without a purchase (free shares or a spin-off)'
 
-/** Rows this step adds carry this id, so the same lot is never added twice. */
-const lotExternalId = (lot: StatementLot) => `xtb-open-position-${lot.positionId}`
 
 export type RateSource = {
   /** NBP's table A on the day (or the last day before it): code → PLN. */
   table: (date: string) => Promise<ReadonlyMap<string, number>>
-  /** PLN per unit of `currency` on `date`, or the last published rate before it. */
+  /** PLN per unit of `currency`: NBP's rate from the last business day before `date`. */
   rate: (currency: string, date: string) => Promise<number>
 }
 
@@ -50,9 +49,12 @@ export function nbpRates(settings: ProviderSettings): RateSource {
   return {
     table: (date) => getNBPTable(date, settings),
     rate: async (currency, date) => {
-      const day = date.slice(0, 10)
-      const from = new Date(`${day}T00:00:00Z`)
+      // The day before, and the 14 before that: NBP publishes no rates on weekends and holidays.
+      const to = new Date(`${date.slice(0, 10)}T00:00:00Z`)
+      to.setUTCDate(to.getUTCDate() - 1)
+      const from = new Date(to)
       from.setUTCDate(from.getUTCDate() - 14)
+      const day = to.toISOString().slice(0, 10)
       const rates = await getNBPRateRange(currency, from.toISOString().slice(0, 10), day, settings)
       const latest = [...rates.keys()].sort().pop()
       if (!latest) throw new Error(`NBP has no ${currency} rate up to ${day}`)

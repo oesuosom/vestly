@@ -35,7 +35,7 @@ function renderFlow(file: File) {
 const fetchMock = vi.fn(async (url: string) => {
   const body = url.includes('/tables/a/')
     ? [{ effectiveDate: '2026-11-20', rates: [{ code: 'USD', mid: 3.98 }, { code: 'EUR', mid: 4.24 }, { code: 'GBP', mid: 4.95 }] }]
-    : { rates: [{ effectiveDate: '2026-01-19', mid: 3.9 }, { effectiveDate: '2026-01-20', mid: 3.95 }] }
+    : { rates: [{ effectiveDate: '2026-01-16', mid: 3.85 }, { effectiveDate: '2026-01-19', mid: 3.9 }] }
   return new Response(JSON.stringify(body), { status: 200 })
 })
 
@@ -118,14 +118,14 @@ describe('the holdings check after an XTB .xlsx import', () => {
       comment: 'Received without a purchase (free shares or a spin-off)', date: '2026-02-16T05:00:00.000Z' }])
     expect(holdings().SPIN).toMatchObject({ quantity: 3, purchasePrice: 0, category: 'stock', currentPrice: 20, purchaseDate: '2026-02-16' })
 
-    // 2 × 2.40 USD at NBP's 20 Jan rate (3.95). The currency comes from the statement, not ".UK".
+    // 2 × 2.40 USD at NBP's rate from the business day before 20 Jan (19 Jan: 3.90). The currency comes from the statement, not ".UK".
     const bought = portfolio.transactions.filter((t) => t.ticker === 'SMPL' && t.externalId.startsWith('xtb-open-position-'))
-    expect(bought).toMatchObject([{ type: 'buy', quantity: 2, amountPLN: -18.96, originalCurrency: 'USD', affectsCash: false }])
+    expect(bought).toMatchObject([{ type: 'buy', quantity: 2, amountPLN: -18.72, originalCurrency: 'USD', affectsCash: false }])
     expect(holdings().SMPL).toMatchObject({ quantity: 6, currentPrice: 10.4 })
-    expect(holdings().SMPL.purchasePrice).toBeCloseTo((51.2 + 18.96) / 6, 8)
+    expect(holdings().SMPL.purchasePrice).toBeCloseTo((51.2 + 18.72) / 6, 8)
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       'https://api.nbp.pl/api/exchangerates/tables/a/2026-11-10/2026-11-20/?format=json',
-      'https://api.nbp.pl/api/exchangerates/rates/a/usd/2026-01-06/2026-01-20/?format=json',
+      'https://api.nbp.pl/api/exchangerates/rates/a/usd/2026-01-05/2026-01-19/?format=json',
     ])
     expect(screen.getByText(/SPIN holding added at cost 0\. 2 shares of SMPL added at XTB’s open price\./)).toBeTruthy()
     expect(screen.getByText('6 holdings match XTB’s statement of 20 Nov 2026. Their prices and categories are updated from it.')).toBeTruthy()
@@ -151,6 +151,9 @@ describe('the holdings check after an XTB .xlsx import', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Close position: Foo Industries' }))
     fireEvent.click(screen.getByRole('button', { name: 'Apply 2 changes' }))
     expect(await screen.findByText(/Record that you sold all of/)).toBeTruthy()
+    // The statement's report day, not today; the amount is left for the person to enter.
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toMatch(/20\/11\/2026|2026-11-20/)
+    expect((screen.getByLabelText('Sale amount (PLN)') as HTMLInputElement).value).toBe('')
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await screen.findByRole('button', { name: 'Done' })
     expect(holdings().FOOI.quantity).toBe(5) // cancelled: still open

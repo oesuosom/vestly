@@ -18,6 +18,17 @@ import { pairTradeFees } from './tradeFees'
  * Pure: reads its inputs and returns what differs. Nothing is changed here.
  */
 
+/** Rows the holdings check adds carry this id prefix, then the lot's position id. */
+const ADDED_PREFIX = 'xtb-open-position-'
+
+/** The id of the row recording one lot, so the same lot is never added twice. */
+export const lotExternalId = (lot: StatementLot) => `${ADDED_PREFIX}${lot.positionId}`
+
+/** The note on a row the holdings check added (shown in Activity), if it is one. */
+export function holdingsCheckNote(t: Transaction): string | undefined {
+  return t.externalId.startsWith(ADDED_PREFIX) ? t.comment : undefined
+}
+
 /** One lot of an instrument, as the statement lists it. */
 export type StatementLot = {
   /** The broker's position id. */

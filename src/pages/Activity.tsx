@@ -21,6 +21,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { Account, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { holdingsCheckNote } from '@/domain/holdingsCheck'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import {
   Trash,
@@ -706,6 +707,7 @@ export function Activity() {
               filteredRows.map(t => {
                 const meta = TYPE_META[t.type]
                 const instrument = t.instrument ?? t.relatedInstrument
+                const note = holdingsCheckNote(t)
                 const ticker = t.ticker ?? t.relatedTicker
                 const holding = (ticker && holdingByKey.get(ticker.toUpperCase()))
                   ?? (instrument && holdingByKey.get(instrument.toLowerCase()))
@@ -730,9 +732,12 @@ export function Activity() {
                       {instrument ? (
                         <div className="flex items-center gap-2">
                           {holding && <HoldingIcon holding={holding} size={24} />}
-                          <span className="text-sm tracking-tight text-foreground truncate max-w-[160px]">
-                            {instrument}
-                          </span>
+                          <div className="min-w-0">
+                            <span className="block text-sm tracking-tight text-foreground truncate max-w-[160px]">
+                              {instrument}
+                            </span>
+                            {note && <span className="block text-xs leading-4 mt-0.5 text-accent max-w-[240px]">{note}</span>}
+                          </div>
                         </div>
                       ) : (
                         <span className="opacity-50">—</span>
