@@ -24,9 +24,9 @@ const ADDED_PREFIX = 'xtb-open-position-'
 /** The id of the row recording one lot, so the same lot is never added twice. */
 export const lotExternalId = (lot: StatementLot) => `${ADDED_PREFIX}${lot.positionId}`
 
-/** The note on a row the holdings check added (shown in Activity), if it is one. */
-export function holdingsCheckNote(t: Transaction): string | undefined {
-  return t.externalId.startsWith(ADDED_PREFIX) ? t.comment : undefined
+/** Whether the holdings check added this row (Activity marks those with a note). */
+export function isHoldingsCheckRow(t: Transaction): boolean {
+  return t.externalId.startsWith(ADDED_PREFIX)
 }
 
 /** One lot of an instrument, as the statement lists it. */

@@ -21,12 +21,13 @@ import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { Account, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
-import { holdingsCheckNote } from '@/domain/holdingsCheck'
+import { holdingsCheckNote } from '@/features/import/holdingsCheckApply'
+import { Tooltip } from '@/components/ui/Tooltip'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import {
   Trash,
   Filter, ReceiptBill, BanknoteStack, ChartBarsWide, Elements,
-  ProjectsBold, ComponentsBold, Wallet2Bold,
+  ProjectsBold, ComponentsBold, Wallet2Bold, CircleInfo,
 } from '@/generated/icons'
 
 // ─────────────────────────────────────────
@@ -731,13 +732,16 @@ export function Activity() {
                     <td className="px-4 py-2">
                       {instrument ? (
                         <div className="flex items-center gap-2">
-                          {holding && <HoldingIcon holding={holding} size={24} />}
-                          <div className="min-w-0">
-                            <span className="block text-sm tracking-tight text-foreground truncate max-w-[160px]">
-                              {instrument}
+                          {holding && (
+                            <span className="relative flex shrink-0">
+                              <HoldingIcon holding={holding} size={24} />
+                              {note && <NoteBadge note={note} />}
                             </span>
-                            {note && <span className="block text-xs leading-4 mt-0.5 text-accent max-w-[240px]">{note}</span>}
-                          </div>
+                          )}
+                          {!holding && note && <NoteBadge note={note} inline />}
+                          <span className="text-sm tracking-tight text-foreground truncate max-w-[160px]">
+                            {instrument}
+                          </span>
                         </div>
                       ) : (
                         <span className="opacity-50">—</span>
@@ -794,5 +798,24 @@ export function Activity() {
         onUndo={undoTransaction ? handleUndoDelete : undefined}
       />
     </div>
+  )
+}
+
+/**
+ * The note on a row the holdings check added: a small info badge over the
+ * corner of the instrument's icon, with the note in a tooltip on hover and
+ * keyboard focus. Its ring takes the row's background, so it reads as cut out
+ * of the icon. `inline` places it in the row when there is no icon.
+ */
+function NoteBadge({ note, inline = false }: { note: string; inline?: boolean }) {
+  return (
+    <span className={inline ? 'flex shrink-0' : 'absolute left-4 top-4 flex'}>
+      {/* The badge sits 16 px into the icon: 24 px clears the icon by 8, as designed. */}
+      <Tooltip label={note} variant="message" ariaLabel="Note" offset={inline ? 6 : 24} className="rounded-full focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent">
+        <span className="flex size-3.5 items-center justify-center rounded-full border border-background bg-muted p-px group-hover:border-muted">
+          <CircleInfo size={10} className="text-accent" aria-hidden="true" />
+        </span>
+      </Tooltip>
+    </span>
   )
 }

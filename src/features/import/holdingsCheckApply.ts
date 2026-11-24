@@ -4,6 +4,7 @@ import { holdingPositionKey } from '@/domain/closePosition'
 import {
   applyStatementPrices,
   currencyForRate,
+  isHoldingsCheckRow,
   lotExternalId,
   type HoldingDifference,
   type HoldingMatch,
@@ -15,6 +16,7 @@ import {
 import { getNBPRateRange, getNBPTable } from '@/services/nbp'
 import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import type { Account, Holding, Transaction } from '@/types'
+import { formatQuantity } from '@/utils/formatters'
 
 /**
  * Apply the rows checked in the holdings-check step (see `domain/holdingsCheck.ts`):
@@ -226,4 +228,21 @@ export async function applyHoldingsCheck({
 
   const toClose = rows.flatMap((d: HoldingDifference) => (d.kind === 'gone' && d.holding ? [d.holding] : []))
   return { accounts: nextAccounts, transactions: nextTransactions, toClose, parts, matching: matches.length }
+}
+
+/**
+ * The note Activity shows on a row the holdings check added, in its tooltip:
+ * "Added from XTB’s Open Positions: 2 @ 2,4 USD" for shares bought at XTB's
+ * open price, "…: 3 received at cost 0 (free shares or a spin-off)" for free
+ * shares. Undefined for every other row.
+ */
+export function holdingsCheckNote(t: Transaction): string | undefined {
+  if (!isHoldingsCheckRow(t)) return undefined
+  const quantity = formatQuantity(t.quantity ?? 0)
+  const lead = 'Added from XTB’s Open Positions:'
+  if (t.type === 'receive') return `${lead} ${quantity} received at cost 0 (free shares or a spin-off)`
+  if (t.type === 'buy' && t.pricePerUnitOriginal !== undefined) {
+    return `${lead} ${quantity} @ ${formatQuantity(t.pricePerUnitOriginal)} ${t.originalCurrency ?? ''}`.trimEnd()
+  }
+  return t.comment
 }

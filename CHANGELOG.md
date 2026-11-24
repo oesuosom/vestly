@@ -16,16 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a difference). When something differs, a last step lists it, one card per holding, with
   both quantities and the change Apply makes:
   - **Free shares or a spin-off** (held at XTB with an open price of about 0, and no purchase):
-    "Add at cost 0", checked by default. It records the shares as received at 0 PLN, with the
-    note "Received without a purchase (free shares or a spin-off)", and creates the holding.
+    "Add at cost 0", checked by default. It records the shares as received at 0 PLN and creates
+    the holding.
   - **XTB holds more than Vestly** (a purchase the file doesn't have): "Add N shares at XTB's open
-    price", off by default. It records a purchase at the lot's open price and open date,
-    converted to PLN with NBP's rate for that day. It needs NBP: while NBP is off in
-    Settings › Market Data, the box is disabled and NBP is never contacted.
-  - **XTB shows none held**: "Close position", off by default. It opens the Close position dialog.
+    price", off by default. It records a purchase for each missing lot at its open price and open
+    date, converted to PLN with NBP's rate from the business day before. It needs NBP: while NBP
+    is off in Settings › Market Data, the box is disabled and NBP is never contacted.
+  - **XTB shows none held**: "Close position", off by default. It opens the Close position
+    dialog, starting on the statement's day.
   - **Vestly holds more than XTB**: shown, with nothing to apply.
 
-  Rows added this way don't change the Cash row. When everything matches there is no extra step:
+  Rows added this way don't change the Cash row. In Activity they carry a small info badge on the
+  instrument's icon; hovering or focusing it says where they came from ("Added from XTB's Open
+  Positions: 2 @ 2,4 USD"). When everything matches there is no extra step:
   the success message says "All 5 holdings match XTB's statement of 20 Nov 2026". Either way,
   the holdings that match take the statement's current price (as their last known price) and
   its category, stock or ETF.

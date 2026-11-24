@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Holding, Transaction } from '@/types'
-import { applyStatementPrices, checkHoldings, currencyForRate, holdingsCheckNote, lotExternalId, missingLots, type HoldingsStatement, type StatementHolding } from './holdingsCheck'
+import { applyStatementPrices, checkHoldings, currencyForRate, isHoldingsCheckRow, lotExternalId, missingLots, type HoldingsStatement, type StatementHolding } from './holdingsCheck'
 
 const NOW = '2026-11-01T00:00:00.000Z'
 const holding = (id: string, ticker: string, quantity: number, extra: Partial<Holding> = {}): Holding => ({
@@ -116,10 +116,10 @@ describe('currencyForRate', () => {
   })
 })
 
-describe('holdingsCheckNote', () => {
-  it('is the comment of a row the check added, and nothing for an imported row', () => {
-    const added = { ...trade('receive', 'SPIN', 3, NOW), externalId: lotExternalId({ positionId: '7', quantity: 3, openPrice: 0, openDate: NOW }), comment: 'note' }
-    expect(holdingsCheckNote(added)).toBe('note')
-    expect(holdingsCheckNote({ ...trade('buy', 'ACME', 1, NOW), comment: 'OPEN BUY 1 @ 10.00' })).toBeUndefined()
+describe('isHoldingsCheckRow', () => {
+  it('is true for a row the check added, and false for an imported row', () => {
+    const added = { ...trade('receive', 'SPIN', 3, NOW), externalId: lotExternalId({ positionId: '7', quantity: 3, openPrice: 0, openDate: NOW }) }
+    expect(isHoldingsCheckRow(added)).toBe(true)
+    expect(isHoldingsCheckRow(trade('buy', 'ACME', 1, NOW))).toBe(false)
   })
 })
