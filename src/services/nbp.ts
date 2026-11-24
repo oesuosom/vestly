@@ -100,3 +100,24 @@ export async function getNBPRateToday(currency: string, settings: ProviderSettin
   if (!mid || isNaN(mid)) throw new Error(`NBP today: invalid rate for ${currency}`)
   return mid
 }
+
+/**
+ * Every currency in NBP's table A on `date`, or on the last day before it that
+ * has one (no table is published on weekends and holidays): code → mid rate.
+ * Empty when NBP has none in the 10 days up to `date`.
+ *
+ * @throws ProviderOffError while NBP is switched off
+ */
+export async function getNBPTable(date: string, settings: ProviderSettings): Promise<Map<string, number>> {
+  assertProviderOn(settings, 'nbp')
+  type NBPTablesResponse = { effectiveDate: string; rates: { code: string; mid: number }[] }[]
+  const to = date.slice(0, 10)
+  const fromDate = new Date(`${to}T00:00:00Z`)
+  fromDate.setUTCDate(fromDate.getUTCDate() - 10)
+  const url = `https://api.nbp.pl/api/exchangerates/tables/a/${fromDate.toISOString().slice(0, 10)}/${to}/?format=json`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`NBP: HTTP ${res.status} for table A up to ${to}`)
+  const tables = (await res.json()) as NBPTablesResponse
+  const latest = [...tables].sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate)).at(-1)
+  return new Map((latest?.rates ?? []).map((r) => [r.code.toUpperCase(), r.mid]))
+}

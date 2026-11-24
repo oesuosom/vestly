@@ -42,7 +42,7 @@ export function ClosePositionDialog({ holding, isOpen, onClose, onClosed }: Clos
     <Modal isOpen={isOpen} onClose={onClose} title="Close Position" size="sm" variant="card">
       {shown && (
         // Keyed by holding, so each opening starts from fresh defaults.
-        <ClosePositionForm key={shown.id} holding={shown} onCancel={onClose} onClosed={() => { onClose(); onClosed?.() }} />
+        <ClosePositionForm key={shown.id} holding={shown} onCancel={onClose} onClosed={() => { onClosed?.(); onClose() }} />
       )}
     </Modal>
   )

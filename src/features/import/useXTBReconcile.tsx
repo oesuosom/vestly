@@ -2,12 +2,15 @@
  * useXTBReconcile — the post-import reconciliation state machine shared by the
  * XTB Cash Operations and daily-confirmation import flows.
  *
- * Sequences three steps: create holdings for unmatched instruments
+ * Sequences four steps: create holdings for unmatched instruments
  * (XTBReconcileSteps.tsx), apply the quantity changes and closes the trades
- * imply for existing holdings (HoldingSyncStep.tsx), then offer to recalculate
- * cost bases (XTBReconcileSteps.tsx).
+ * imply for existing holdings (HoldingSyncStep.tsx), offer to recalculate
+ * cost bases (XTBReconcileSteps.tsx), then — for an .xlsx statement with Open
+ * Positions — check the holdings against what XTB holds (HoldingsCheckStep.tsx).
  */
-import { useState, type ReactElement } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
+import { ClosePositionDialog } from '@/features/accounts/ClosePositionDialog'
+import { applyStatementPrices, checkHoldings, type HoldingsCheck, type HoldingsStatement } from '@/domain/holdingsCheck'
 import { recalculateCostBases } from '@/domain/calculations'
 import { accountsAfterSync, planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
 import { resolveDividendLinks } from '@/domain/transactions'
@@ -24,6 +27,8 @@ import type { Account, AssetCategory, Transaction } from '@/types'
 import { holdingClause } from './doneSummary'
 import { HoldingSyncStep } from './HoldingSyncStep'
 import { syncClause, useApplyHoldingSync } from './useApplyHoldingSync'
+import { HoldingsCheckStep } from './HoldingsCheckStep'
+import { applyHoldingsCheck, canConvertOpenPrice, nbpRates } from './holdingsCheckApply'
 import {
   CostBasisStep,
   UnmatchedStep,
@@ -35,7 +40,17 @@ import {
 // ─────────────────────────────────────────
 
 /** Which reconciliation step, if any, is currently showing. */
-export type ReconcileStage = 'idle' | 'unmatched' | 'sync' | 'cost_basis'
+export type ReconcileStage = 'idle' | 'unmatched' | 'sync' | 'cost_basis' | 'holdings_check'
+
+/** How the holdings compared with the statement, for the done screen. */
+export type HoldingsCheckSummary = {
+  /** The statement's date, UTC ISO timestamp. */
+  asOf: string
+  /** Holdings that matched, whose price and category were saved from the statement. */
+  matching: number
+  /** Whether nothing differed. */
+  allMatch: boolean
+}
 
 /** Dev-only seed so the `/dev` showcase can freeze a reconciliation step. */
 export type ReconcileSeed = {
@@ -44,6 +59,7 @@ export type ReconcileSeed = {
   unresolvedRows?: UnresolvedRow[]
   syncRows?: HoldingSyncRow[]
   costBasisRows?: CostBasisDiffRow[]
+  holdingsCheck?: HoldingsCheck
 }
 
 export type UseXTBReconcile = {
@@ -52,9 +68,21 @@ export type UseXTBReconcile = {
    * step is now showing, false when there was nothing to reconcile (in which
    * case the caller should go straight to its done screen).
    */
-  begin: (mergedTransactions: Transaction[], nextAccounts: Account[], imported: Transaction[]) => boolean
+  begin: (
+    mergedTransactions: Transaction[],
+    nextAccounts: Account[],
+    imported: Transaction[],
+    openPositions?: HoldingsStatement,
+  ) => boolean
+  /**
+   * Only the holdings check, for an import that added nothing: returns true
+   * when its step is showing. Prices are saved either way.
+   */
+  beginHoldingsCheck: (transactions: Transaction[], accounts: Account[], openPositions?: HoldingsStatement) => boolean
   /** The current step's UI, or null when {@link stage} is 'idle'. */
   render: () => ReactElement | null
+  /** Set once the holdings were checked against an Open Positions sheet. */
+  holdingsCheckSummary: HoldingsCheckSummary | null
 }
 
 /**
@@ -73,7 +101,8 @@ export function useXTBReconcile({
   seed?: ReconcileSeed
 }): UseXTBReconcile {
   const { replaceAccounts, setTransactions } = usePortfolio()
-  const { instrumentAliases } = useSettings()
+  const settings = useSettings()
+  const { instrumentAliases } = settings
   const applyHoldingSync = useApplyHoldingSync()
 
   const [stage, setStage] = useState<ReconcileStage>(seed?.stage ?? 'idle')
@@ -93,16 +122,53 @@ export function useXTBReconcile({
   const [cbAccountsSnapshot, setCbAccountsSnapshot] = useState<Account[]>([])
   const [cbTransactionsSnapshot, setCbTransactionsSnapshot] = useState<Transaction[]>([])
 
+  const [openPositions, setOpenPositions] = useState<HoldingsStatement | undefined>(undefined)
+  const [holdingsCheck, setHoldingsCheck] = useState<HoldingsCheck | null>(seed?.holdingsCheck ?? null)
+  const [hcAccountsSnapshot, setHcAccountsSnapshot] = useState<Account[]>([])
+  const [hcTransactionsSnapshot, setHcTransactionsSnapshot] = useState<Transaction[]>([])
+  const [holdingsCheckSummary, setHoldingsCheckSummary] = useState<HoldingsCheckSummary | null>(null)
+  /** Holdings chosen to close, waiting for the Close position dialog, first one showing. */
+  const [closeQueue, setCloseQueue] = useState<Account['holdings']>([])
+  /** Set by the Close position dialog's onClosed, which runs just before its onClose. */
+  const closedRef = useRef(false)
+
   /** Clauses accumulated across the steps, handed back via onFinish. */
   const [extraParts, setExtraParts] = useState<string[]>([])
+
+  /**
+   * Compare the account with the statement's Open Positions. Saves the
+   * statement's price and category on the holdings that match, then shows the
+   * differences step when something differs. Returns whether it is showing.
+   */
+  function startHoldingsCheck(
+    accountsNow: Account[],
+    transactionsNow: Transaction[],
+    parts: string[],
+    statement: HoldingsStatement | undefined = openPositions,
+  ): boolean {
+    const account = accountsNow.find((a) => a.id === accountId)
+    if (!statement || !account) return false
+    const check = checkHoldings(statement, account, transactionsNow)
+    const priced = applyStatementPrices(accountsNow, accountId, check.matching, new Date().toISOString())
+    if (priced !== accountsNow) replaceAccounts(priced)
+    setHoldingsCheckSummary({ asOf: check.asOf, matching: check.matching.length, allMatch: check.differences.length === 0 })
+    if (check.differences.length === 0) return false
+    setHoldingsCheck(check)
+    setHcAccountsSnapshot(priced)
+    setHcTransactionsSnapshot(transactionsNow)
+    setExtraParts(parts)
+    setStage('holdings_check')
+    return true
+  }
 
   function beginCostBasis(
     accountsNow: Account[],
     transactionsNow: Transaction[],
     parts: string[],
+    statement: HoldingsStatement | undefined = openPositions,
   ): boolean {
     const diffRows = computeCostBasisDiff(accountsNow, transactionsNow, accountId)
-    if (diffRows.length === 0) return false
+    if (diffRows.length === 0) return startHoldingsCheck(accountsNow, transactionsNow, parts, statement)
     setCostBasisRows(diffRows)
     setCbAccountsSnapshot(accountsNow)
     setCbTransactionsSnapshot(transactionsNow)
@@ -117,10 +183,11 @@ export function useXTBReconcile({
     transactionsNow: Transaction[],
     imported: Transaction[],
     parts: string[],
+    statement: HoldingsStatement | undefined = openPositions,
   ): boolean {
     const account = accountsNow.find((a) => a.id === accountId)
     const rows = account ? planHoldingSync(account, transactionsNow, imported) : []
-    if (rows.length === 0) return beginCostBasis(accountsNow, transactionsNow, parts)
+    if (rows.length === 0) return beginCostBasis(accountsNow, transactionsNow, parts, statement)
     setSyncRows(rows)
     setSyncAccountsSnapshot(accountsNow)
     setSyncTransactionsSnapshot(transactionsNow)
@@ -129,8 +196,15 @@ export function useXTBReconcile({
     return true
   }
 
-  function begin(mergedTransactions: Transaction[], nextAccounts: Account[], imported: Transaction[]): boolean {
+  function begin(
+    mergedTransactions: Transaction[],
+    nextAccounts: Account[],
+    imported: Transaction[],
+    statement?: HoldingsStatement,
+  ): boolean {
     setImportedRows(imported)
+    setOpenPositions(statement)
+    setHoldingsCheckSummary(null)
     const { matched, unresolved } = computeUnmatchedInstruments(
       mergedTransactions,
       nextAccounts,
@@ -148,7 +222,13 @@ export function useXTBReconcile({
       return true
     }
 
-    return beginSync(nextAccounts, mergedTransactions, imported, [])
+    return beginSync(nextAccounts, mergedTransactions, imported, [], statement)
+  }
+
+  function beginHoldingsCheck(transactionsNow: Transaction[], accountsNow: Account[], statement?: HoldingsStatement): boolean {
+    setOpenPositions(statement)
+    setHoldingsCheckSummary(null)
+    return startHoldingsCheck(accountsNow, transactionsNow, [], statement)
   }
 
   function finish(parts: string[]) {
@@ -255,7 +335,45 @@ export function useXTBReconcile({
     parts.push(
       `Purchase prices updated for ${costBasisRows.length} holding${costBasisRows.length !== 1 ? 's' : ''}`,
     )
+    if (!startHoldingsCheck(recalculated, cbTransactionsSnapshot, parts)) finish(parts)
+  }
+
+  function handleSkipCostBasis() {
+    if (!startHoldingsCheck(cbAccountsSnapshot, cbTransactionsSnapshot, extraParts)) finish(extraParts)
+  }
+
+  async function handleApplyHoldingsCheck(checked: Set<string>) {
+    if (!holdingsCheck) return
+    const applied = await applyHoldingsCheck({
+      check: holdingsCheck,
+      checked,
+      accounts: hcAccountsSnapshot,
+      transactions: hcTransactionsSnapshot,
+      accountId,
+      rates: canConvertOpenPrice(settings) ? nbpRates(settings) : null,
+    })
+    const relinked = resolveDividendLinks(applied.transactions, applied.accounts)
+    replaceAccounts(applied.accounts)
+    setTransactions(relinked)
+    setHoldingsCheckSummary({ asOf: holdingsCheck.asOf, matching: applied.matching, allMatch: false })
+    const parts = [...extraParts, ...applied.parts]
+    if (applied.toClose.length > 0) {
+      setExtraParts(parts)
+      setCloseQueue(applied.toClose)
+      return
+    }
     finish(parts)
+  }
+
+  /** The Close position dialog for the first queued holding closed (or was cancelled). */
+  function handleCloseDialogDone() {
+    const closed = closedRef.current
+    closedRef.current = false
+    const parts = closed ? [...extraParts, `${closeQueue[0].ticker ?? closeQueue[0].name} closed`] : extraParts
+    const rest = closeQueue.slice(1)
+    setCloseQueue(rest)
+    if (rest.length > 0) setExtraParts(parts)
+    else finish(parts)
   }
 
   function render(): ReactElement | null {
@@ -277,12 +395,30 @@ export function useXTBReconcile({
         <CostBasisStep
           diffRows={costBasisRows}
           onConfirm={handleConfirmCostBasis}
-          onSkip={() => finish(extraParts)}
+          onSkip={handleSkipCostBasis}
         />
+      )
+    }
+    if (stage === 'holdings_check' && holdingsCheck) {
+      return (
+        <>
+          <HoldingsCheckStep
+            check={holdingsCheck}
+            nbpOn={canConvertOpenPrice(settings)}
+            onApply={handleApplyHoldingsCheck}
+            onSkip={() => finish(extraParts)}
+          />
+          <ClosePositionDialog
+            holding={closeQueue[0] ?? null}
+            isOpen={closeQueue.length > 0}
+            onClose={handleCloseDialogDone}
+            onClosed={() => { closedRef.current = true }}
+          />
+        </>
       )
     }
     return null
   }
 
-  return { begin, render }
+  return { begin, beginHoldingsCheck, render, holdingsCheckSummary }
 }

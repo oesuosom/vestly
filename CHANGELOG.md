@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An XTB .xlsx import checks your holdings against XTB's Open Positions** — the statement's
+  Open Positions sheet says what XTB held for you on the day the report was made, and Vestly
+  ignored it. Now, after the other review steps, each stock and ETF is compared with what Vestly
+  holds in the account after the import, per instrument (so lots XTB merged into one never show
+  as a difference). When something differs, a last step lists it, one card per holding, with
+  both quantities and the change Apply makes:
+  - **Free shares or a spin-off** (held at XTB with an open price of about 0, and no purchase):
+    "Add at cost 0", checked by default. It records the shares as received at 0 PLN, with the
+    note "Received without a purchase (free shares or a spin-off)", and creates the holding.
+  - **XTB holds more than Vestly** (a purchase the file doesn't have): "Add N shares at XTB's open
+    price", off by default. It records a purchase at the lot's open price and open date,
+    converted to PLN with NBP's rate for that day. It needs NBP: while NBP is off in
+    Settings › Market Data, the box is disabled and NBP is never contacted.
+  - **XTB shows none held**: "Close position", off by default. It opens the Close position dialog.
+  - **Vestly holds more than XTB**: shown, with nothing to apply.
+
+  Rows added this way don't change the Cash row. When everything matches there is no extra step:
+  the success message says "All 5 holdings match XTB's statement of 20 Nov 2026". Either way,
+  the holdings that match take the statement's current price (as their last known price) and
+  its category, stock or ETF.
 - **XTB's original .xlsx statement imports as it is** — XTB exports one Excel file with Closed
   Positions, Cash Operations and Open Positions sheets. Vestly read only the first sheet, so the
   file showed as an unknown CSV and you had to copy Cash Operations into its own CSV by hand.
@@ -36,6 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that didn't come out of the account's cash, such as eMakler imports, are counted and explained
   in a note. A balance below zero comes with a hint that deposits may be missing, and an account
   with no cash transactions yet points to Activity. Activity can now open filtered to one account.
+
+### Removed
+
+- **The "XTB Portfolio" holdings CSV format** — it expected the columns Symbol, Quantity, Open
+  Price, Current Price and Open Date, which XTB's export doesn't have, so no real file ever
+  matched it. What XTB holds is now read from the .xlsx statement's Open Positions sheet (see
+  Added). A CSV with those columns still imports as an unknown CSV, with its columns mapped by hand.
 
 ### Fixed
 

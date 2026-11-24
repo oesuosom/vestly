@@ -7,11 +7,13 @@ import {
   detectSeparator,
   findCashOperationsSheet,
   parseCSVNumber,
+  readOpenPositions,
   sheetCells,
   splitCSVLine,
   type Cell,
 } from './xtbStatement'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import type { HoldingsStatement } from '@/domain/holdingsCheck'
 import { feesChargedWith, findClosedByHandSales, findDuplicateTradeGroups, type TradeDuplicate } from './tradeDedup'
 
 // ─────────────────────────────────────────
@@ -65,6 +67,8 @@ export type ParseResult = {
   warnings: ParseWarning[]
   /** The statement's period, from the file's header block, when it has one. */
   period?: StatementPeriod
+  /** What XTB holds, from the .xlsx statement's Open Positions sheet, when it has one. */
+  openPositions?: HoldingsStatement
 }
 
 // ─────────────────────────────────────────
@@ -369,10 +373,12 @@ export async function parseXTBCashOperations(
     const sheet = findCashOperationsSheet(workbook)
     if (!sheet) throw new Error('This file has no Cash Operations sheet.')
     table = cashOperationsFromSheet(sheet, workbook.date1904)
-  } else {
-    assertHomeCurrency(null, file.name)
-    table = cashOperationsFromCSV(await readTextFile(file))
+    const parsed = parseCashOperationsTable(table, accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
+    const openPositions = readOpenPositions(workbook)
+    return openPositions ? { ...parsed, openPositions } : parsed
   }
+  assertHomeCurrency(null, file.name)
+  table = cashOperationsFromCSV(await readTextFile(file))
   return parseCashOperationsTable(table, accountId, existingExternalIds, accounts, instrumentAliases, existingTransactions)
 }
 

@@ -12,7 +12,8 @@
  * it as CSV, so the same structure is also read from CSV text, whatever
  * separator and number format the spreadsheet app saved it with.
  */
-import type { CellValue, Workbook, WorkbookSheet } from './xlsReader'
+import type { HoldingsStatement, StatementHolding, StatementLot } from '@/domain/holdingsCheck'
+import { excelSerialToISO, type CellValue, type Workbook, type WorkbookSheet } from './xlsReader'
 
 /** A cell the parser reads: text stays text, numbers stay numbers. */
 export type Cell = string | number
@@ -164,4 +165,125 @@ export class StatementCurrencyError extends Error {
 export function assertHomeCurrency(wb: Workbook | null, fileName: string): void {
   const currency = statementCurrency(wb, fileName)
   if (currency && currency !== HOME_CURRENCY) throw new StatementCurrencyError(currency)
+}
+
+// ─────────────────────────────────────────
+// Open Positions
+// ─────────────────────────────────────────
+
+/**
+ * Index of the Open Positions header row, or -1: the row that names an
+ * `Instrument/Position`, a `Ticker`, a `Volume` and an `Open price` column.
+ */
+export function openPositionsHeaderIndex(rows: readonly (readonly Cell[])[]): number {
+  return rows.findIndex((row) => {
+    const n = names(row)
+    return n.includes('instrument/position') && n.includes('ticker') && n.includes('volume') && n.includes('open price')
+  })
+}
+
+/** "ACME.US" → ACME on US; a bare "ACME" has no market. */
+function splitTicker(value: string): { ticker: string; exchange?: string } | null {
+  const v = value.trim().toUpperCase()
+  if (!v) return null
+  const m = v.match(/^([A-Z0-9][A-Z0-9-]*)\.([A-Z]+)$/)
+  return m ? { ticker: m[1], exchange: m[2] } : { ticker: v }
+}
+
+const CATEGORIES: Record<string, 'stock' | 'etf'> = { stock: 'stock', etf: 'etf' }
+
+/**
+ * What XTB holds, from the statement's Open Positions sheet, wherever it is in
+ * the file. Null when the file has no such sheet or it has no date.
+ *
+ * The sheet lists each instrument as a summary row (its name in
+ * `Instrument/Position`, a `Category`, an empty `Type`) followed by its lots
+ * (a position id in `Instrument/Position`, `Type` "BUY"). Lots are grouped by
+ * their `Ticker`, so nothing depends on the rows' order; the summary rows only
+ * give each instrument its name and category. Columns are found by name.
+ * Instruments whose summary says they are neither a stock nor an ETF (CFDs)
+ * are left out, as are lots that aren't buys.
+ *
+ * Each instrument's current price in PLN is its lots' Value (in the account
+ * currency) over their volume, and its currency's PLN rate is that Value over
+ * volume × Current price: the market suffix can't tell the currency (".UK"
+ * instruments can be priced in USD).
+ */
+export function readOpenPositions(wb: Workbook): HoldingsStatement | null {
+  const candidates = [...sheetNamed(wb, 'open positions'), ...wb.sheets]
+  for (const sheet of candidates) {
+    const rows = sheetCells(sheet)
+    const header = openPositionsHeaderIndex(rows)
+    if (header < 0) continue
+
+    const asOfCell = rows.slice(0, header).find((r) => /^\s*data as of/i.test(String(r[0] ?? '')))?.[1]
+    const asOf = typeof asOfCell === 'number' ? excelSerialToISO(asOfCell, wb.date1904) : null
+    if (!asOf) return null
+
+    const n = names(rows[header])
+    const col = (name: string) => n.indexOf(name)
+    const c = {
+      instrument: col('instrument/position'), ticker: col('ticker'), category: col('category'), type: col('type'),
+      volume: col('volume'), value: col('value'), current: col('current price'), open: col('open price'),
+      openTime: col('open time (utc)'),
+    }
+    const text = (row: Cell[], i: number) => (i < 0 ? '' : String(row[i] ?? '').trim())
+    const num = (row: Cell[], i: number) => (i >= 0 && typeof row[i] === 'number' ? (row[i] as number) : NaN)
+
+    type Group = { name?: string; category?: string; ticker: string; exchange?: string; lots: StatementLot[]; value: number; valued: number; priced: number }
+    const groups = new Map<string, Group>()
+    const group = (raw: string) => {
+      const t = splitTicker(raw)
+      if (!t) return null
+      let g = groups.get(t.ticker)
+      if (!g) groups.set(t.ticker, (g = { ticker: t.ticker, exchange: t.exchange, lots: [], value: 0, valued: 0, priced: 0 }))
+      return g
+    }
+
+    for (const row of rows.slice(header + 1)) {
+      const g = group(text(row, c.ticker))
+      if (!g) continue
+      const type = text(row, c.type).toUpperCase()
+      if (!type) {
+        g.name = text(row, c.instrument) || g.name
+        g.category = text(row, c.category).toLowerCase() || g.category
+        continue
+      }
+      const volume = num(row, c.volume)
+      if (type !== 'BUY' || !(volume > 0)) continue
+      const openTime = num(row, c.openTime)
+      const value = num(row, c.value)
+      const current = num(row, c.current)
+      g.lots.push({
+        positionId: text(row, c.instrument),
+        quantity: volume,
+        openPrice: Number.isFinite(num(row, c.open)) ? num(row, c.open) : 0,
+        openDate: (Number.isFinite(openTime) && excelSerialToISO(openTime, wb.date1904)) || asOf,
+      })
+      if (Number.isFinite(value) && Number.isFinite(current) && current > 0) {
+        g.value += value
+        g.valued += volume
+        g.priced += volume * current
+      }
+    }
+
+    const holdings: StatementHolding[] = []
+    for (const g of groups.values()) {
+      if (g.lots.length === 0) continue
+      if (g.category && !CATEGORIES[g.category]) continue
+      const quantity = Math.round(g.lots.reduce((s, l) => s + l.quantity, 0) * 1e8) / 1e8
+      holdings.push({
+        key: g.ticker,
+        ticker: g.ticker,
+        exchange: g.exchange,
+        name: g.name || g.ticker,
+        category: g.category ? CATEGORIES[g.category] : undefined,
+        quantity,
+        lots: g.lots,
+        ...(g.priced > 0 && { currentPricePLN: g.value / g.valued, rateToPLN: g.value / g.priced }),
+      })
+    }
+    return { asOf, holdings }
+  }
+  return null
 }

@@ -17,8 +17,9 @@ import { usePortfolio } from '@/context/PortfolioContext'
 import { formatDate, formatQuantity } from '@/utils/formatters'
 import { useSettings } from '@/context/SettingsContext'
 import { ChevronDownSmall, CircleCheck, CircleCross, Skip } from '@/generated/icons'
-import { joinDoneParts } from './doneSummary'
-import { useXTBReconcile, type ReconcileStage } from './useXTBReconcile'
+import { doneMessage } from './doneSummary'
+import { useXTBReconcile, type HoldingsCheckSummary, type ReconcileStage } from './useXTBReconcile'
+import type { HoldingsCheck } from '@/domain/holdingsCheck'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import type { DevSeed } from './devSeed'
 import type { HoldingSyncRow } from '@/domain/holdingSync'
@@ -47,6 +48,7 @@ type Step =
   | 'unmatched'
   | 'sync'
   | 'cost_basis'
+  | 'holdings_check'
   | 'done'
 
 /** Dev-only seedable state for the `/dev` showcase. */
@@ -56,7 +58,9 @@ export type XTBTransactionFlowDevState = {
   unresolvedRows: UnresolvedRow[]
   syncRows: HoldingSyncRow[]
   costBasisRows: CostBasisDiffRow[]
+  holdingsCheck?: HoldingsCheck
   doneParts: string[]
+  doneSummary?: HoldingsCheckSummary
 }
 
 // ─────────────────────────────────────────
@@ -101,6 +105,7 @@ export function XTBTransactionFlow({
 
   // Done summary parts
   const [doneParts, setDoneParts] = useState<string[]>(devSeed?.state?.doneParts ?? [])
+  const [addedCount, setAddedCount] = useState(0)
 
   // Unmatched-instruments and cost-basis steps, shared with XTBConfirmationFlow.
   const reconcile = useXTBReconcile({
@@ -111,9 +116,10 @@ export function XTBTransactionFlow({
     },
     seed: devSeed
       ? {
-          stage: (devSeed.step === 'unmatched' || devSeed.step === 'sync' || devSeed.step === 'cost_basis'
+          stage: (devSeed.step === 'unmatched' || devSeed.step === 'sync' || devSeed.step === 'cost_basis' || devSeed.step === 'holdings_check'
             ? devSeed.step
             : 'idle') as ReconcileStage,
+          holdingsCheck: devSeed.state?.holdingsCheck,
           unmatchedRows: devSeed.state?.unmatchedRows,
           unresolvedRows: devSeed.state?.unresolvedRows,
           syncRows: devSeed.state?.syncRows,
@@ -161,10 +167,12 @@ export function XTBTransactionFlow({
     }
     setDoneParts(parts)
 
-    // Nothing was added → nothing to reconcile.
-    if (added === 0 || !reconcile.begin(mergedTransactions, nextAccounts, parseResult.transactions)) {
-      setStep('done')
-    }
+    setAddedCount(added)
+    // Nothing was added → only the holdings check (an .xlsx statement still says what XTB holds).
+    const showing = added === 0
+      ? reconcile.beginHoldingsCheck(mergedTransactions, nextAccounts, parseResult.openPositions)
+      : reconcile.begin(mergedTransactions, nextAccounts, parseResult.transactions, parseResult.openPositions)
+    if (!showing) setStep('done')
   }
 
   // ── Done ───────────────────────────────
@@ -215,9 +223,11 @@ export function XTBTransactionFlow({
 
   // Done
   if (step === 'done') {
+    const done = doneMessage(doneParts, reconcile.holdingsCheckSummary ?? devSeed?.state?.doneSummary ?? null, addedCount, accountName)
     return (
       <ImportDoneCard
-        message={joinDoneParts(doneParts)}
+        message={done.message}
+        detail={done.detail}
         onDone={handleDone}
       />
     )

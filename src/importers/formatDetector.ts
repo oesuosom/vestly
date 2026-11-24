@@ -10,7 +10,6 @@ import { extractPDFLayout } from './pdfText'
 
 export type DetectedFormat =
   | { type: 'pko_ike' }
-  | { type: 'xtb_holdings' }
   | { type: 'xtb_transactions' }
   | { type: 'xtb_confirmation' }
   | { type: 'emakler_portfolio' }
@@ -36,7 +35,7 @@ export type DetectedFormatType = DetectedFormat['type']
  * 4. XTB's .xlsx statement: a sheet with the Cash Operations header row, wherever it is
  * 5. Decode to CSV text (handles CSV, and the first sheet of other XLS/XLSX files)
  *    and look for a Cash Operations CSV: its header row, found by names
- * 6. Known holdings formats via csvParser (PKO IKE, XTB holdings)
+ * 6. Known holdings formats via csvParser (PKO IKE)
  * 7. Fallback: unknown CSV with extracted headers
  */
 export async function detectFileFormat(file: File): Promise<DetectedFormat> {
@@ -96,12 +95,11 @@ export async function detectFileFormat(file: File): Promise<DetectedFormat> {
     return { type: 'xtb_transactions' }
   }
 
-  // 6. Try known holdings formats (PKO IKE, XTB holdings)
+  // 6. Try known holdings formats (PKO IKE)
   const { headers } = parseCSVRaw(text)
   const knownFormat = detectFormat(headers)
 
   if (knownFormat?.id === 'pko_ike') return { type: 'pko_ike' }
-  if (knownFormat?.id === 'xtb') return { type: 'xtb_holdings' }
 
   // 7. Unknown CSV — user will map columns manually
   return { type: 'unknown_csv', headers }

@@ -6,9 +6,11 @@ type CheckboxProps = {
   label?: string
   disabled?: boolean
   className?: string
+  /** Accessible name when there is no visible label. */
+  ariaLabel?: string
 }
 
-export function Checkbox({ checked, onChange, label, disabled = false, className = '' }: CheckboxProps) {
+export function Checkbox({ checked, onChange, label, disabled = false, className = '', ariaLabel }: CheckboxProps) {
   return (
     <label
       className={`inline-flex items-center gap-2 ${
@@ -20,6 +22,7 @@ export function Checkbox({ checked, onChange, label, disabled = false, className
           type="checkbox"
           checked={checked}
           disabled={disabled}
+          aria-label={ariaLabel}
           onChange={e => onChange(e.target.checked)}
           className="sr-only peer"
         />

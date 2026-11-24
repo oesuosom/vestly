@@ -219,7 +219,7 @@ export function UnifiedImportModal({
     if (!selectedAccountId || !primaryFormat) return
 
     // For CSV-based formats, pre-parse the CSV text
-    const csvFormats: DetectedFormatType[] = ['pko_ike', 'xtb_holdings', 'unknown_csv']
+    const csvFormats: DetectedFormatType[] = ['pko_ike', 'unknown_csv']
     if (csvFormats.includes(primaryFormat.type)) {
       const file = uploadedFiles.find((uf) => uf.format.type === primaryFormat.type)?.file
       if (file) {
@@ -430,7 +430,7 @@ export function UnifiedImportModal({
     const { type } = primaryFormat
 
     // CSV holdings formats
-    if (type === 'pko_ike' || type === 'xtb_holdings' || type === 'unknown_csv') {
+    if (type === 'pko_ike' || type === 'unknown_csv') {
       const knownFormat = type === 'unknown_csv' ? null : detectFormat(csvHeaders)
       return (
         <CSVImportFlow
