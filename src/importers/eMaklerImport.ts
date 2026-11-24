@@ -5,6 +5,8 @@
 import { getNBPRate, getNBPRateRange, getNBPRateToday } from '@/services/nbp'
 import type { EMaklerOrderRow, EMaklerPortfolioRow } from './eMaklerParser'
 import { isProviderOn, type ProviderSettings } from '@/services/providers'
+import { EXCHANGE_CODES } from '@/domain/exchanges'
+import { currencyCode } from '@/domain/priceCurrency'
 
 // ─────────────────────────────────────────
 // localStorage helpers for order deduplication
@@ -46,6 +48,12 @@ export type EMaklerHoldingResult = {
   nbpRateUsed: number           // FX rate applied — 1 if PLN, 0 if unknown
   status: 'complete' | 'missing_cost_basis'
   category: 'stock' | 'etf'    // default 'stock'; user can change in modal
+  /**
+   * The currency the instrument is quoted in, as the file says it (ISO code,
+   * or GBX for pence): the portfolio's price currency, else the latest buy
+   * order's. Saved on the holding; absent when the file's value isn't a code.
+   */
+  currency?: string
 }
 
 export type EMaklerTransactionData = {
@@ -190,13 +198,37 @@ async function resolveNbpRate(
  * @param settings              Provider switches — exchange rates come from NBP, then
  *                              EODHD. Without settings, no rates are fetched.
  */
+/** `{ currency }` when the file's currency is a code we read (`currencyCode`), else nothing. */
+function withCurrency(raw: string): { currency?: string } {
+  const currency = currencyCode(raw)
+  return currency ? { currency } : {}
+}
+
+/** Exchange codes the app knows; anything else came through `normalizeEMaklerExchange` unchanged. */
+const KNOWN_EXCHANGES = new Set<string>(EXCHANGE_CODES)
+
+/**
+ * One warning per eMakler market the import doesn't know: its holdings keep
+ * the market as eMakler writes it, and prices can't be fetched for them until
+ * the exchange is set on the holding. Nothing is guessed.
+ */
+function unknownMarketWarnings(rows: { name: string; exchange: string }[]): string[] {
+  const seen = new Map<string, string>()
+  for (const r of rows) {
+    if (r.exchange && !KNOWN_EXCHANGES.has(r.exchange) && !seen.has(r.exchange)) seen.set(r.exchange, r.name)
+  }
+  return [...seen].map(([market, name]) =>
+    `Unknown market "${market}" (${name}): kept as it is, so prices for its holdings can't be fetched. Set the exchange on the holding to fix it.`,
+  )
+}
+
 export async function buildEMaklerImport(
   portfolioRows: EMaklerPortfolioRow[],
   orderRows: EMaklerOrderRow[],
   existingOrderKeys: Set<string>,
   settings?: ProviderSettings,
 ): Promise<EMaklerImportResult> {
-  const warnings: string[] = []
+  const warnings: string[] = unknownMarketWarnings([...portfolioRows, ...orderRows])
   let duplicatesSkipped = 0
   const today = new Date().toISOString().slice(0, 10)
 
@@ -259,6 +291,7 @@ export async function buildEMaklerImport(
         purchasePrice: pricePLN,
         purchaseDate: purchaseDateISO,
         priceCurrency: mostRecent.currency,
+        ...withCurrency(mostRecent.currency),
         originalPurchasePrice: mostRecent.price,
         nbpRateUsed: rate,
         status: resolved ? 'complete' : 'missing_cost_basis',
@@ -295,6 +328,7 @@ export async function buildEMaklerImport(
         purchasePrice: 0,
         purchaseDate: today,
         priceCurrency: row.priceCurrency,
+        ...withCurrency(row.priceCurrency),
         originalPurchasePrice: 0,
         nbpRateUsed: row.priceCurrency === 'PLN' ? 1 : 0,
         status: 'missing_cost_basis',
@@ -325,6 +359,7 @@ export async function buildEMaklerImport(
       purchasePrice: purchasePricePLN,
       purchaseDate: purchaseDateISO,
       priceCurrency: mostRecent.currency,
+      ...withCurrency(row.priceCurrency),
       originalPurchasePrice: mostRecent.price,
       nbpRateUsed: rate,
       status: resolved ? 'complete' : 'missing_cost_basis',

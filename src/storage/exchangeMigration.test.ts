@@ -135,3 +135,55 @@ describe('restoring a backup made before the change', () => {
     expect(read<Transaction[]>(KEYS.TRANSACTIONS)[0].exchange).toBe('XETRA')
   })
 })
+
+describe('eMakler’s "DEU-XETRA"', () => {
+  beforeEach(() => localStorage.clear())
+
+  const key = (name: string, exchange: string) => `${name}|${exchange}|2026-02-06T10:00:00.000Z|4|10`
+  const eMaklerStore = (): PortfolioStore => ({
+    ...legacyStore(),
+    accounts: [account([holding('exeu', 'DEU-XETRA'), holding('swld', 'UK')])],
+    settings: DEFAULT_SETTINGS,
+    transactions: [
+      { ...buy('e1', 'EXEU', 'DEU-XETRA'), source: 'emakler_import', externalId: key('EXAMPLE EUROPE ETF', 'DEU-XETRA') },
+      { ...buy('e2', 'SWLD', 'UK'), source: 'emakler_import', externalId: key('SAMPLE WORLD ETF', 'UK') },
+      // An XTB id that happens to look like a key is never touched.
+      { ...buy('x1', 'ACME', 'US'), externalId: 'A|DEU-XETRA|b|c|d' },
+    ],
+  })
+
+  it('becomes XETRA, inside eMakler’s order keys too, so the same file still dedupes', () => {
+    const { store, changedHoldingIds } = migrateLegacyExchangeCodes(eMaklerStore())
+    expect(store.accounts[0].holdings.map((h) => h.exchange)).toEqual(['XETRA', 'UK'])
+    expect(store.transactions.map((t) => [t.exchange, t.externalId])).toEqual([
+      ['XETRA', key('EXAMPLE EUROPE ETF', 'XETRA')],
+      ['UK', key('SAMPLE WORLD ETF', 'UK')],
+      ['US', 'A|DEU-XETRA|b|c|d'],
+    ])
+    expect(changedHoldingIds).toEqual(['exeu'])
+  })
+
+  it('on start, also in the processed-order keys and the price history', () => {
+    seed(eMaklerStore())
+    write('ft_emakler_order_keys', [key('EXAMPLE EUROPE ETF', 'DEU-XETRA'), key('SAMPLE WORLD ETF', 'UK')])
+    write(HISTORICAL_PRICES_STORAGE_KEY, historyFor(['exeu', 'swld']))
+
+    initializeStore()
+
+    expect(read<string[]>('ft_emakler_order_keys')).toEqual([key('EXAMPLE EUROPE ETF', 'XETRA'), key('SAMPLE WORLD ETF', 'UK')])
+    expect(read<Account[]>(KEYS.ACCOUNTS)[0].holdings[0].exchange).toBe('XETRA')
+    expect(read<HistoricalPricesCache>(HISTORICAL_PRICES_STORAGE_KEY).histories.map((h) => h.holdingId)).toEqual(['swld'])
+  })
+
+  it('in a restored older backup', () => {
+    seed(migrateLegacyExchangeCodes(eMaklerStore()).store)
+    initializeStore()
+    const old = eMaklerStore()
+    const result = validateBackup(JSON.parse(JSON.stringify({ accounts: old.accounts, transactions: old.transactions })))
+    if (!result.ok) throw new Error(result.error)
+    applyBackup(result.backup, result.fields)
+    initializeStore()
+    expect(read<Account[]>(KEYS.ACCOUNTS)[0].holdings[0].exchange).toBe('XETRA')
+    expect(read<Transaction[]>(KEYS.TRANSACTIONS)[0].externalId).toBe(key('EXAMPLE EUROPE ETF', 'XETRA'))
+  })
+})

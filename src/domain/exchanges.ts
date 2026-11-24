@@ -33,10 +33,12 @@ export function exchangeFromXTBSuffix(suffix: string): ExchangeCode | undefined 
 
 /**
  * Exchange codes stored by earlier versions that mean one of ours: XTB
- * imports kept XTB's raw "DE". Startup rewrites them (`storage/migrations.ts`).
+ * imports kept XTB's raw "DE", and eMakler imports kept its raw "DEU-XETRA".
+ * Startup rewrites them (`storage/migrations.ts`).
  */
 export const LEGACY_EXCHANGE_CODES: Readonly<Record<string, ExchangeCode>> = {
   DE: 'XETRA',
+  'DEU-XETRA': 'XETRA',
 }
 
 /**

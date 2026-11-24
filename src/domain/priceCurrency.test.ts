@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Account, Holding } from '@/types'
 import {
+  currencyCode,
   currencyFromStatement,
   currencyFromYahoo,
   holdingPriceCurrency,
@@ -63,6 +64,20 @@ describe('currencyFromYahoo', () => {
     expect(currencyFromYahoo('')).toBeUndefined()
     expect(currencyFromYahoo(null)).toBeUndefined()
     expect(currencyFromYahoo(undefined)).toBeUndefined()
+  })
+})
+
+describe('currencyCode (a file’s currency column)', () => {
+  it('reads ISO codes and pence, trimmed', () => {
+    expect(currencyCode(' EUR ')).toBe('EUR')
+    expect(currencyCode('GBX')).toBe('GBX')
+    expect(currencyCode('GBp')).toBe('GBX')
+  })
+
+  it('guesses nothing else', () => {
+    expect(currencyCode('eur')).toBeUndefined()
+    expect(currencyCode('Euro')).toBeUndefined()
+    expect(currencyCode('')).toBeUndefined()
   })
 })
 

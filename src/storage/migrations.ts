@@ -77,11 +77,29 @@ export function migrateIfNeeded(store: PortfolioStore): PortfolioStore {
 }
 
 /**
+ * An eMakler order's deduplication key (`name|exchange|date|quantity|price`,
+ * also stored as its transaction's `externalId`) with a legacy exchange code
+ * rewritten, so the same order file still dedupes after the parser started
+ * writing XETRA for "DEU-XETRA". The exchange is read from the end, so a name
+ * containing "|" can't shift it. Returns the key itself when nothing changes.
+ */
+export function migrateEMaklerOrderKey(key: string): string {
+  const parts = key.split('|')
+  if (parts.length < 5) return key
+  const at = parts.length - 4
+  const code = LEGACY_EXCHANGE_CODES[parts[at]]
+  if (!code) return key
+  parts[at] = code
+  return parts.join('|')
+}
+
+/**
  * Exchange codes earlier versions stored that mean one of ours
- * (`LEGACY_EXCHANGE_CODES`): XTB imports kept XTB's "DE" for XETRA, so those
- * holdings' prices were looked up on the wrong market and converted at the
- * USD rate. Rewrites them on open and closed holdings, transactions and
- * instrument aliases.
+ * (`LEGACY_EXCHANGE_CODES`): XTB imports kept XTB's "DE" and eMakler imports
+ * kept "DEU-XETRA" for XETRA, so those holdings' prices were looked up on the
+ * wrong market and converted at the USD rate. Rewrites them on open and closed
+ * holdings, transactions (and eMakler orders' `externalId`, which embeds the
+ * exchange) and instrument aliases.
  *
  * Not tied to a schema version: it is idempotent and cheap, and runs on every
  * start (`initializeStore`), so a backup restored from before the change is
@@ -114,9 +132,10 @@ export function migrateLegacyExchangeCodes(store: PortfolioStore): { store: Port
   let transactionsChanged = false
   const transactions = store.transactions.map((t) => {
     const code = t.exchange ? LEGACY_EXCHANGE_CODES[t.exchange] : undefined
-    if (!code) return t
+    const externalId = t.source === 'emakler_import' ? migrateEMaklerOrderKey(t.externalId) : t.externalId
+    if (!code && externalId === t.externalId) return t
     transactionsChanged = true
-    return { ...t, exchange: code }
+    return { ...t, ...(code && { exchange: code }), externalId }
   })
 
   let aliasesChanged = false

@@ -51,9 +51,19 @@ export function priceToPLN(price: number, currency: string, rateToPLN: number): 
  * "ZAc" or "ILA"), so the market default applies rather than a guess.
  */
 export function currencyFromYahoo(reported: string | null | undefined): string | undefined {
-  if (!reported) return undefined
-  if (reported === 'GBp' || reported === 'GBX') return PENCE
-  return /^[A-Z]{3}$/.test(reported) ? reported : undefined
+  return currencyCode(reported)
+}
+
+/**
+ * A currency as a source writes it, as our code: "GBp" or "GBX" (pence) → GBX,
+ * three-letter upper-case ISO codes as they are. Undefined for anything else,
+ * so nothing is guessed.
+ */
+export function currencyCode(raw: string | null | undefined): string | undefined {
+  const value = raw?.trim()
+  if (!value) return undefined
+  if (value === 'GBp' || value === 'GBX') return PENCE
+  return /^[A-Z]{3}$/.test(value) ? value : undefined
 }
 
 /**

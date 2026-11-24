@@ -301,6 +301,7 @@ export function EMaklerImportFlow({
           existingId: row.existingHolding.id,
           quantity: h.quantity,
           currentPrice: h.currentPrice,
+          ...(h.currency && { currency: h.currency }),
         })
       } else {
         const ticker = tickerInputs[i]?.trim().toUpperCase() || undefined
@@ -310,6 +311,7 @@ export function EMaklerImportFlow({
             name: h.name,
             ticker,
             exchange: h.exchange,
+            ...(h.currency && { currency: h.currency }),
             category,
             quantity: h.quantity,
             purchasePrice: purchasePricePLN,

@@ -8,7 +8,7 @@ import {
   type Snapshot,
   type Transaction,
 } from '@/types'
-import { migrateIfNeeded, migrateLegacyExchangeCodes } from './migrations'
+import { migrateEMaklerOrderKey, migrateIfNeeded, migrateLegacyExchangeCodes } from './migrations'
 import { loadHistoricalPricesCache, saveHistoricalPricesCache } from './historicalPriceStorage'
 
 /**
@@ -353,6 +353,17 @@ export function initializeStore(): void {
   migrateExchangeCodes()
 }
 
+/** eMakler's processed order keys (see `loadEMaklerOrderKeys`). */
+export const EMAKLER_ORDER_KEYS = 'ft_emakler_order_keys'
+
+/** Rewrite legacy exchange codes inside stored eMakler order keys, so the same file still dedupes. */
+function migrateEMaklerOrderKeys(): void {
+  const keys = readKey<unknown>(EMAKLER_ORDER_KEYS, null)
+  if (!Array.isArray(keys)) return
+  const next = keys.map((k) => (typeof k === 'string' ? migrateEMaklerOrderKey(k) : k))
+  if (next.some((k, i) => k !== keys[i])) writeCacheKey(EMAKLER_ORDER_KEYS, next)
+}
+
 /** The price cache before holdings had their own price currency (see priceFetcher's CACHE_KEY). */
 const OLD_PRICE_CACHE_KEY = 'ft_price_cache_v2'
 
@@ -367,6 +378,8 @@ function migrateExchangeCodes(): void {
   } catch {
     // Storage unavailable: nothing to remove.
   }
+
+  migrateEMaklerOrderKeys()
 
   const store = getStore()
   const { store: migrated, changedHoldingIds } = migrateLegacyExchangeCodes(store)

@@ -86,10 +86,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - XTB imports translate ".DE" to XETRA, and ".NL" to Euronext Amsterdam, a new market
     (`.AS` on Yahoo and EODHD, EUR by default). An XTB suffix Vestly doesn't know is kept as it
     is, and the import preview warns about it once.
+  - eMakler imports translate "DEU-XETRA" to XETRA (it was kept as it was, so those holdings
+    were looked up on the US market and converted at the USD rate). A market eMakler writes that
+    Vestly doesn't know is kept, and the preview warns about it once. Holdings an eMakler
+    portfolio file adds or updates take its price currency (the first "Waluta" column), which
+    replaces what price data reported. The order history's currency column is found by its name
+    ("Walute"), not only by its position.
   - **Migration:** on start, holdings (open and closed), transactions and instrument aliases
-    stored with the exchange `DE` are rewritten to `XETRA`. The cached price history of those
-    holdings is dropped so it's fetched again, and cached prices are refreshed once. Backups made
-    before this change still restore, and are migrated the same way, with or without a version.
+    stored with the exchange `DE` (XTB) or `DEU-XETRA` (eMakler) are rewritten to `XETRA`, and
+    so are eMakler's stored order keys, so the same order file is still recognised as already
+    imported. The cached price history of those holdings is dropped so it's fetched again, and
+    cached prices are refreshed once. Backups made before this change still restore, and are
+    migrated the same way, with or without a version.
   - Price history converted from another currency than the holding's is fetched again in full,
     so old points converted at the wrong rate aren't mixed with new ones.
 
