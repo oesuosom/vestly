@@ -69,6 +69,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **London, German and Dutch listings are priced in the right currency and market** — Vestly
+  took a holding's currency from its market alone, and every market but Warsaw and XETRA meant
+  USD. A London share quoted in pounds was converted at the USD rate (off by about a quarter),
+  and one quoted in pence was off by about 100×. XTB's ".DE" and ".NL" suffixes were stored as
+  they were, so those holdings' history was looked up on the US market and their prices were
+  converted at the USD rate too. Now:
+  - Each holding can know its own price currency (GBX for pence). An XTB .xlsx import takes it
+    from Open Positions (Value ÷ (Volume × Current price), matched with NBP's table for the
+    report date). Otherwise it comes from the price data (Yahoo reports it). If neither says,
+    the market's usual currency is used, as before. A statement's currency is never overridden
+    by price data.
+  - Price refresh and price history convert from that currency: pence at the GBP rate ÷ 100,
+    pounds and euros at their own rates. With a rate's provider off, nothing falls back to
+    another currency's rate, and no provider that's off is contacted.
+  - XTB imports translate ".DE" to XETRA, and ".NL" to Euronext Amsterdam, a new market
+    (`.AS` on Yahoo and EODHD, EUR by default). An XTB suffix Vestly doesn't know is kept as it
+    is, and the import preview warns about it once.
+  - **Migration:** on start, holdings (open and closed), transactions and instrument aliases
+    stored with the exchange `DE` are rewritten to `XETRA`. The cached price history of those
+    holdings is dropped so it's fetched again, and cached prices are refreshed once. Backups made
+    before this change still restore, and are migrated the same way, with or without a version.
+  - Price history converted from another currency than the holding's is fetched again in full,
+    so old points converted at the wrong rate aren't mixed with new ones.
+
 - **The account card's empty chart fits the card** — when an account's chart had nothing to draw
   yet ("No chart data yet" or "Not enough history yet"), the Vestly logo covered the range picker
   and the title and text fell below the card, cut off. In the account card the message now takes

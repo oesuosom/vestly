@@ -8,7 +8,8 @@ import {
   type Snapshot,
   type Transaction,
 } from '@/types'
-import { migrateIfNeeded } from './migrations'
+import { migrateIfNeeded, migrateLegacyExchangeCodes } from './migrations'
+import { loadHistoricalPricesCache, saveHistoricalPricesCache } from './historicalPriceStorage'
 
 /**
  * Every localStorage key the store owns. Exported so consumers that must know a
@@ -348,4 +349,36 @@ export function initializeStore(): void {
     // without this the migrated value is computed and then thrown away.
     saveAccounts(migrated.accounts)
   }
+
+  migrateExchangeCodes()
+}
+
+/** The price cache before holdings had their own price currency (see priceFetcher's CACHE_KEY). */
+const OLD_PRICE_CACHE_KEY = 'ft_price_cache_v2'
+
+/**
+ * Rewrite exchange codes earlier versions stored (XTB's "DE" → XETRA), and
+ * drop the cached price history of the holdings that changed so it's fetched
+ * again from the right market. Runs on every start; writes only what changed.
+ */
+function migrateExchangeCodes(): void {
+  try {
+    localStorage.removeItem(OLD_PRICE_CACHE_KEY)
+  } catch {
+    // Storage unavailable: nothing to remove.
+  }
+
+  const store = getStore()
+  const { store: migrated, changedHoldingIds } = migrateLegacyExchangeCodes(store)
+  if (migrated === store) return
+  if (migrated.accounts !== store.accounts) saveAccounts(migrated.accounts)
+  if (migrated.transactions !== store.transactions) saveTransactions(migrated.transactions)
+  if (migrated.settings !== store.settings) saveSettings(migrated.settings)
+
+  if (changedHoldingIds.length === 0) return
+  const history = loadHistoricalPricesCache()
+  if (!history) return
+  const changed = new Set(changedHoldingIds)
+  const kept = history.histories.filter((h) => !changed.has(h.holdingId))
+  if (kept.length !== history.histories.length) saveHistoricalPricesCache({ ...history, histories: kept })
 }

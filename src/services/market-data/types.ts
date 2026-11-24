@@ -8,12 +8,14 @@ export type NormalizedTicker = {
   holdingId: string
   ticker: string
   exchange: string  // 'US', 'PL', etc.
+  /** The holding's own price currency, when known (ISO code, or 'GBX' for pence). */
+  currency?: string
 }
 
 export type PriceResult = {
   holdingId: string
   price: number       // always PLN
-  currency: string    // original currency before conversion
+  currency: string    // original currency before conversion ('GBX' for pence)
   fetchedAt: string
   error?: string
 }

@@ -73,7 +73,7 @@ export function Overview() {
     })
   }, [isLoading, eodhdOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings)
+  const { historicalPrices, retry: retryHistory, isRetrying } = useHistoricalPrices(accounts, settings, replaceAccounts)
   const openSettings = useOpenSettings()
 
   // Which holdings the chart can draw with the providers that are on.

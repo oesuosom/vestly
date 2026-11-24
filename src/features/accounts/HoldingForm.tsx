@@ -37,6 +37,7 @@ const EXCHANGE_OPTIONS = exchangeOptions({
   PL: 'PL (Warsaw / GPW)',
   UK: 'UK (London / LSE)',
   XETRA: 'XETRA (Frankfurt)',
+  NL: 'NL (Euronext Amsterdam)',
 }, 'None')
 
 /**

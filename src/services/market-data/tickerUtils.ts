@@ -10,6 +10,7 @@ const EXCHANGE_TO_YAHOO: Record<string, string> = {
   PL:    '.WA',
   UK:    '.L',
   XETRA: '.DE',
+  NL:    '.AS',    // Euronext Amsterdam
   CC:    '-USD',   // crypto: ETH → ETH-USD
 } satisfies Record<ExchangeCode | 'CC', string>
 
@@ -33,17 +34,21 @@ const EXCHANGE_TO_EODHD: Record<string, string> = {
   PL:    'WAR',
   UK:    'LSE',   // London Stock Exchange (e.g. EIMI.LSE, CSPX.LSE)
   XETRA: 'XETRA', // Frankfurt / XETRA (e.g. EXS1.XETRA)
+  NL:    'AS',    // Euronext Amsterdam (e.g. ASML.AS)
   CC:    'CC',    // CryptoCompare (e.g. ETH-USD.CC, BTC-USD.CC)
 } satisfies Record<ExchangeCode | 'CC', string>
 
 /**
- * Returns the native currency that EODHD reports prices in for a given exchange.
- * Used by the EODHD provider to pick the correct PLN conversion rate.
+ * The currency a market's prices are usually in: the default for a holding
+ * whose own price currency isn't known (see `holdingPriceCurrency` in
+ * `domain/priceCurrency.ts`, which callers should use instead). London has no
+ * single answer — its listings trade in USD, GBP or pence — so UK keeps the
+ * USD default it always had.
  */
 export function currencyForExchange(exchange: string): 'PLN' | 'USD' | 'EUR' {
   if (exchange === 'PL') return 'PLN'
-  if (exchange === 'XETRA') return 'EUR'
-  return 'USD'  // US, UK (LSE), CC (crypto) — all USD-denominated
+  if (exchange === 'XETRA' || exchange === 'NL') return 'EUR'
+  return 'USD'  // US, UK (LSE) by default, CC (crypto)
 }
 
 /**

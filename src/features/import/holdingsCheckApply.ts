@@ -9,10 +9,12 @@ import {
   type HoldingDifference,
   type HoldingMatch,
   type HoldingsCheck,
+  type HoldingsStatement,
   type PriceCurrency,
   type StatementHolding,
   type StatementLot,
 } from '@/domain/holdingsCheck'
+import { currencyFromStatement, rateCurrency, unitsPerRateUnit } from '@/domain/priceCurrency'
 import { getNBPRateRange, getNBPTable } from '@/services/nbp'
 import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import type { Account, Holding, Transaction } from '@/types'
@@ -62,6 +64,35 @@ export function nbpRates(settings: ProviderSettings): RateSource {
       if (!latest) throw new Error(`NBP has no ${currency} rate up to ${day}`)
       return rates.get(latest)!
     },
+  }
+}
+
+/** A rate within this share of 1 is PLN: no table needed. */
+const PLN_TOLERANCE = 0.04
+
+/**
+ * The statement with each instrument's price currency worked out from its PLN
+ * rate (`currencyFromStatement`): PLN without asking anyone, the rest with
+ * NBP's table for the report date, fetched once. With NBP off (`rates` null)
+ * or its table unavailable, only PLN instruments get one; the rest stay
+ * unknown, and their holdings keep what they have (the market's default).
+ */
+export async function withStatementCurrencies(statement: HoldingsStatement, rates: RateSource | null): Promise<HoldingsStatement> {
+  const isPLN = (r: number | undefined) => r !== undefined && Math.abs(r - 1) < PLN_TOLERANCE
+  let table: ReadonlyMap<string, number> | null = null
+  if (rates && statement.holdings.some((h) => h.rateToPLN !== undefined && !isPLN(h.rateToPLN))) {
+    try {
+      table = await rates.table(statement.asOf)
+    } catch (err) {
+      console.warn('[XTB import] NBP table unavailable; statement currencies left unknown:', err)
+    }
+  }
+  return {
+    ...statement,
+    holdings: statement.holdings.map((h) => {
+      const currency = isPLN(h.rateToPLN) ? 'PLN' : table ? currencyFromStatement(h.rateToPLN, table) : undefined
+      return currency ? { ...h, currency } : h
+    }),
   }
 }
 
@@ -127,6 +158,8 @@ export async function applyHoldingsCheck({
 
   let table: ReadonlyMap<string, number> | null = null
   const currencyOf = async (s: StatementHolding): Promise<PriceCurrency> => {
+    if (s.currency === 'PLN') return { currency: 'PLN', divisor: 1 }
+    if (s.currency && rates) return { currency: rateCurrency(s.currency), divisor: unitsPerRateUnit(s.currency) }
     const rate = s.rateToPLN
     if (rate !== undefined && Math.abs(rate - 1) < 0.04) return { currency: 'PLN', divisor: 1 }
     if (!rates) throw new Error('NBP is off, so the open price can’t be converted to PLN.')
@@ -198,6 +231,7 @@ export async function applyHoldingsCheck({
           name: s.name,
           ticker: s.ticker,
           exchange: s.exchange,
+          ...(s.currency && { currency: s.currency }),
           category: s.category ?? 'stock',
           quantity: round8(position.quantity),
           purchasePrice: position.averageCostPLN,

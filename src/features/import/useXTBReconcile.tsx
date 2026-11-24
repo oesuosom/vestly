@@ -11,7 +11,7 @@
 import { useRef, useState, type ReactElement } from 'react'
 import { format } from 'date-fns'
 import { ClosePositionDialog } from '@/features/accounts/ClosePositionDialog'
-import { applyStatementPrices, checkHoldings, type HoldingsCheck, type HoldingsStatement } from '@/domain/holdingsCheck'
+import { applyStatementCurrencies, applyStatementPrices, checkHoldings, type HoldingsCheck, type HoldingsStatement } from '@/domain/holdingsCheck'
 import { recalculateCostBases } from '@/domain/calculations'
 import { accountsAfterSync, planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
 import { resolveDividendLinks } from '@/domain/transactions'
@@ -150,7 +150,9 @@ export function useXTBReconcile({
     const account = accountsNow.find((a) => a.id === accountId)
     if (!statement || !account) return false
     const check = checkHoldings(statement, account, transactionsNow)
-    const priced = applyStatementPrices(accountsNow, accountId, check.matching, new Date().toISOString())
+    // The statement's price currency goes on every holding of its instruments, matching or not.
+    const withCurrencies = applyStatementCurrencies(accountsNow, accountId, statement)
+    const priced = applyStatementPrices(withCurrencies, accountId, check.matching, new Date().toISOString())
     if (priced !== accountsNow) replaceAccounts(priced)
     setHoldingsCheckSummary({ asOf: check.asOf, matching: check.matching.length, allMatch: check.differences.length === 0 })
     if (check.differences.length === 0) return false

@@ -1,4 +1,5 @@
-import { toEODHDTicker, currencyForExchange } from './tickerUtils'
+import { toEODHDTicker } from './tickerUtils'
+import { holdingPriceCurrency, priceToPLN, rateCurrency } from '@/domain/priceCurrency'
 import type { NormalizedTicker, PriceProvider, PriceResult } from './types'
 import { assertProviderOn, type ProviderSettings } from '@/services/providers'
 
@@ -58,50 +59,32 @@ export const eodhdProvider: PriceProvider = {
     const apiKey = settings.priceProvider.apiKey
     const now = new Date().toISOString()
 
-    // Determine which currency conversion rates we need
-    const needsUSD = tickers.some((t) => currencyForExchange(t.exchange) === 'USD')
-    const needsEUR = tickers.some((t) => currencyForExchange(t.exchange) === 'EUR')
+    // Each ticker converts from its own price currency (GBX at the GBP rate ÷ 100),
+    // falling back to its market's default when the holding doesn't know it.
+    const currencyOf = (t: NormalizedTicker) => holdingPriceCurrency(t)
 
-    // Fetch required FX rates upfront (USD/PLN and/or EUR/PLN)
-    let usdPlnRate = 1
-    let eurPlnRate = 1
-
-    if (needsUSD) {
+    // Fetch each rate the tickers need, once (USD/PLN, EUR/PLN, GBP/PLN, …).
+    const needed = [...new Set(tickers.map((t) => rateCurrency(currencyOf(t))).filter((c) => c !== 'PLN'))]
+    const rates = new Map<string, number>([['PLN', 1]])
+    const rateErrors = new Map<string, string>()
+    for (const currency of needed) {
       try {
-        usdPlnRate = await eodhdProvider.fetchExchangeRate!('USD', 'PLN', settings)
+        rates.set(currency, await eodhdProvider.fetchExchangeRate!(currency, 'PLN', settings))
       } catch (err) {
-        console.error('[EODHD] Failed to fetch USD/PLN rate:', err)
-        return tickers.map((t) => ({
-          holdingId: t.holdingId,
-          price: 0,
-          currency: currencyForExchange(t.exchange),
-          fetchedAt: now,
-          error: 'Failed to fetch USD/PLN exchange rate',
-        }))
-      }
-    }
-
-    if (needsEUR) {
-      try {
-        eurPlnRate = await eodhdProvider.fetchExchangeRate!('EUR', 'PLN', settings)
-      } catch (err) {
-        console.error('[EODHD] Failed to fetch EUR/PLN rate:', err)
-        return tickers.map((t) => ({
-          holdingId: t.holdingId,
-          price: 0,
-          currency: currencyForExchange(t.exchange),
-          fetchedAt: now,
-          error: 'Failed to fetch EUR/PLN exchange rate',
-        }))
+        console.error(`[EODHD] Failed to fetch ${currency}/PLN rate:`, err)
+        rateErrors.set(currency, `Failed to fetch ${currency}/PLN exchange rate`)
       }
     }
 
     // Fetch each ticker individually
     const results = await Promise.all(
       tickers.map(async (t): Promise<PriceResult> => {
+        const currency = currencyOf(t)
+        const rateError = rateErrors.get(rateCurrency(currency))
+        // No rate, no price: a price converted with another currency's rate would be wrong.
+        if (rateError) return { holdingId: t.holdingId, price: 0, currency, fetchedAt: now, error: rateError }
         const eodhdTicker = toEODHDTicker(t.ticker, t.exchange)
         const url = `${EODHD_BASE}/real-time/${eodhdTicker}?api_token=${apiKey}&fmt=json`
-        const currency = currencyForExchange(t.exchange)
         try {
           const res = await fetch(url)
           if (!res.ok) {
@@ -112,10 +95,9 @@ export const eodhdProvider: PriceProvider = {
           if (!rawPrice || isNaN(rawPrice)) {
             return { holdingId: t.holdingId, price: 0, currency, fetchedAt: now, error: 'No price returned' }
           }
-          const fxRate = currency === 'PLN' ? 1 : currency === 'EUR' ? eurPlnRate : usdPlnRate
           return {
             holdingId: t.holdingId,
-            price: rawPrice * fxRate,
+            price: priceToPLN(rawPrice, currency, rates.get(rateCurrency(currency))!),
             currency,
             fetchedAt: now,
           }

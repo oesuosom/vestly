@@ -1,4 +1,5 @@
-import { DEFAULT_SETTINGS, type PortfolioStore, type Transaction } from '@/types'
+import { DEFAULT_SETTINGS, type Holding, type InstrumentAlias, type PortfolioStore, type Transaction } from '@/types'
+import { LEGACY_EXCHANGE_CODES } from '@/domain/exchanges'
 // Renames are resolved at read time (see @/utils/iconIds); these two migrations
 // remain so stores already stamped 3.0.0 or 4.0.0 still advance.
 import { ICON_ID_RENAMES } from '@/utils/iconIds'
@@ -73,6 +74,69 @@ export function migrateIfNeeded(store: PortfolioStore): PortfolioStore {
   if (s.version.version === '3.0.0') s = migrate_3_0_0_to_4_0_0(s)
   if (s.version.version === '4.0.0') s = migrate_4_0_0_to_5_0_0(s)
   return s
+}
+
+/**
+ * Exchange codes earlier versions stored that mean one of ours
+ * (`LEGACY_EXCHANGE_CODES`): XTB imports kept XTB's "DE" for XETRA, so those
+ * holdings' prices were looked up on the wrong market and converted at the
+ * USD rate. Rewrites them on open and closed holdings, transactions and
+ * instrument aliases.
+ *
+ * Not tied to a schema version: it is idempotent and cheap, and runs on every
+ * start (`initializeStore`), so a backup restored from before the change is
+ * fixed too, whatever version it carries — or none.
+ *
+ * @returns The store (the same object when nothing changed) and the ids of the
+ *          holdings whose exchange changed, whose cached price history was
+ *          fetched for the wrong market.
+ */
+export function migrateLegacyExchangeCodes(store: PortfolioStore): { store: PortfolioStore; changedHoldingIds: string[] } {
+  const changedHoldingIds: string[] = []
+  const fixHolding = (h: Holding): Holding => {
+    const code = h.exchange ? LEGACY_EXCHANGE_CODES[h.exchange] : undefined
+    if (!code) return h
+    changedHoldingIds.push(h.id)
+    return { ...h, exchange: code }
+  }
+
+  let accountsChanged = false
+  const accounts = store.accounts.map((a) => {
+    const holdings = a.holdings.map(fixHolding)
+    const closedHoldings = a.closedHoldings?.map(fixHolding)
+    const touched = holdings.some((h, i) => h !== a.holdings[i]) ||
+      (closedHoldings?.some((h, i) => h !== a.closedHoldings![i]) ?? false)
+    if (!touched) return a
+    accountsChanged = true
+    return { ...a, holdings, ...(closedHoldings && { closedHoldings }) }
+  })
+
+  let transactionsChanged = false
+  const transactions = store.transactions.map((t) => {
+    const code = t.exchange ? LEGACY_EXCHANGE_CODES[t.exchange] : undefined
+    if (!code) return t
+    transactionsChanged = true
+    return { ...t, exchange: code }
+  })
+
+  let aliasesChanged = false
+  const aliases: Record<string, InstrumentAlias> = {}
+  for (const [name, alias] of Object.entries(store.settings?.instrumentAliases ?? {})) {
+    const code = alias?.exchange ? LEGACY_EXCHANGE_CODES[alias.exchange] : undefined
+    if (code) aliasesChanged = true
+    aliases[name] = code ? { ...alias, exchange: code } : alias
+  }
+
+  if (!accountsChanged && !transactionsChanged && !aliasesChanged) return { store, changedHoldingIds }
+  return {
+    store: {
+      ...store,
+      accounts: accountsChanged ? accounts : store.accounts,
+      transactions: transactionsChanged ? transactions : store.transactions,
+      settings: aliasesChanged ? { ...store.settings, instrumentAliases: aliases } : store.settings,
+    },
+    changedHoldingIds,
+  }
 }
 
 export type { Transaction }

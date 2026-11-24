@@ -61,7 +61,9 @@ const PROVIDERS: Record<string, PriceProvider> = {
 // Bump this version whenever a breaking change is made to exchange-code mapping
 // or currency-conversion logic so old cached prices are automatically discarded.
 // v1 → v2: fixed UK→LSE exchange code; added per-exchange EUR/PLN conversion.
-const CACHE_KEY = 'ft_price_cache_v2'
+// v2 → v3: each holding converts from its own price currency (GBP, GBX, …); XTB's
+// "DE" became XETRA and Amsterdam was added, so prices cached under v2 may be wrong.
+const CACHE_KEY = 'ft_price_cache_v3'
 const CACHE_MAX_AGE_MS = 23 * 60 * 60 * 1000  // 23 hours
 
 function readCache(): PriceCache | null {
@@ -87,6 +89,18 @@ function writeCache(entries: PriceCacheEntry[], providers: string): PriceCache {
   }
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache))
   return cache
+}
+
+/**
+ * Drop cached prices, so the next refresh fetches and converts again: for
+ * when a holding's price currency was learned after its price was cached.
+ */
+export function invalidatePriceCache(): void {
+  try {
+    localStorage.removeItem(CACHE_KEY)
+  } catch {
+    // Storage unavailable: nothing cached to drop.
+  }
 }
 
 function isCacheFresh(cache: PriceCache): boolean {
@@ -149,6 +163,7 @@ export async function fetchAllPrices(
         holdingId: holding.id,
         ticker: holding.ticker,
         exchange: holding.exchange,
+        ...(holding.currency && { currency: holding.currency }),
       })
     }
   }

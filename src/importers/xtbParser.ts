@@ -13,6 +13,7 @@ import {
   type Cell,
 } from './xtbStatement'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
+import { EXCHANGE_CODES, exchangeFromXTBSuffix } from '@/domain/exchanges'
 import type { HoldingsStatement } from '@/domain/holdingsCheck'
 import { feesChargedWith, findClosedByHandSales, findDuplicateTradeGroups, type TradeDuplicate } from './tradeDedup'
 
@@ -125,6 +126,15 @@ function typeForRow(rawType: string, amount: number): TransactionType | undefine
 // Comment parsers
 // ─────────────────────────────────────────
 
+/**
+ * Our exchange code for XTB's market suffix: "DE" → XETRA, "NL" → Euronext
+ * Amsterdam (see `exchangeFromXTBSuffix`). A suffix we don't know is kept as
+ * it is; the import preview warns about it once (see {@link unknownMarketWarnings}).
+ */
+export function xtbExchange(suffix: string): string {
+  return exchangeFromXTBSuffix(suffix) ?? suffix
+}
+
 export type TradeComment = {
   /** `OPEN` starts a position, `CLOSE` ends one. */
   action: 'OPEN' | 'CLOSE'
@@ -161,7 +171,7 @@ export function parseTradeComment(comment: string): TradeComment | null {
   return {
     action: m[1] as TradeComment['action'],
     side: m[2] as TradeComment['side'],
-    ...(m[3] && { ticker: m[3], exchange: m[4] }),
+    ...(m[3] && { ticker: m[3], exchange: xtbExchange(m[4]) }),
     quantity,
     ...(m[6] && { orderQuantity: parseFloat(m[6]) }),
     pricePerUnitOriginal: parseFloat(m[7]),
@@ -181,7 +191,7 @@ export function parseTickerFromComment(comment: string): {
 } | null {
   const match = comment.match(/^([A-Z0-9]+)\.([A-Z]{2})\s/)
   if (!match) return null
-  return { ticker: match[1], exchange: match[2] }
+  return { ticker: match[1], exchange: xtbExchange(match[2]) }
 }
 
 /** A `Ticker` column value: "ACME.US" → ACME on US; a bare "ACME" has no exchange. */
@@ -189,7 +199,30 @@ function parseTickerCell(cell: string): { ticker: string; exchange?: string } | 
   const value = cell.trim()
   if (!value) return null
   const m = value.match(/^(\S+)\.([A-Z]{2,3})$/)
-  return m ? { ticker: m[1], exchange: m[2] } : { ticker: value }
+  return m ? { ticker: m[1], exchange: xtbExchange(m[2]) } : { ticker: value }
+}
+
+const KNOWN_EXCHANGES = new Set<string>([...EXCHANGE_CODES, 'CC'])
+
+/**
+ * One warning per market suffix the import doesn't know ("ACME.FR"): its
+ * holdings keep the suffix, and prices can't be fetched for them until the
+ * market is set on the holding. Nothing is guessed.
+ */
+function unknownMarketWarnings(transactions: Transaction[], rowOf: Map<string, RawRow>): ParseWarning[] {
+  const seen = new Map<string, Transaction>()
+  for (const t of transactions) {
+    if (t.exchange && !KNOWN_EXCHANGES.has(t.exchange) && !seen.has(t.exchange)) seen.set(t.exchange, t)
+  }
+  return [...seen].map(([suffix, t]) => {
+    const row = rowOf.get(t.id)
+    const name = t.instrument ?? t.relatedInstrument ?? t.ticker ?? t.relatedTicker
+    return {
+      row: row?.line ?? 0,
+      message: `Unknown market ".${suffix}"${name ? ` (${name})` : ''}: kept as it is, so prices for its holdings can't be fetched. Set the exchange on the holding to fix it.`,
+      rawData: row ? JSON.stringify(row.cells) : '',
+    }
+  })
 }
 
 // ─────────────────────────────────────────
@@ -451,6 +484,8 @@ function parseCashOperationsTable(
   const internalTransfers = pairInternalTransfers(rows, amountOf)
   const warn = (row: RawRow, message: string) =>
     warnings.push({ row: row.line, message, rawData: JSON.stringify(row.cells) })
+  /** The row each transaction came from, for warnings about it. */
+  const rowOf = new Map<string, RawRow>()
 
   for (const row of rows) {
     const rawType = cell(row, 'type')
@@ -503,8 +538,10 @@ function parseCashOperationsTable(
     }
 
     // 7. Build transaction with type-specific fields
+    const id = uuidv4()
+    rowOf.set(id, row)
     const base = {
-      id: uuidv4(),
+      id,
       accountId,
       type,
       date,
@@ -587,6 +624,8 @@ function parseCashOperationsTable(
     }
     accountedCents += toCents(amountPLN)
   }
+
+  warnings.push(...unknownMarketWarnings(transactions, rowOf))
 
   // Pass 3: drop sales Close position already recorded by hand, then trades
   // that already arrived via a daily confirmation PDF. Matching is by economic

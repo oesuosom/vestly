@@ -1,6 +1,7 @@
 import { addDays, differenceInDays, format, parseISO } from 'date-fns'
 import type { Account, Holding, HistoricalPricesCache, HoldingPriceHistory, HoldingPricePoint } from '@/types'
-import { currencyForExchange, toEODHDTicker, toYahooTicker } from './tickerUtils'
+import { toEODHDTicker, toYahooTicker } from './tickerUtils'
+import { currencyFromYahoo, holdingPriceCurrency, priceToPLN, rateCurrency } from '@/domain/priceCurrency'
 import { getNBPRateRange } from '@/services/nbp'
 import { fetchCoinGeckoHistory, getCoinGeckoId } from './coinGecko'
 import { assertProviderOn, isProviderOn, type ProviderSettings } from '@/services/providers'
@@ -18,7 +19,8 @@ const YAHOO_BASES = ['/api/yahoo', '/api/yahoo2']
 type YahooHistoricalResponse = {
   chart: {
     result: {
-      meta: { currency: string }
+      /** The listing's currency: "USD", "EUR", "GBP", "GBp" for pence, … */
+      meta: { currency?: string | null }
       timestamp: number[]
       indicators: { quote: [{ close: (number | null)[] }] }
     }[] | null
@@ -52,7 +54,29 @@ function lookupRate(rateMap: Map<string, number>, date: string): number {
 // Ticker-based: fetch from Yahoo Finance
 // ─────────────────────────────────────────
 
-async function fetchTickerHistory(holding: Holding, settings: ProviderSettings, range = '5y', retries = 1, attempt = 0): Promise<HoldingPricePoint[]> {
+/** A fetched series, and the currency it was converted from. */
+type FetchedSeries = {
+  prices: HoldingPricePoint[]
+  currency: string
+  /** The currency the price data reported, when it did (Yahoo). */
+  reportedCurrency?: string
+}
+
+/**
+ * Native prices in PLN. A PLN series is returned as it is; otherwise NBP's
+ * rates for the currency's rate currency (GBP for GBX) over the series' dates.
+ */
+async function nativeToPLN(
+  rawPoints: { date: string; priceNative: number }[],
+  currency: string,
+  settings: ProviderSettings,
+): Promise<HoldingPricePoint[]> {
+  if (currency === 'PLN') return rawPoints.map((p) => ({ date: p.date, pricePLN: p.priceNative }))
+  const rateMap = await getNBPRateRange(rateCurrency(currency), rawPoints[0].date, rawPoints[rawPoints.length - 1].date, settings)
+  return rawPoints.map((p) => ({ date: p.date, pricePLN: priceToPLN(p.priceNative, currency, lookupRate(rateMap, p.date)) }))
+}
+
+async function fetchTickerHistory(holding: Holding, settings: ProviderSettings, range = '5y', retries = 1, attempt = 0): Promise<FetchedSeries> {
   assertProviderOn(settings, 'yahoo')
   const base = YAHOO_BASES[attempt % YAHOO_BASES.length]
   const symbol = toYahooTicker(holding.ticker!, holding.exchange!)
@@ -87,23 +111,12 @@ async function fetchTickerHistory(holding: Holding, settings: ProviderSettings, 
     }
   }
 
-  if (rawPoints.length === 0) return []
-
-  // Convert to PLN
-  const currency = currencyForExchange(holding.exchange!)
-  if (currency === 'PLN') {
-    return rawPoints.map(p => ({ date: p.date, pricePLN: p.priceNative }))
-  }
-
-  // Fetch NBP FX range for this currency
-  const startDate = rawPoints[0].date
-  const endDate = rawPoints[rawPoints.length - 1].date
-  const rateMap = await getNBPRateRange(currency, startDate, endDate, settings)
-
-  return rawPoints.map(p => ({
-    date: p.date,
-    pricePLN: p.priceNative * lookupRate(rateMap, p.date),
-  }))
+  // Statement first, then what Yahoo reports, then the market's default.
+  const reportedCurrency = currencyFromYahoo(result.meta?.currency)
+  const currency = holding.currency ?? reportedCurrency ?? holdingPriceCurrency(holding)
+  const reported = reportedCurrency ? { reportedCurrency } : {}
+  if (rawPoints.length === 0) return { prices: [], currency, ...reported }
+  return { prices: await nativeToPLN(rawPoints, currency, settings), currency, ...reported }
 }
 
 // ─────────────────────────────────────────
@@ -114,7 +127,7 @@ type EODHDBar = { date: string; adjusted_close: number; close: number }
 
 // `from` defaults to the holding's purchase date (full history); pass a later date to fetch
 // only the recent tail when extending an already-cached series.
-async function fetchEodhdHistory(holding: Holding, settings: ProviderSettings, from = holding.purchaseDate): Promise<HoldingPricePoint[]> {
+async function fetchEodhdHistory(holding: Holding, settings: ProviderSettings, from = holding.purchaseDate): Promise<FetchedSeries> {
   assertProviderOn(settings, 'eodhd')
   const apiKey = settings.priceProvider.apiKey
   const eodhdTicker = toEODHDTicker(holding.ticker!, holding.exchange!)
@@ -124,22 +137,17 @@ async function fetchEodhdHistory(holding: Holding, settings: ProviderSettings, f
   const res = await fetch(url)
   if (!res.ok) throw new Error(`EODHD historical: HTTP ${res.status} for ${eodhdTicker}`)
 
+  // EODHD's bars don't say their currency: the holding's, else the market's default.
+  const currency = holdingPriceCurrency(holding)
   const data = await res.json() as EODHDBar[]
-  if (!Array.isArray(data) || data.length === 0) return []
+  if (!Array.isArray(data) || data.length === 0) return { prices: [], currency }
 
   const rawPoints = data
     .map((d) => ({ date: d.date, priceNative: d.adjusted_close ?? d.close }))
     .filter((p) => p.priceNative && !isNaN(p.priceNative))
 
-  if (rawPoints.length === 0) return []
-
-  const currency = currencyForExchange(holding.exchange!)
-  if (currency === 'PLN') {
-    return rawPoints.map((p) => ({ date: p.date, pricePLN: p.priceNative }))
-  }
-
-  const rateMap = await getNBPRateRange(currency, rawPoints[0].date, rawPoints[rawPoints.length - 1].date, settings)
-  return rawPoints.map((p) => ({ date: p.date, pricePLN: p.priceNative * lookupRate(rateMap, p.date) }))
+  if (rawPoints.length === 0) return { prices: [], currency }
+  return { prices: await nativeToPLN(rawPoints, currency, settings), currency }
 }
 
 // ─────────────────────────────────────────
@@ -207,6 +215,16 @@ function rangeForGap(lastDate: string): string {
   return '5y'
 }
 
+/**
+ * The currency a cached ticker series was converted from. Caches built before
+ * it was recorded converted with the market's currency as it was then: PLN for
+ * Warsaw, EUR for XETRA, USD for everything else.
+ */
+function cachedSeriesCurrency(entry: HoldingPriceHistory | undefined, holding: Holding): string {
+  if (entry?.currency) return entry.currency
+  return holding.exchange === 'PL' ? 'PLN' : holding.exchange === 'XETRA' ? 'EUR' : 'USD'
+}
+
 /** Which history providers are on — stored with the cache so switching one on refetches. */
 export function historyProviderSignature(settings: ProviderSettings): string {
   return (['eodhd', 'yahoo', 'nbp', 'coingecko'] as const).filter((id) => isProviderOn(settings, id)).join(',')
@@ -229,12 +247,18 @@ export async function buildHistoricalPricesCache(
     }
   }
 
+  /** A cached entry as it is, prices and currency, for a holding that isn't fetched now. */
+  const kept = (holdingId: string): HoldingPriceHistory => {
+    const entry = reuseMap.get(holdingId)
+    return entry ? { ...entry, holdingId } : { holdingId, prices: [] }
+  }
+
   const histories: HoldingPriceHistory[] = []
   // Tasks needing a network fetch. `existing` empty → full history fetch (new holding
   // or a previous fetch that failed). `existing` non-empty → incremental extend: fetch a
   // short recent range and merge, so the series advances to today instead of freezing at
   // the date it was first fetched.
-  const fetchTasks: { holding: Holding; existing: HoldingPricePoint[] }[] = []
+  const fetchTasks: { holding: Holding; existing: HoldingPricePoint[]; existingCurrency?: string }[] = []
   for (const holding of allHoldings) {
     const hasTicker = !!(holding.ticker && holding.exchange)
     const isCrypto = holding.category === 'crypto'
@@ -249,10 +273,16 @@ export async function buildHistoricalPricesCache(
     if (!canFetchHistory(holding, settings)) {
       // Its provider is off: no request. Keep what's cached so switching it back
       // on only has to catch up; the chart leaves it out meanwhile.
-      histories.push({ holdingId: holding.id, prices: cachedPrices })
+      histories.push(kept(holding.id))
       continue
     }
-    if (cachedPrices.length === 0) {
+    // A series converted from another currency than the holding's is wrong as a
+    // whole (e.g. a GBP listing converted at the USD rate): fetch it again in full.
+    // The price data's own report counts until it's saved on the holding.
+    const cachedEntry = reuseMap.get(holding.id)
+    const cachedCurrency = cachedSeriesCurrency(cachedEntry, holding)
+    const expectedCurrency = holding.currency ?? cachedEntry?.reportedCurrency ?? holdingPriceCurrency(holding)
+    if (cachedPrices.length === 0 || (!isCrypto && cachedCurrency !== expectedCurrency)) {
       // New holding, or a previous fetch that failed / was rate-limited — fetch full history.
       fetchTasks.push({ holding, existing: [] })
       continue
@@ -263,10 +293,10 @@ export async function buildHistoricalPricesCache(
       // Series already reaches today — reuse as-is, no network call. (currentPrice is never
       // appended here: it comes from EODHD with a live FX rate and would create a
       // mixed-source spike; the chart shows today separately via liveTotal.)
-      histories.push({ holdingId: holding.id, prices: cachedPrices })
+      histories.push(kept(holding.id))
     } else {
       // Series is behind (cache built on an earlier day) — extend it with the missing days.
-      fetchTasks.push({ holding, existing: cachedPrices })
+      fetchTasks.push({ holding, existing: cachedPrices, existingCurrency: cachedCurrency })
     }
   }
 
@@ -276,7 +306,7 @@ export async function buildHistoricalPricesCache(
   // up to the close date (computePortfolioAt).
   for (const holding of accounts.flatMap((a) => a.closedHoldings ?? [])) {
     const cachedPrices = reuseMap.get(holding.id)?.prices ?? []
-    if (cachedPrices.length > 0) histories.push({ holdingId: holding.id, prices: cachedPrices })
+    if (cachedPrices.length > 0) histories.push(kept(holding.id))
   }
 
   // Process one at a time with per-provider throttling to stay within rate limits.
@@ -300,7 +330,8 @@ export async function buildHistoricalPricesCache(
   // a fallback, so a single provider failing never blanks the series.
   const eodhdOn = isProviderOn(settings, 'eodhd')
   const yahooOn = isProviderOn(settings, 'yahoo')
-  const fetchTicker = async (holding: Holding, range: string, from: string): Promise<HoldingPricePoint[]> => {
+  const fetchTicker = async (holding: Holding, range: string, from: string): Promise<FetchedSeries> => {
+    const none: FetchedSeries = { prices: [], currency: holdingPriceCurrency(holding) }
     const tryYahoo = async () => {
       await throttle(lastYahooFetch, YAHOO_DELAY_MS)
       lastYahooFetch = Date.now()
@@ -315,23 +346,26 @@ export async function buildHistoricalPricesCache(
     if (eodhdOn) {
       try {
         const eodhd = await tryEodhd()
-        if (eodhd.length > 0 || !yahooOn) return eodhd
+        if (eodhd.prices.length > 0 || !yahooOn) return eodhd
       } catch {
-        if (!yahooOn) return []
+        if (!yahooOn) return none
       }
     }
     try {
       return await tryYahoo()
     } catch {
-      return []
+      return none
     }
   }
 
   for (let i = 0; i < fetchTasks.length; i += CONCURRENCY) {
     const batch = fetchTasks.slice(i, i + CONCURRENCY)
     const results = await Promise.allSettled(
-      batch.map(async ({ holding, existing }) => {
+      batch.map(async ({ holding, existing: cached, existingCurrency }) => {
+        let existing = cached
         let fetched: HoldingPricePoint[]
+        let currency: string | undefined
+        let reportedCurrency: string | undefined
         const isCrypto = holding.category === 'crypto'
         const cryptoTicker = holding.ticker?.replace(/-USD$/, '')
 
@@ -348,13 +382,27 @@ export async function buildHistoricalPricesCache(
           // Extend with the smallest range covering the gap; full history for new holdings.
           const from = existing.length > 0 ? existing[existing.length - 1].date : holding.purchaseDate
           const range = existing.length > 0 ? rangeForGap(from) : '5y'
-          fetched = await fetchTicker(holding, range, from)
+          let series = await fetchTicker(holding, range, from)
+          if (existing.length > 0 && series.prices.length > 0 && series.currency !== existingCurrency) {
+            // The price data reports another currency than the cached series was
+            // converted from: the cached points are wrong, so fetch the whole series.
+            series = await fetchTicker(holding, '5y', holding.purchaseDate)
+            existing = []
+          }
+          fetched = series.prices
+          currency = series.currency
+          reportedCurrency = series.reportedCurrency
         } else {
           // Bonds / manually-entered holdings without ticker — synchronous, no delay needed
           fetched = interpolateBondHistory(holding)
         }
         const prices = existing.length > 0 ? mergeHistories(existing, fetched) : fetched
-        return { holdingId: holding.id, prices } satisfies HoldingPriceHistory
+        return {
+          holdingId: holding.id,
+          prices,
+          ...(currency && { currency }),
+          ...(reportedCurrency && { reportedCurrency }),
+        } satisfies HoldingPriceHistory
       })
     )
     for (let j = 0; j < results.length; j++) {
@@ -366,7 +414,11 @@ export async function buildHistoricalPricesCache(
         // extend failure never wipes good data; otherwise store an empty entry so the cache
         // still "covers" this holding and we don't loop re-fetching it. Retried when the
         // 7-day TTL expires or the user force-refreshes.
-        histories.push({ holdingId: batch[j].holding.id, prices: batch[j].existing })
+        histories.push({
+          holdingId: batch[j].holding.id,
+          prices: batch[j].existing,
+          ...(batch[j].existingCurrency && { currency: batch[j].existingCurrency }),
+        })
         console.warn(`[HistoricalPrices] Skipped ${batch[j].holding.name}:`, result.reason)
       }
     }
