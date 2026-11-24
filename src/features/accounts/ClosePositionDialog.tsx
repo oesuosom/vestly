@@ -17,6 +17,8 @@ type ClosePositionDialogProps = {
   onClose: () => void
   /** Runs after the position is closed, e.g. to close the panel it was opened from. */
   onClosed?: () => void
+  /** The date to start from, `yyyy-MM-dd`, instead of today (kept between the earliest allowed day and today). */
+  defaultDate?: string
 }
 
 type FormValues = {
@@ -32,7 +34,7 @@ type FormValues = {
  * The preview under the fields is the same `planClose` the context action
  * runs, so the profit and the Cash change it shows are what gets recorded.
  */
-export function ClosePositionDialog({ holding, isOpen, onClose, onClosed }: ClosePositionDialogProps) {
+export function ClosePositionDialog({ holding, isOpen, onClose, onClosed, defaultDate }: ClosePositionDialogProps) {
   // Hold the last holding through the exit animation, when the parent has
   // already cleared it. Same "store previous value" pattern as the panel.
   const [shown, setShown] = useState(holding)
@@ -42,7 +44,7 @@ export function ClosePositionDialog({ holding, isOpen, onClose, onClosed }: Clos
     <Modal isOpen={isOpen} onClose={onClose} title="Close Position" size="sm" variant="card">
       {shown && (
         // Keyed by holding, so each opening starts from fresh defaults.
-        <ClosePositionForm key={shown.id} holding={shown} onCancel={onClose} onClosed={() => { onClose(); onClosed?.() }} />
+        <ClosePositionForm key={shown.id} holding={shown} defaultDate={defaultDate} onCancel={onClose} onClosed={() => { onClosed?.(); onClose() }} />
       )}
     </Modal>
   )
@@ -50,10 +52,12 @@ export function ClosePositionDialog({ holding, isOpen, onClose, onClosed }: Clos
 
 function ClosePositionForm({
   holding,
+  defaultDate,
   onCancel,
   onClosed,
 }: {
   holding: Holding
+  defaultDate?: string
   onCancel: () => void
   onClosed: () => void
 }) {
@@ -71,7 +75,11 @@ function ClosePositionForm({
     handleSubmit,
     formState: { errors },
   } = useForm<FormValues>({
-    defaultValues: { date: today, saleAmount: undefined, fee: 0 },
+    defaultValues: {
+      date: defaultDate ? [defaultDate, earliest, today].sort()[1] : today,
+      saleAmount: undefined,
+      fee: 0,
+    },
   })
   const [date, saleAmount, fee] = useWatch({ control, name: ['date', 'saleAmount', 'fee'] })
 

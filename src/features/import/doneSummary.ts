@@ -9,6 +9,9 @@
  *     and falls back to a count otherwise → "BTC holding created" / "2 holdings created"
  */
 
+import { format } from 'date-fns'
+import { formatDate } from '@/utils/formatters'
+
 /** Pluralize `noun` by `n` ("1 buy", "2 buys"). */
 function plural(n: number, noun: string): string {
   return `${n} ${noun}${n !== 1 ? 's' : ''}`
@@ -40,6 +43,34 @@ export function buildImportSummary(counts: Record<string, number>): {
  */
 export function joinDoneParts(parts: string[]): string {
   return parts.length > 0 ? parts.join('. ') + '.' : 'No changes were made.'
+}
+
+/**
+ * The success message. When the holdings were checked against the statement's
+ * Open Positions, a second line says how many matched and that their prices
+ * and categories were updated. When all of them matched, the first line names
+ * the account: "Imported 324 transactions into Demo Broker".
+ */
+export function doneMessage(
+  parts: string[],
+  summary: { asOf: string; matching: number; allMatch: boolean } | null,
+  added: number,
+  accountName: string,
+): { message: string; detail?: string } {
+  if (!summary || summary.matching === 0) return { message: joinDoneParts(parts) }
+  const date = formatDate(format(new Date(summary.asOf), 'yyyy-MM-dd'))
+  const updated = summary.matching === 1 ? 'Its price and category are updated from it.' : 'Their prices and categories are updated from it.'
+  if (summary.allMatch) {
+    const lead = `Imported ${added} transaction${added !== 1 ? 's' : ''} into ${accountName}`
+    const rest = parts.filter((p) => !/^\d+ transactions? imported$/.test(p))
+    const holdings = summary.matching === 1 ? 'Your 1 holding matches' : `All ${summary.matching} holdings match`
+    return {
+      message: added > 0 ? (rest.length > 0 ? joinDoneParts([lead, ...rest]) : lead) : joinDoneParts(rest),
+      detail: `${holdings} XTB’s statement of ${date}. ${updated}`,
+    }
+  }
+  const holdings = summary.matching === 1 ? '1 holding matches' : `${summary.matching} holdings match`
+  return { message: joinDoneParts(parts), detail: `${holdings} XTB’s statement of ${date}. ${updated}` }
 }
 
 /**

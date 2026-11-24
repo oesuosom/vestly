@@ -105,23 +105,9 @@ export const KNOWN_FORMATS: KnownFormat[] = [
         calculateBondPurchaseDate(row['EMISJA'], val),
     },
   },
-  {
-    id: 'xtb',
-    name: 'XTB',
-    detectHeaders: ['Symbol', 'Quantity', 'Open Price'],
-    mapping: {
-      ticker: 'Symbol',
-      quantity: 'Quantity',
-      purchasePrice: 'Open Price',
-      currentPrice: 'Current Price',
-      purchaseDate: 'Open Date',
-    },
-    transform: {
-      quantity: (val: string) => parseFloat(val),
-      purchasePrice: (val: string) => parseFloat(val),
-      currentPrice: (val: string) => parseFloat(val),
-    },
-  },
+  // There is no XTB holdings format: XTB's export has none of the columns it
+  // expected. What XTB holds is read from the .xlsx statement's Open Positions
+  // sheet instead (readOpenPositions in xtbStatement.ts).
 ]
 
 // ─────────────────────────────────────────

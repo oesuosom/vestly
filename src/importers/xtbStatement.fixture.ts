@@ -133,9 +133,98 @@ export function cashOperationsSheet(rows: CashOpRow[] = CASH_OPERATIONS, total?:
   }
 }
 
-export function openPositionsSheet(currency = 'PLN'): Sheet {
-  const lot = (id: string, ticker: string, volume: number, openTime: string): Cell[] =>
-    ['My Trades', id, ticker, 'STOCK', 'BUY', volume, 100, '', 10, serial(openTime), '', '', 1.5, 1.2, 1.4, 0, 0, 0, 0]
+/**
+ * One instrument in Open Positions: its summary row's name and category, and
+ * its lots. Rates are what the made-up instrument's currency was worth in PLN
+ * when the report was generated: a lot's Value is Volume × Current price × rate.
+ */
+export type OpenPosition = {
+  instrument: string
+  /** As XTB writes it: "ACME.US". */
+  ticker: string
+  category: 'STOCK' | 'ETF'
+  currentPrice: number
+  /** PLN per unit of the instrument's currency at report time. */
+  rate: number
+  lots: { id: string; volume: number; openPrice: number; openTime: string }[]
+}
+
+/**
+ * What XTB holds for {@link CASH_OPERATIONS}: every purchase still open, so
+ * everything matches. ACME's two purchases were merged by XTB into one position
+ * at their weighted-average open price, as it does; per ticker it still adds up.
+ */
+export const MATCHING_POSITIONS: OpenPosition[] = [
+  { instrument: 'Acme Corp', ticker: 'ACME.US', category: 'STOCK', currentPrice: 12, rate: 4,
+    lots: [{ id: '70000002', volume: 7, openPrice: 10, openTime: '2026-01-05 14:37:04.277391' }] },
+  { instrument: 'Example Global ETF', ticker: 'EXGL.DE', category: 'ETF', currentPrice: 410, rate: 4.25,
+    lots: [{ id: '70000006', volume: 0.25, openPrice: 400, openTime: '2026-02-10 09:15:30.123456' }] },
+  { instrument: 'Przyklad SA', ticker: 'PRZK.PL', category: 'STOCK', currentPrice: 11, rate: 1,
+    lots: [{ id: '70000004', volume: 10, openPrice: 10.5, openTime: '2026-02-05 10:00:00.250000' }] },
+  // A ".UK" ticker priced in USD: its currency shows only in Value ÷ (Volume × Current price).
+  { instrument: 'Sample Holdings', ticker: 'SMPL.UK', category: 'STOCK', currentPrice: 2.6, rate: 4,
+    lots: [{ id: '70000005', volume: 4, openPrice: 2.5, openTime: '2026-02-09 23:59:59.999600' }] },
+  { instrument: 'Voorbeeld NV', ticker: 'VBLD.NL', category: 'STOCK', currentPrice: 21, rate: 4.25,
+    lots: [{ id: '70000007', volume: 1, openPrice: 20, openTime: '2026-02-06 08:00:00' }] },
+]
+
+/** Purchases of two more instruments, for the statement whose holdings differ. */
+export const DIFFERENCES_CASH_OPERATIONS: CashOpRow[] = [
+  op('Stock purchase', 'Foo Industries', 'FOOI.US', 'STOCK', '2026-02-12 14:00:00', -200, '90000015', 'OPEN BUY 5 @ 10.00', '70000011'),
+  op('Stock purchase', 'Muster AG', 'MUST.DE', 'STOCK', '2026-02-11 09:30:00', -255, '90000014', 'OPEN BUY 5 @ 12.00', '70000010'),
+  ...CASH_OPERATIONS,
+]
+
+/**
+ * What XTB holds for {@link DIFFERENCES_CASH_OPERATIONS}. Four instruments
+ * match (ACME merged); four don't:
+ *   - SPIN.US: free shares from a spin-off, open price 0, no Cash Operations row.
+ *   - SMPL.UK: XTB holds 2 more, from a lot bought before the file's purchases.
+ *   - MUST.DE: XTB holds 2 fewer (a sale the file doesn't have).
+ *   - FOOI.US: bought in the file, gone at XTB.
+ */
+export const DIFFERENCES_POSITIONS: OpenPosition[] = [
+  ...MATCHING_POSITIONS.filter((p) => p.ticker !== 'SMPL.UK'),
+  { instrument: 'Sample Holdings', ticker: 'SMPL.UK', category: 'STOCK', currentPrice: 2.6, rate: 4,
+    lots: [
+      { id: '70000005', volume: 4, openPrice: 2.5, openTime: '2026-02-09 23:59:59.999600' },
+      { id: '70000009', volume: 2, openPrice: 2.4, openTime: '2026-01-20 13:00:00' },
+    ] },
+  { instrument: 'Spinco Example', ticker: 'SPIN.US', category: 'STOCK', currentPrice: 5, rate: 4,
+    lots: [{ id: '70000012', volume: 3, openPrice: 0, openTime: '2026-02-16 05:00:00' }] },
+  { instrument: 'Muster AG', ticker: 'MUST.DE', category: 'STOCK', currentPrice: 13, rate: 4.25,
+    lots: [{ id: '70000010', volume: 3, openPrice: 12, openTime: '2026-02-11 09:30:00' }] },
+]
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+
+/**
+ * The Open Positions sheet as XTB's export lays it out: the header block, a
+ * small summary table in the account currency, a note, then the header row
+ * and one summary row per instrument followed by its lots. A summary row has
+ * the instrument's name, its category and the total volume, with an empty
+ * Type and Current price; a lot has its position id, Type "BUY", no category,
+ * and typed numbers.
+ */
+export function openPositionsSheet(currency = 'PLN', positions: OpenPosition[] = MATCHING_POSITIONS): Sheet {
+  const rows: Cell[][] = []
+  for (const p of positions) {
+    const lots = p.lots.map((l) => {
+      const value = round2(l.volume * p.currentPrice * p.rate)
+      const gross = round2((p.currentPrice - l.openPrice) * l.volume * p.rate)
+      return { ...l, value, gross }
+    })
+    const sum = (f: (l: (typeof lots)[number]) => number) => round2(lots.reduce((s, l) => s + f(l), 0))
+    const volume = Math.round(lots.reduce((s, l) => s + l.volume, 0) * 1e8) / 1e8
+    rows.push(['My Trades', p.instrument, p.ticker, p.category, '', volume, sum((l) => l.value), '', '', '', '', '', '',
+      sum((l) => l.gross), sum((l) => l.gross), 0, 0, 0, 0])
+    for (const l of lots) {
+      const cost = l.volume * l.openPrice * p.rate
+      rows.push(['My Trades', l.id, p.ticker, '', 'BUY', l.volume, l.value, p.currentPrice, l.openPrice, serial(l.openTime),
+        '', '', cost > 0 ? round2((l.gross / cost) * 100) : 0, l.gross, l.gross, 0, 0, 0, 0])
+    }
+  }
+  const total = round2(rows.filter((r) => r[4] === 'BUY').reduce((s, r) => s + (r[6] as number), 0))
   return {
     name: 'Open Positions',
     rows: [
@@ -143,16 +232,19 @@ export function openPositionsSheet(currency = 'PLN'): Sheet {
       ['Open Positions', ''],
       ['Data as of report generated', serial(PERIOD.to)],
       ['Product', 'Metric', 'Amount', 'Currency'],
-      ['My Trades', 'Open position value', 1234.56, currency],
+      ['My Trades', 'Open position value', total, currency],
       ['My Trades', 'Open position profit', 12.34, currency],
       [],
       ['Note', 'Summary values and open positions are shown as of the report generation time'],
       OPEN_POSITIONS_HEADER,
-      ['My Trades', 'Acme Corp', 'ACME.US', 'STOCK', '', 7, 300, '', 10, '', '', '', 1.5, 4.2, 4.4, 0, 0, 0, 0],
-      lot('70000002', 'ACME.US', 2, '2026-01-05 14:37:04.277391'),
-      lot('70000003', 'ACME.US', 5, '2026-01-15 15:30:12.000001'),
+      ...rows,
     ],
   }
+}
+
+/** The statement whose holdings differ from XTB's: see {@link DIFFERENCES_POSITIONS}. */
+export function differencesStatementSheets(): Sheet[] {
+  return [closedPositionsSheet(), cashOperationsSheet(DIFFERENCES_CASH_OPERATIONS), openPositionsSheet('PLN', DIFFERENCES_POSITIONS)]
 }
 
 export type StatementOptions = {

@@ -54,7 +54,7 @@ All achieved with minimal monthly maintenance (under 15 minutes).
 - [x] Account detail pages with per-account stats and holdings
 
 ### Import System
-- [x] XTB Portfolio CSV (holdings snapshot)
+- [x] XTB holdings check against the .xlsx statement's Open Positions (the XTB Portfolio CSV format was removed: XTB's export never had its columns)
 - [x] XTB Cash Operations CSV (transaction history)
 - [x] PKO IKE Obligacje Skarbowe CSV (holdings)
 - [x] eMakler Portfolio CSV (holdings, with NBP FX conversion)

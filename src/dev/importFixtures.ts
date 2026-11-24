@@ -58,7 +58,7 @@ function tx(
 }
 
 // ─────────────────────────────────────────
-// CSV (PKO IKE / XTB holdings / unknown CSV)
+// CSV (PKO IKE / unknown CSV)
 // ─────────────────────────────────────────
 
 /** A recognised format, so the mapping step shows the "Format detected" alert. */

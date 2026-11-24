@@ -964,7 +964,7 @@ export function DevShowcase() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="Import — CSV (PKO IKE / XTB holdings / unknown)">
+      <Section title="Import — CSV (PKO IKE / unknown)">
         <CardFlowFrame label="Mapping">
           <CSVImportFlow accountId="dev" accountName="XTB" accountType="ike" headers={csvHeaders} rawRows={csvRows} detectedFormat={csvDetectedFormat} onComplete={noop} onBack={noop} devSeed={csvSeed.mapping} />
         </CardFlowFrame>

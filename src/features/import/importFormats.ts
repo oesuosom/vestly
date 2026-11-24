@@ -41,13 +41,6 @@ export const FORMAT_SPECS: Record<DetectedFormatType, FormatSpec> = {
     accounts: ['ike'],
     transactional: false,
   },
-  xtb_holdings: {
-    label: 'XTB Portfolio',
-    fileBadge: 'Portfolio',
-    badge: { label: 'Stocks & ETFs', variant: 'teal' },
-    accounts: ['brokerage'],
-    transactional: false,
-  },
   xtb_transactions: {
     label: 'XTB Cash Operations',
     fileBadge: 'Cash Operations',
