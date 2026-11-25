@@ -1,11 +1,21 @@
 import { addDays, addMonths, format, parseISO, startOfMonth, subMonths } from 'date-fns'
 import type { Account, DateRange, HistoricalPricesCache, Snapshot, Transaction } from '@/types'
-import { getHoldingValue, getTotalValue } from '@/domain/calculations'
+import { affectsCash, getHoldingValue, getTotalValue } from '@/domain/calculations'
 import { buildHistoriesMap, computePortfolioAt } from '@/domain/portfolioValue'
 import type { HistoryCoverage } from '@/domain/historyCoverage'
 import { todayISO } from '@/utils/today'
 
-export type ChartPoint = { date: string; totalValue: number | undefined }
+export type ChartPoint = {
+  date: string
+  totalValue: number | undefined
+  /**
+   * Set when the value is a straight line between the values on two anchor
+   * days (snapshots or today), `t` of the way from `from` to `to`. Money moved
+   * in or out between them is spread along that line too, not a step, and
+   * `rangeChange` needs to know that to leave it out.
+   */
+  between?: { from: string; to: string; t: number }
+}
 
 export type ChartDataInput = {
   snapshots: Snapshot[]
@@ -103,7 +113,7 @@ function buildTimeline(startDate: string, dateRange: DateRange): string[] {
 function interpolateAnchors(
   date: string,
   anchors: { date: string; value: number }[],
-): number | undefined {
+): Pick<ChartPoint, 'totalValue' | 'between'> | undefined {
   if (anchors.length === 0) return undefined
 
   // Binary-search for the last anchor whose date <= date (the "before" anchor)
@@ -127,15 +137,18 @@ function interpolateAnchors(
   const after = beforeIdx + 1 < anchors.length ? anchors[beforeIdx + 1] : undefined
 
   // Date is on or after the last anchor → carry the last known value
-  if (!after) return before.value
+  if (!after) return { totalValue: before.value, between: { from: before.date, to: before.date, t: 0 } }
 
   // Linear interpolation between the two surrounding anchors
   const t0 = parseISO(before.date).getTime()
   const t1 = parseISO(after.date).getTime()
   const t = parseISO(date).getTime()
-  if (t1 === t0) return before.value
+  if (t1 === t0) return { totalValue: before.value, between: { from: before.date, to: before.date, t: 0 } }
   const ratio = (t - t0) / (t1 - t0)
-  return before.value + (after.value - before.value) * ratio
+  return {
+    totalValue: before.value + (after.value - before.value) * ratio,
+    between: { from: before.date, to: after.date, t: ratio },
+  }
 }
 
 /** The points PortfolioAreaChart draws, oldest first, ending today. */
@@ -231,7 +244,7 @@ export function buildChartData({
     // Fallback: linear interpolation between snapshot anchors
     const interpolated = interpolateAnchors(date, anchors)
     if (interpolated !== undefined) {
-      return { date, totalValue: interpolated }
+      return { date, ...interpolated }
     }
 
     // Last resort: pre-anchor dates with no market prices
@@ -243,32 +256,89 @@ export function buildChartData({
 }
 
 export type RangeChange = {
-  /** Last point's value minus the first point with a value. */
+  /** Last point's value minus the first point with a value, less money moved in or out in between. */
   delta: number
-  /** `delta` as a percentage of the start value; null when the start value is 0. */
+  /**
+   * `delta` as a percentage of the start value plus the net money moved in
+   * between; null when that base is 0 or less.
+   */
   deltaPercent: number | null
   /** Date of the first point with a value: where the chart's line starts. */
   sinceDate: string
 }
 
 /**
- * The change over the chart's range, read from its own points: from the first
- * point with a value to the last one (today). Null when fewer than two points
- * have a value, i.e. when there's no line to compare along.
- *
- * Deposits and withdrawals in the range still count as change here.
+ * The calendar day the chart files a transaction under. Matches
+ * `computeAccountCashBalance`, which the chart uses for cash on past days:
+ * the first 10 characters of `date` (date-only XTB rows are the date itself).
  */
-export function rangeChange(points: ChartPoint[]): RangeChange | null {
+const flowDay = (t: Transaction) => t.date.slice(0, 10)
+
+/**
+ * The transactions whose cash the chart's values include: those that move
+ * cash (`affectsCash`) in an account with a synthetic cash holding. Accounts
+ * without one (crypto accounts) don't count cash at all, so a deposit there
+ * doesn't change the value and mustn't be taken out of the change.
+ */
+export function cashCountedTransactions(accounts: Account[], transactions: Transaction[]): Transaction[] {
+  const withCash = new Set(
+    accounts.filter((a) => a.holdings.some((h) => h.isSynthetic && h.category === 'cash')).map((a) => a.id),
+  )
+  return transactions.filter((t) => withCash.has(t.accountId) && affectsCash(t))
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100 || 0
+
+/**
+ * The change over the chart's range, read from its own points: from the first
+ * point with a value to the last one (today), less the money moved in or out
+ * in between, so a deposit or withdrawal isn't a gain or a loss. Null when
+ * fewer than two points have a value, i.e. when there's no line to compare along.
+ *
+ * `transactions` are the ones that apply (all of them on Overview, so a
+ * transfer between two of your accounts nets to zero; the account's own on its
+ * page). Only `deposit` and `withdrawal` rows are flows, by their signed
+ * `amountPLN`; dividends, interest, taxes, fees, buys and sells are part of
+ * the performance. Crypto `send` / `receive` aren't flows either: coins
+ * received from outside count as a gain, coins sent out as a loss.
+ *
+ * Which flows the start point already holds follows how the chart values a day:
+ * - Computed days (`computePortfolioAt`) and snapshots hold the cash after
+ *   every transaction dated that day or earlier, so a flow on the start day is
+ *   already in the start value and isn't counted again.
+ * - Today's value is the live total, which holds every transaction.
+ * - A day drawn as a straight line between two anchors (`between`) holds the
+ *   same share `t` of the flows between those anchors as of their values.
+ * The flows held by a point are summed the same way, and the change is
+ * (end value − start value) − (flows held at the end − flows held at the start).
+ * Pass only transactions the values count (see `cashCountedTransactions`).
+ */
+export function rangeChange(points: ChartPoint[], transactions: Transaction[]): RangeChange | null {
   const valued = points.filter(
-    (p): p is { date: string; totalValue: number } => p.totalValue !== undefined && Number.isFinite(p.totalValue),
+    (p): p is ChartPoint & { totalValue: number } => p.totalValue !== undefined && Number.isFinite(p.totalValue),
   )
   if (valued.length < 2) return null
   const start = valued[0]
   const end = valued[valued.length - 1]
-  const delta = end.totalValue - start.totalValue
+
+  const flows = transactions.filter((t) => t.type === 'deposit' || t.type === 'withdrawal')
+  // Net flows a value on `day` holds: everything up to that day, or every
+  // flow on today's (the last point's) live value.
+  const heldOn = (day: string) =>
+    flows.reduce((sum, t) => (day >= end.date || flowDay(t) <= day ? sum + t.amountPLN : sum), 0)
+  const held = (p: ChartPoint) =>
+    p.between ? heldOn(p.between.from) + (heldOn(p.between.to) - heldOn(p.between.from)) * p.between.t : heldOn(p.date)
+
+  const netFlows = held(end) - held(start)
+  const delta = round2(end.totalValue - start.totalValue - netFlows)
+  // Simple return on the money that was in play: the start value plus what was
+  // paid in (less what was taken out) over the range. Not time-weighted. When
+  // that base is 0 or below (nothing at the start and nothing paid in, or more
+  // taken out than there was) a percentage means nothing, so there's none.
+  const base = start.totalValue + netFlows
   return {
     delta,
-    deltaPercent: start.totalValue === 0 ? null : (delta / start.totalValue) * 100,
+    deltaPercent: base <= 0 ? null : (delta / base) * 100,
     sinceDate: start.date,
   }
 }

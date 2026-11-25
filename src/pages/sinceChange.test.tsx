@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS, type Account, type Holding, type Snapshot } from '@/types'
+import { DEFAULT_SETTINGS, type Account, type Holding, type Snapshot, type Transaction } from '@/types'
 import { AccountDetail } from '@/pages/AccountDetail'
 import { Overview } from '@/pages/Overview'
 
@@ -19,16 +19,43 @@ const snapshot = (date: string, value: number): Snapshot => ({
   accountValues: { a1: value }, createdAt: now,
 })
 
-const data: { accounts: Account[]; snapshots: Snapshot[] } = { accounts: [], snapshots: [] }
+const data: { accounts: Account[]; snapshots: Snapshot[]; transactions: Transaction[] } = {
+  accounts: [], snapshots: [], transactions: [],
+}
 function seed(holdings: Holding[], snapshots: Snapshot[]) {
   data.accounts = [{ id: 'a1', name: 'Demo Broker', type: 'brokerage', createdAt: now, lastUpdated: now, holdings }]
+  data.snapshots = snapshots
+  data.transactions = []
+}
+
+const flow = (accountId: string, date: string, amountPLN: number): Transaction => ({
+  id: `f-${accountId}-${date}-${amountPLN}`, externalId: `f-${accountId}-${date}-${amountPLN}`, accountId,
+  type: amountPLN >= 0 ? 'deposit' : 'withdrawal', date: `${date}T10:00:00.000Z`, amountPLN, source: 'manual', createdAt: now,
+})
+/** The synthetic cash holding the app keeps for an account, from its transactions. */
+const cash = (accountId: string, transactions: Transaction[]): Holding => {
+  const own = transactions.filter((t) => t.accountId === accountId)
+  const balance = own.reduce((sum, t) => sum + t.amountPLN, 0)
+  return {
+    id: `cash_${accountId}`, accountId, name: 'Cash', category: 'cash', quantity: 1, purchasePrice: balance,
+    currentPrice: balance, purchaseDate: own.map((t) => t.date.slice(0, 10)).sort()[0], isSynthetic: true,
+    createdAt: now, updatedAt: now,
+  }
+}
+/** Accounts by name, each with its own cash and any other holdings. */
+function seedAccounts(accounts: { id: string; name: string; holdings?: Holding[] }[], transactions: Transaction[], snapshots: Snapshot[] = []) {
+  data.accounts = accounts.map(({ id, name, holdings = [] }) => ({
+    id, name, type: 'brokerage', createdAt: now, lastUpdated: now,
+    holdings: [...holdings, cash(id, transactions)],
+  }))
+  data.transactions = transactions
   data.snapshots = snapshots
 }
 
 vi.mock('@/context/SettingsContext', () => ({ useSettings: () => DEFAULT_SETTINGS }))
 vi.mock('@/context/PortfolioContext', () => ({
   usePortfolio: () => ({
-    accounts: data.accounts, snapshots: data.snapshots, transactions: [], isLoading: false,
+    accounts: data.accounts, snapshots: data.snapshots, transactions: data.transactions, isLoading: false,
     replaceAccounts: vi.fn(), addAccount: vi.fn(), updateAccount: vi.fn(), deleteAccount: vi.fn(),
     addHolding: vi.fn(), updateHolding: vi.fn(),
   }),
@@ -60,9 +87,9 @@ async function renderOverview() {
   return document.body
 }
 
-async function renderAccount() {
+async function renderAccount(slug = 'demo-broker') {
   render(
-    <MemoryRouter initialEntries={['/accounts/demo-broker']}>
+    <MemoryRouter initialEntries={[`/accounts/${slug}`]}>
       <Routes><Route path="/accounts/:accountSlug" element={<AccountDetail />} /></Routes>
     </MemoryRouter>,
   )
@@ -110,5 +137,77 @@ describe.each([
     seed([bond(TODAY)], [snapshot(TODAY, 1000)])
     const scope = await renderPage()
     expect(within(scope).queryByText(/^since /)).toBeNull()
+  })
+})
+
+describe('money moved in or out isn’t a gain or a loss', () => {
+  const RANGES = ['1M', '1Y', 'ALL'] as const
+  const deposits = [flow('a1', '2026-09-01', 1000), flow('a1', '2026-11-10', 10_000)]
+  // Overview hides the change when it's 0 and keeps "since …"; the account page shows "0 PLN (0,00%)".
+  const overviewChange = (scope: HTMLElement) => changeLabel(scope).change
+  const accountChange = (scope: HTMLElement) => changeLabel(scope).change?.replace(/\s/g, ' ')
+
+  it('Overview: cash only, a deposit and no price move is no change', async () => {
+    seedAccounts([{ id: 'a1', name: 'Demo Broker' }], deposits, [snapshot('2026-10-01', 1000)])
+    const scope = await renderOverview()
+    for (const range of RANGES) {
+      fireEvent.click(within(scope).getByRole('button', { name: range }))
+      expect(overviewChange(scope), range).toBeNull()
+      expect(changeLabel(scope).since, range).toMatch(/^since /)
+    }
+  })
+
+  it('account page: cash only, a deposit and no price move is no change', async () => {
+    seedAccounts([{ id: 'a1', name: 'Demo Broker' }], deposits, [snapshot('2026-10-01', 1000)])
+    const scope = await renderAccount()
+    for (const range of RANGES) {
+      fireEvent.click(within(scope).getByRole('button', { name: range }))
+      expect(accountChange(scope), range).toMatch(/^0 PLN \(0,00%\)$/)
+    }
+  })
+
+  it('a price move plus a deposit: only the price move counts', async () => {
+    seedAccounts([{ id: 'a1', name: 'Demo Broker', holdings: [bond('2023-03-17')] }], [flow('a1', '2026-11-18', 5000)])
+    const overview = await renderOverview()
+    fireEvent.click(within(overview).getByRole('button', { name: 'ALL' }))
+    expect(changeLabel(overview).change).toMatch(/^\+200 PLN/)
+    cleanup()
+    const account = await renderAccount()
+    fireEvent.click(within(account).getByRole('button', { name: 'ALL' }))
+    expect(changeLabel(account).change).toMatch(/^\+200 PLN/)
+  })
+
+  describe('a transfer between two accounts on the same day', () => {
+    const base = [flow('a1', '2026-09-01', 5000), flow('a2', '2026-09-01', 1000)]
+    const transfer = [flow('a1', '2026-11-12', -2000), flow('a2', '2026-11-12', 2000)]
+    const accounts = [
+      { id: 'a1', name: 'Demo Broker', holdings: [bond('2023-03-17')] },
+      { id: 'a2', name: 'Demo Savings' },
+    ]
+
+    it('leaves Overview’s change as it was', async () => {
+      const seen: (string | null)[] = []
+      for (const txs of [base, [...base, ...transfer]]) {
+        seedAccounts(accounts, txs)
+        const scope = await renderOverview()
+        fireEvent.click(within(scope).getByRole('button', { name: 'ALL' }))
+        seen.push(changeLabel(scope).change)
+        cleanup()
+      }
+      expect(seen[0]).toMatch(/^\+200 PLN/)
+      expect(seen[1]).toBe(seen[0])
+    })
+
+    it('shows no change on either account page: each counts its own side', async () => {
+      seedAccounts(accounts.map((a) => ({ ...a, holdings: [] })), [...base, ...transfer])
+      for (const slug of ['demo-broker', 'demo-savings']) {
+        const scope = await renderAccount(slug)
+        for (const range of RANGES) {
+          fireEvent.click(within(scope).getByRole('button', { name: range }))
+          expect(accountChange(scope), `${slug} ${range}`).toMatch(/^0 PLN \(0,00%\)$/)
+        }
+        cleanup()
+      }
+    })
   })
 })

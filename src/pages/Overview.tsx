@@ -30,7 +30,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { AccountCard } from '@/features/dashboard/AccountCard'
 import { PortfolioInsightCard } from '@/features/dashboard/PortfolioInsightCard'
 import { PortfolioAreaChart } from '@/components/charts/PortfolioAreaChart'
-import { buildChartData, rangeChange } from '@/components/charts/chartData'
+import { buildChartData, cashCountedTransactions, rangeChange } from '@/components/charts/chartData'
 import { AccountFormModal } from '@/features/accounts/AccountFormModal'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { ProgressiveBlur } from '@/components/ui/ProgressiveBlur'
@@ -113,11 +113,15 @@ export function Overview() {
     [snapshots, accounts, transactions, dateRange, historicalPrices, coverage],
   )
 
-  // Change over the selected range, from the first point with a value to today.
+  // Change over the selected range, from the first point with a value to today,
+  // less money paid in or taken out. Every account's transactions count, so a
+  // transfer between two of your accounts nets to zero here.
   // None when the chart has no line (or isn't drawn at all).
   const change = useMemo(
-    () => (coverage.noHistory || coverage.allFailed ? null : rangeChange(chartData)),
-    [chartData, coverage],
+    () => (coverage.noHistory || coverage.allFailed
+      ? null
+      : rangeChange(chartData, cashCountedTransactions(accounts, transactions))),
+    [chartData, coverage, accounts, transactions],
   )
   const delta = change?.delta ?? 0
   const deltaPercent = change?.deltaPercent ?? null

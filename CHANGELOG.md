@@ -15,14 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Deposits and withdrawals don't count as gains or losses** — on Overview and the account
+  page, "+X PLN (Y%) since …" now leaves out money paid in or taken out over the range, so a
+  10,000 PLN deposit with no price move shows no change instead of +10,000 PLN. On Overview a
+  transfer between two of your accounts cancels out; on an account page it counts as money moved
+  in or out of that account. The percentage is the change divided by the value at the start plus
+  what was paid in (less what was taken out). The chart itself still shows your total value.
 - **The change under the value matches the chart's range** — on Overview and the account page,
   "+X PLN (Y%) since …" is now the change over the selected range, from where the chart's line
   starts to today, and its date is that first day. Before, Overview compared with the oldest
   snapshot it could find, so right after importing history it said "since" today or "since
   inception". The account page now follows the range picker too: it used to show the gain on
   the holdings you still hold since their oldest purchase, whatever the range. That gain is
-  still in the Total return figure on the account page. Deposits and withdrawals in the range
-  still count as change for now.
+  still in the Total return figure on the account page. Deposits and withdrawals are left out
+  of the change (see above).
 - **Dates around midnight agree everywhere** — for an hour or two around midnight (in Poland,
   just after midnight; west of UTC, in the evening), some places used the next or previous day:
   a holding imported from eMakler without a matching order could get a different purchase date

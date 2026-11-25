@@ -17,7 +17,7 @@ import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCover
 import { useOpenSettings } from '@/features/settings/openSettings'
 import { AccountInsightPanel, type AiAvailability } from '@/features/accounts/AccountInsightPanel'
 import { ChartMessage, MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
-import { buildChartData, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
+import { buildChartData, cashCountedTransactions, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
 import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
@@ -249,10 +249,14 @@ export function AccountDetail() {
   const chartData = useMemo(() => buildChartData({ ...chartInput, dateRange }), [chartInput, dateRange])
   const emptyChart = emptyChartMessage(chartData)
   // Change over the selected range, from the first point with a value to today,
-  // so the label's date is where the line starts. None when there's no line.
+  // so the label's date is where the line starts, less money moved in or out of
+  // this account (a transfer to another of your accounts included). None when
+  // there's no line.
   const change = useMemo(
-    () => (coverage.noHistory || coverage.allFailed ? null : rangeChange(chartData)),
-    [chartData, coverage],
+    () => (coverage.noHistory || coverage.allFailed
+      ? null
+      : rangeChange(chartData, cashCountedTransactions(chartInput.accounts, chartInput.transactions))),
+    [chartData, coverage, chartInput],
   )
   // Keep the range picker while another range has a line, so you can switch to it.
   const otherRangeHasChart = useMemo(
