@@ -254,7 +254,7 @@ export function AccountDetail() {
   )
   const chartData = useMemo(() => buildChartData({ ...chartInput, dateRange }), [chartInput, dateRange])
   const emptyChart = emptyChartMessage(chartData)
-  // Keep the range picker while another range has a line (e.g. ALL is empty early in the month).
+  // Keep the range picker while another range has a line, so you can switch to it.
   const otherRangeHasChart = useMemo(
     () => emptyChart !== null && DATE_RANGES.some(
       (range) => range !== dateRange && emptyChartMessage(buildChartData({ ...chartInput, dateRange: range })) === null,

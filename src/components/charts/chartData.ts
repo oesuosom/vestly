@@ -60,17 +60,24 @@ export function isShortRange(range: DateRange): boolean {
  * then merge in any snapshot dates.
  *
  * For 1M/3M/6M/1Y: daily ticks so the chart has a continuous line even on days
- * the app was never opened. For ALL: monthly ticks to keep the view clean.
+ * the app was never opened. For ALL: monthly ticks to keep the view clean,
+ * plus the start date and today, so the line starts on the first day with data
+ * and ends today (and draws as soon as the history spans two days).
  */
 function buildTimeline(startDate: string, dateRange: DateRange): string[] {
   const dates = new Set<string>()
   const today = new Date()
 
   if (dateRange === 'ALL') {
-    // Monthly ticks — keeps the ALL view clean and consistent
-    let cursor = startOfMonth(parseISO(startDate))
+    const start = parseISO(startDate)
+    if (start <= today) {
+      dates.add(format(start, 'yyyy-MM-dd'))
+      dates.add(format(today, 'yyyy-MM-dd'))
+    }
+    // Monthly ticks on the 1st, none before the start date (no data there yet)
+    let cursor = startOfMonth(start)
     while (cursor <= today) {
-      dates.add(format(cursor, 'yyyy-MM-dd'))
+      if (cursor >= start) dates.add(format(cursor, 'yyyy-MM-dd'))
       cursor = addMonths(cursor, 1)
     }
   } else {
