@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The ALL range draws a line as soon as the shorter ranges do** — early in a portfolio's
+  history, ALL said "Not enough history yet" while 1M and 1Y already drew a line, on Overview and
+  on the account page. ALL only plotted the 1st of each month, and the 1st of the month the
+  history started in came before the first transaction. Now ALL always starts on the first day
+  with data and ends today, with the 1st of each month in between, so long histories still look
+  as clean as before.
+
 ## [0.0.3] — 2026-11-24
 
 Imports that work as downloaded, and switches that mean what they say. XTB's original .xlsx

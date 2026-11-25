@@ -87,14 +87,14 @@ describe('account page: chart card with nothing to draw', () => {
     }
   })
 
-  it('keeps the range picker when only the selected range is empty, so you can switch back', async () => {
-    // Bought earlier this month: 1Y has daily points, ALL has one monthly point.
+  it('draws ALL as soon as 1Y does, when the history started earlier this month', async () => {
+    // Bought earlier this month: ALL has the first day and today, like 1Y.
     seed([bond('2026-11-10')], [todaySnapshot(1000)])
     const card = await renderAccount()
     expect(within(card).queryByText('Not enough history yet')).toBeNull()
     fireEvent.click(within(card).getByRole('button', { name: 'ALL' }))
-    expect(within(card).getByText('Not enough history yet')).toBeTruthy()
-    expect(card.querySelector('canvas')).toBeNull()
+    expect(within(card).queryByText('Not enough history yet')).toBeNull()
+    expect(within(card).getByRole('button', { name: 'ALL' })).toBeTruthy()
     fireEvent.click(within(card).getByRole('button', { name: '1Y' }))
     expect(within(card).queryByText('Not enough history yet')).toBeNull()
   })
