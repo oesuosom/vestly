@@ -241,3 +241,34 @@ export function buildChartData({
     }
   })
 }
+
+export type RangeChange = {
+  /** Last point's value minus the first point with a value. */
+  delta: number
+  /** `delta` as a percentage of the start value; null when the start value is 0. */
+  deltaPercent: number | null
+  /** Date of the first point with a value: where the chart's line starts. */
+  sinceDate: string
+}
+
+/**
+ * The change over the chart's range, read from its own points: from the first
+ * point with a value to the last one (today). Null when fewer than two points
+ * have a value, i.e. when there's no line to compare along.
+ *
+ * Deposits and withdrawals in the range still count as change here.
+ */
+export function rangeChange(points: ChartPoint[]): RangeChange | null {
+  const valued = points.filter(
+    (p): p is { date: string; totalValue: number } => p.totalValue !== undefined && Number.isFinite(p.totalValue),
+  )
+  if (valued.length < 2) return null
+  const start = valued[0]
+  const end = valued[valued.length - 1]
+  const delta = end.totalValue - start.totalValue
+  return {
+    delta,
+    deltaPercent: start.totalValue === 0 ? null : (delta / start.totalValue) * 100,
+    sinceDate: start.date,
+  }
+}

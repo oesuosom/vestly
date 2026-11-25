@@ -17,7 +17,7 @@ import { getHistoryCoverage, missingHistoryMessage } from '@/domain/historyCover
 import { useOpenSettings } from '@/features/settings/openSettings'
 import { AccountInsightPanel, type AiAvailability } from '@/features/accounts/AccountInsightPanel'
 import { ChartMessage, MissingHistoryPill, NoPriceHistory, PriceHistoryLoadFailed } from '@/components/charts/HistoryNotices'
-import { buildChartData, emptyChartMessage } from '@/components/charts/chartData'
+import { buildChartData, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
 import { getAccountValue, getHoldingValue, getHoldingPnL } from '@/domain/calculations'
 import { describeTransactions, findAccountTransactions } from '@/domain/holdingDeletion'
 import { formatPLN, formatPercent, formatDate, slugify, formatQuantity } from '@/utils/formatters'
@@ -227,12 +227,6 @@ export function AccountDetail() {
   const totalReturnPLN = investedValuePLN - costBasisPLN
   const totalReturnPct = costBasisPLN > 0 ? (totalReturnPLN / costBasisPLN) * 100 : 0
 
-  // Earliest purchase date for "since" label on trend line
-  const earliestDate = useMemo(() => {
-    if (!account || account.holdings.length === 0) return null
-    return account.holdings.map((h) => h.purchaseDate).sort()[0]
-  }, [account])
-
   // Map snapshots to account-specific totalValue
   const accountSnapshots: Snapshot[] = useMemo(() => {
     if (!accountId) return []
@@ -254,6 +248,12 @@ export function AccountDetail() {
   )
   const chartData = useMemo(() => buildChartData({ ...chartInput, dateRange }), [chartInput, dateRange])
   const emptyChart = emptyChartMessage(chartData)
+  // Change over the selected range, from the first point with a value to today,
+  // so the label's date is where the line starts. None when there's no line.
+  const change = useMemo(
+    () => (coverage.noHistory || coverage.allFailed ? null : rangeChange(chartData)),
+    [chartData, coverage],
+  )
   // Keep the range picker while another range has a line, so you can switch to it.
   const otherRangeHasChart = useMemo(
     () => emptyChart !== null && DATE_RANGES.some(
@@ -520,8 +520,8 @@ export function AccountDetail() {
     )
   }
 
-  const returnColor = totalReturnPLN > 0 ? 'text-positive' : totalReturnPLN < 0 ? 'text-negative' : 'text-accent'
-  const returnSign = totalReturnPLN > 0 ? '+' : ''
+  const changeColor = !change ? '' : change.delta > 0 ? 'text-positive' : change.delta < 0 ? 'text-negative' : 'text-accent'
+  const changeSign = change && change.delta > 0 ? '+' : ''
 
   // ── Render ─────────────────────────────
   return (
@@ -598,14 +598,13 @@ export function AccountDetail() {
               >
                 {formatPLN(currentValuePLN)}
               </p>
-              {account.holdings.length > 0 && (
+              {change && (
                 <div className="flex items-center gap-1 text-sm tracking-[-0.35px] flex-wrap">
-                  <span className={returnColor}>
-                    {returnSign}{formatPLN(totalReturnPLN)} ({formatPercent(totalReturnPct, true, 2)})
+                  <span className={changeColor}>
+                    {changeSign}{formatPLN(change.delta)}
+                    {change.deltaPercent !== null && ` (${formatPercent(change.deltaPercent, true, 2)})`}
                   </span>
-                  {earliestDate && (
-                    <span className="text-accent">since {formatDate(earliestDate)}</span>
-                  )}
+                  <span className="text-accent">since {formatDate(change.sinceDate)}</span>
                 </div>
               )}
             </div>
