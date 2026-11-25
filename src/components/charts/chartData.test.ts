@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, DateRange, Holding, Snapshot, Transaction } from '@/types'
-import { buildChartData, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
+import { buildChartData, cashCountedTransactions, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
 
 // Synthetic data only. "Today" is fixed so the timeline doesn't depend on the real date.
 const TODAY = '2026-11-25'
@@ -96,14 +96,14 @@ describe('rangeChange', () => {
       { date: '2026-10-25', totalValue: 800 },
       { date: '2026-11-01', totalValue: 900 },
       { date: TODAY, totalValue: 1000 },
-    ])).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2026-10-25' })
+    ], [])).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2026-10-25' })
   })
 
   it('reports a loss as a negative change', () => {
     expect(rangeChange([
       { date: '2026-10-25', totalValue: 1000 },
       { date: TODAY, totalValue: 900 },
-    ])).toEqual({ delta: -100, deltaPercent: -10, sinceDate: '2026-10-25' })
+    ], [])).toEqual({ delta: -100, deltaPercent: -10, sinceDate: '2026-10-25' })
   })
 
   it('starts at the first point with a value, where the line starts', () => {
@@ -112,23 +112,23 @@ describe('rangeChange', () => {
       { date: '2026-10-26', totalValue: undefined },
       { date: '2026-11-01', totalValue: 500 },
       { date: TODAY, totalValue: 1000 },
-    ])).toEqual({ delta: 500, deltaPercent: 100, sinceDate: '2026-11-01' })
+    ], [])).toEqual({ delta: 500, deltaPercent: 100, sinceDate: '2026-11-01' })
   })
 
   it('is null without two points with a value', () => {
-    expect(rangeChange([])).toBeNull()
-    expect(rangeChange([{ date: TODAY, totalValue: 1000 }])).toBeNull()
+    expect(rangeChange([], [])).toBeNull()
+    expect(rangeChange([{ date: TODAY, totalValue: 1000 }], [])).toBeNull()
     expect(rangeChange([
       { date: '2026-10-25', totalValue: undefined },
       { date: TODAY, totalValue: 1000 },
-    ])).toBeNull()
+    ], [])).toBeNull()
   })
 
   it('has no percentage when the start value is 0', () => {
     expect(rangeChange([
       { date: '2026-10-25', totalValue: 0 },
       { date: TODAY, totalValue: 1000 },
-    ])).toEqual({ delta: 1000, deltaPercent: null, sinceDate: '2026-10-25' })
+    ], [])).toEqual({ delta: 1000, deltaPercent: null, sinceDate: '2026-10-25' })
   })
 
   it('history imported today, only today\'s snapshot: ALL runs from the first day with data, not today', () => {
@@ -139,12 +139,12 @@ describe('rangeChange', () => {
       transactions: [],
       dateRange: 'ALL',
     })
-    expect(rangeChange(points)).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2023-03-17' })
+    expect(rangeChange(points, [])).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2023-03-17' })
   })
 
   it('a range that starts before the history does: since the first day with data', () => {
     const points = chart('2026-11-05', '1Y')
-    const change = rangeChange(points)
+    const change = rangeChange(points, [])
     expect(change?.sinceDate).toBe('2026-11-05')
     expect(change?.sinceDate).toBe(points.find((p) => p.totalValue !== undefined)!.date)
     expect(change?.delta).toBe(points.at(-1)!.totalValue! - points[0].totalValue!)
@@ -153,7 +153,122 @@ describe('rangeChange', () => {
   it('each range starts where its own line starts', () => {
     for (const range of ['1M', '3M', '6M', '1Y', 'ALL'] as const) {
       const points = chart('2023-03-17', range)
-      expect(rangeChange(points)?.sinceDate, range).toBe(points[0].date)
+      expect(rangeChange(points, [])?.sinceDate, range).toBe(points[0].date)
     }
+  })
+})
+
+describe('rangeChange: money moved in or out', () => {
+  const flow = (date: string, amountPLN: number, accountId = 'a1'): Transaction => ({
+    id: `f-${date}-${amountPLN}-${accountId}`, externalId: `f-${date}-${amountPLN}-${accountId}`, accountId,
+    type: amountPLN >= 0 ? 'deposit' : 'withdrawal', date, amountPLN, source: 'manual', createdAt: now,
+  })
+  // Cash only: one synthetic cash holding, valued from transactions on past days.
+  const cashAccount = (transactions: Transaction[], id = 'a1'): Account => ({
+    id, name: 'Demo Broker', type: 'brokerage', createdAt: now, lastUpdated: now,
+    holdings: [{
+      id: `cash_${id}`, accountId: id, name: 'Cash', category: 'cash', quantity: 1,
+      purchasePrice: transactions.reduce((s, t) => s + t.amountPLN, 0),
+      currentPrice: transactions.reduce((s, t) => s + t.amountPLN, 0),
+      purchaseDate: transactions.map((t) => t.date.slice(0, 10)).sort()[0], isSynthetic: true, createdAt: now, updatedAt: now,
+    }],
+  })
+  const cashChart = (transactions: Transaction[], dateRange: DateRange, snapshots: Snapshot[] = []) =>
+    buildChartData({ snapshots, accounts: [cashAccount(transactions)], transactions, dateRange })
+
+  it('a deposit inside the range with no price change is no change', () => {
+    const txs = [flow('2026-09-01T10:00:00.000Z', 1000), flow('2026-11-10T10:00:00.000Z', 10_000)]
+    for (const range of ['1M', '1Y', 'ALL'] as const) {
+      const change = rangeChange(cashChart(txs, range), txs)
+      expect(change?.delta, range).toBe(0)
+    }
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 1000 },
+      { date: '2026-11-10', totalValue: 11_000 },
+      { date: TODAY, totalValue: 11_000 },
+    ], [flow('2026-11-10', 10_000)])).toEqual({ delta: 0, deltaPercent: 0, sinceDate: '2026-10-25' })
+  })
+
+  it('a withdrawal inside the range with no price change is no change', () => {
+    const txs = [flow('2026-09-01', 5000), flow('2026-11-15T09:30:00.000Z', -1000)]
+    expect(rangeChange(cashChart(txs, '1M'), txs)?.delta).toBe(0)
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 5000 },
+      { date: TODAY, totalValue: 4000 },
+    ], [flow('2026-11-15', -1000)])).toEqual({ delta: 0, deltaPercent: 0, sinceDate: '2026-10-25' })
+  })
+
+  it('a flow on the start day is already in the start value, so it isn’t taken out again', () => {
+    // The chart values a day with every transaction dated that day or earlier.
+    const txs = [flow('2026-10-25T08:00:00.000Z', 3000)]
+    const points = cashChart(txs, '1M')
+    expect(points[0]).toMatchObject({ date: '2026-10-25', totalValue: 3000 })
+    expect(rangeChange(points, txs)?.delta).toBe(0)
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 3000 },
+      { date: TODAY, totalValue: 3100 },
+    ], txs)).toEqual({ delta: 100, deltaPercent: expect.closeTo(3.333, 2), sinceDate: '2026-10-25' })
+  })
+
+  it('a flow before the range is ignored', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 1000 },
+      { date: TODAY, totalValue: 1200 },
+    ], [flow('2026-10-01', 1000)])).toEqual({ delta: 200, deltaPercent: 20, sinceDate: '2026-10-25' })
+  })
+
+  it('a price move plus a deposit: only the price move counts', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 800 },
+      { date: TODAY, totalValue: 6000 },
+    ], [flow('2026-11-18', 5000)])).toEqual({ delta: 200, deltaPercent: expect.closeTo(3.448, 2), sinceDate: '2026-10-25' })
+  })
+
+  it('has no percentage when the start value plus net flows is 0 or less', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 0 },
+      { date: TODAY, totalValue: 0 },
+    ], [])).toEqual({ delta: 0, deltaPercent: null, sinceDate: '2026-10-25' })
+    // 500 at the start, 1,000 taken out (more than there was).
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 500 },
+      { date: TODAY, totalValue: -400 },
+    ], [flow('2026-11-01', -1000)])).toEqual({ delta: 100, deltaPercent: null, sinceDate: '2026-10-25' })
+  })
+
+  it('only deposits and withdrawals are flows', () => {
+    const dividend: Transaction = { ...flow('2026-11-01', 50), type: 'dividend' }
+    const fee: Transaction = { ...flow('2026-11-02', -5), type: 'fee' }
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 1000 },
+      { date: TODAY, totalValue: 1045 },
+    ], [dividend, fee])?.delta).toBe(45)
+  })
+
+  it('a transfer between two accounts nets to zero across both', () => {
+    const txs = [flow('2026-11-10', -2000, 'a1'), flow('2026-11-10', 2000, 'a2')]
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 10_000 },
+      { date: TODAY, totalValue: 10_000 },
+    ], txs)?.delta).toBe(0)
+  })
+
+  it('between snapshots, where the line is straight, a deposit is spread along it and still nets to zero', () => {
+    // A snapshot on 1 Oct and today's value: no price history, so the days in
+    // between are drawn as a straight line and the deposit ramps up along it.
+    const txs = [flow('2026-09-01', 1000), flow('2026-11-10', 10_000)]
+    const oct1: Snapshot = { ...todaySnapshot, id: 's-oct', date: '2026-10-01', totalValue: 1000, accountValues: { a1: 1000 } }
+    for (const range of ['1M', '3M', '1Y', 'ALL'] as const) {
+      const points = cashChart(txs, range, [oct1])
+      expect(rangeChange(points, txs)?.delta, range).toBe(0)
+    }
+    const points = cashChart(txs, '1M', [oct1])
+    expect(points[0].between).toMatchObject({ from: '2026-10-01', to: TODAY })
+  })
+
+  it('cashCountedTransactions keeps the rows the chart counts as cash', () => {
+    const txs = [flow('2026-11-01', 100, 'a1'), flow('2026-11-01', 100, 'crypto'), { ...flow('2026-11-02', 100, 'a1'), source: 'emakler_import' as const }]
+    const crypto: Account = { id: 'crypto', name: 'Demo Wallet', type: 'crypto', createdAt: now, lastUpdated: now, holdings: [] }
+    expect(cashCountedTransactions([cashAccount([txs[0]]), crypto], txs)).toEqual([txs[0]])
   })
 })
