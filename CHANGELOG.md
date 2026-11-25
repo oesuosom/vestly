@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A transaction shows the same day everywhere** — a transaction close to midnight now shows
+  on the same day on every screen: the day it is counted on, which for XTB is the day in XTB's
+  file. Before, the screen-reader label of Activity's delete button, the XTB confirmation
+  import, the Revolut BTC import and the date range on the XTB and Revolut import screens could
+  show the day before or after. West of UTC, you can now close a position, or mark it as sold
+  during an import, when its last purchase late in the evening is counted on the next day. Before,
+  every date was rejected until midnight.
 - **Deposits and withdrawals don't count as gains or losses** — on Overview and the account
   page, "+X PLN (Y%) since …" now leaves out money paid in or taken out over the range, so a
   10,000 PLN deposit with no price move shows no change instead of +10,000 PLN. On Overview a

@@ -5,6 +5,7 @@ import {
   closedPositionResult,
   earliestCloseDate,
   findSharedPositionHolding,
+  latestCloseDate,
   moveToClosed,
   moveToOpen,
   planClose,
@@ -306,6 +307,23 @@ describe('earliestCloseDate', () => {
     const later = tx({ type: 'buy', date: '2026-02-20T10:00:00.000Z', amountPLN: -500, quantity: 5, ticker: 'KGH', source: 'xtb_import' })
     const other = tx({ type: 'buy', date: '2026-03-01', amountPLN: -500, quantity: 5, ticker: 'PKN', source: 'xtb_import' })
     expect(earliestCloseDate(kgh, acc, [later, other])).toBe('2026-02-20')
+  })
+
+  it('is the stored (UTC) day of the last buy, even when that is after the local today', () => {
+    // 21:00 on 11 Nov in New York is stored under 12 Nov.
+    const evening = tx({ type: 'buy', date: '2026-11-12T02:00:00.000Z', amountPLN: -500, quantity: 5, ticker: 'KGH', source: 'xtb_import' })
+    expect(earliestCloseDate(kgh, acc, [evening])).toBe('2026-11-12')
+  })
+})
+
+describe('latestCloseDate', () => {
+  it('is today when the earliest allowed day is today or before', () => {
+    expect(latestCloseDate('2026-11-05', '2026-11-11')).toBe('2026-11-11')
+    expect(latestCloseDate('2026-11-11', '2026-11-11')).toBe('2026-11-11')
+  })
+
+  it('is the earliest allowed day when a row is stored after the local today, so a close is still possible', () => {
+    expect(latestCloseDate('2026-11-12', '2026-11-11')).toBe('2026-11-12')
   })
 })
 

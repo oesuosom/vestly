@@ -2,6 +2,7 @@ import { useId } from 'react'
 import { DateField } from '@/components/ui/DateField'
 import { Input } from '@/components/ui/Input'
 import { RadioButton } from '@/components/ui/RadioButton'
+import { latestCloseDate } from '@/domain/closePosition'
 import { markAsSoldDefaults, type MarkAsSoldErrors, type MissingHolding } from '@/domain/missingHoldings'
 import { formatDate, formatPLN, formatQuantity } from '@/utils/formatters'
 import type { Holding } from '@/types'
@@ -98,7 +99,7 @@ export function NotInFile({ missing, choices, onChange, errors, today, statement
                       id={`missing-date-${holding.id}`}
                       label="Date sold"
                       value={choice.date}
-                      max={today}
+                      max={rowErrors ? latestCloseDate(rowErrors.earliest, today) : today}
                       min={rowErrors?.earliest}
                       onChange={(e) => edit(holding, { date: e.target.value })}
                       error={dateError(rowErrors)}

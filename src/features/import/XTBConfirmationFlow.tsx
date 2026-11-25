@@ -31,6 +31,7 @@ import {
   type ParsedTrade,
 } from '@/importers/xtbConfirmationParser'
 import { findDuplicateTrades } from '@/importers/tradeDedup'
+import { transactionDay } from '@/domain/transactionDay'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { CircleCheck, CircleCross, Skip } from '@/generated/icons'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
@@ -342,11 +343,11 @@ function PreviewStep({
                   </div>
                   <p className="text-xs text-accent mt-0.5">
                     {formatQuantity(trade.quantity)} @ {formatPLN(trade.unitPriceOriginal)} ·{' '}
-                    {formatDate(trade.date)}
+                    {formatDate(transactionDay(trade))}
                   </p>
                   {duplicate && (
                     <p className="text-xs text-warning mt-0.5">
-                      Matches an existing transaction from {formatDate(duplicate.date)}
+                      Matches an existing transaction from {formatDate(transactionDay(duplicate))}
                     </p>
                   )}
                 </div>

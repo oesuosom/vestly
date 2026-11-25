@@ -14,7 +14,8 @@ import type {
   UnresolvedRow,
 } from '@/importers/xtbPostProcessing'
 import { usePortfolio } from '@/context/PortfolioContext'
-import { formatDate, formatQuantity } from '@/utils/formatters'
+import { formatDate, formatMonth, formatQuantity } from '@/utils/formatters'
+import { transactionDay } from '@/domain/transactionDay'
 import { useSettings } from '@/context/SettingsContext'
 import { ChevronDownSmall, CircleCheck, CircleCross, Skip } from '@/generated/icons'
 import { doneMessage } from './doneSummary'
@@ -75,8 +76,9 @@ function tradeLabel(rows: Transaction[]): string {
   return `${first.ticker ?? first.instrument}: ${quantities} ${first.type === 'buy' ? 'bought' : 'sold'} on ${formatDate(first.date.slice(0, 10))}`
 }
 
+/** A transaction's month, e.g. "Nov 2026", by the day it is stored under (see `transactionDay`). */
 function formatMonthYear(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+  return formatMonth(transactionDay({ date: iso }).slice(0, 7))
 }
 
 // ─────────────────────────────────────────

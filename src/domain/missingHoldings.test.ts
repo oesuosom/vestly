@@ -94,6 +94,15 @@ describe('markAsSoldErrors', () => {
     expect(hasErrors(markAsSoldErrors(partly, account, [], { date: '2026-04-10', amount: '1' }, today))).toBe(false)
   })
 
+  it('accepts the stored day of the last sale when it is after the local today (west of UTC)', () => {
+    // 21:00 on 20 Nov in New York is stored under 21 Nov, a day after the local today.
+    const sold: Transaction = { ...later, id: 's', externalId: 's', type: 'sell', date: '2026-11-21T02:00:00.000Z', amountPLN: 120, quantity: 2 }
+    const partly = { holding: alpha, quantity: 8, priorSales: [sold] }
+    expect(hasErrors(markAsSoldErrors(partly, account, [], { date: '2026-11-21', amount: '1' }, today))).toBe(false)
+    expect(markAsSoldErrors(partly, account, [], { date: '2026-11-20', amount: '1' }, today).date).toBe('beforePurchase')
+    expect(markAsSoldErrors(partly, account, [], { date: '2026-11-22', amount: '1' }, today).date).toBe('future')
+  })
+
   it('rejects an empty amount', () => {
     expect(markAsSoldErrors(wholeHolding(alpha), account, [], { date: today, amount: '' }, today).amount).toBe('required')
   })

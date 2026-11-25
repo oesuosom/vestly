@@ -125,6 +125,17 @@ export function earliestCloseDate(holding: Holding, account: Account, transactio
 }
 
 /**
+ * The latest day a close can be dated: today, or the earliest allowed day
+ * when that is later. Rows count on their stored (UTC) day, so west of UTC
+ * the last buy can be stored under the day after the local today (21:00 in
+ * New York on 11 Nov is 12 Nov). Without this the position couldn't be
+ * closed on any day until local midnight.
+ */
+export function latestCloseDate(earliest: string, today: string): string {
+  return earliest > today ? earliest : today
+}
+
+/**
  * The cash rule: a sale's proceeds reach the Cash row only when the holding's
  * purchases were taken out of it, so the money is never counted twice — nor
  * credited for units whose cost was never debited.
@@ -145,8 +156,8 @@ export function closeAddsToCash(account: Account, positionInflows: Transaction[]
  *
  * Inputs are assumed valid: a non-synthetic open holding with no
  * {@link findSharedPositionHolding}, a date from {@link earliestCloseDate} to
- * today, and — except for a bond, whose fee is only recorded — a fee no larger
- * than the sale amount.
+ * {@link latestCloseDate}, and — except for a bond, whose fee is only
+ * recorded — a fee no larger than the sale amount.
  *
  * `priorSales`: the rows of an import that sold part of the holding just
  * before (Mark as sold in an import preview). The close then sells only the

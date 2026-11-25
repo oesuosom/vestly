@@ -15,6 +15,7 @@ import { StatCardGroup } from '@/components/ui/StatCardGroup'
 import { HoldingIcon } from '@/components/ui/HoldingIcon'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { formatDate, formatPLNDetail, formatQuantity } from '@/utils/formatters'
+import { transactionDay } from '@/domain/transactionDay'
 import { usePortfolio } from '@/context/PortfolioContext'
 import { useFilterShortcut } from '@/hooks/useFilterShortcut'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
@@ -513,8 +514,8 @@ export function Activity() {
           if (!key || !instrumentFilter.has(key)) return false
         }
         // By the stored day, both forms alike ("2026-02-10" and "2026-02-10T23:30:00.000Z").
-        if (dateRange?.from && t.date.slice(0, 10) < localDay(dateRange.from)) return false
-        if (dateRange?.to && t.date.slice(0, 10) > localDay(dateRange.to)) return false
+        if (dateRange?.from && transactionDay(t) < localDay(dateRange.from)) return false
+        if (dateRange?.to && transactionDay(t) > localDay(dateRange.to)) return false
         return true
       })
       .sort((a, b) => b.date.localeCompare(a.date))
@@ -776,7 +777,7 @@ export function Activity() {
                           className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-accent hover:text-negative transition-all cursor-pointer"
                           // One per row: say which transaction, e.g. "Delete Buy, Demo Equity Fund, 2 Jan 2026"
                           // (the account stands in for the instrument on cash rows).
-                          aria-label={`Delete ${meta.label}, ${instrument ?? accountNames[t.accountId] ?? t.accountId}, ${formatDate(t.date)}`}
+                          aria-label={`Delete ${meta.label}, ${instrument ?? accountNames[t.accountId] ?? t.accountId}, ${formatDate(transactionDay(t))}`}
                         >
                           <Trash size={14} aria-hidden="true" />
                         </button>

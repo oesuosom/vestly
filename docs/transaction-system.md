@@ -42,6 +42,10 @@ So the field holds a mix of `"2026-02-10"` and `"2026-02-10T10:59:02.277Z"`. Lex
 
 **The stored day is the day.** Cash on a past day, the position walk, the chart, tax-year totals and Activity (its dates and its date filter) all use `date.slice(0, 10)`, never the day in the viewer's time zone. For XTB rows that is the UTC day the file shows: a deposit at 23:30 UTC on 31 December counts in that year, although it was already 1 January in Warsaw. Before #29, Activity converted to local time, so such a row would have shown on a different day than it was counted on.
 
+Every screen shows that same day, screen-reader labels included: read it with `transactionDay(t)` (`src/domain/transactionDay.ts`) and format it with `formatDate(transactionDay(t))`. A bare `yyyy-MM-dd` parses as local midnight of that day, so nothing shifts it. Never pass the full timestamp to `formatDate` or `new Date(…).toLocale…`: that is the viewer's local day, a day off near midnight (#78). Time maths that needs real instants (duplicate matching within a time tolerance) still uses the full timestamp.
+
+"Today" is the viewer's local day (`todayISO()`), so the two can differ by a day. East of UTC a row is never stored after the local today. West of UTC it can be: 21:00 on 11 November in New York is stored under 12 November. Wherever a stored day is compared with today, that row must not count as being in the future. Close position and "Mark as sold" allow dates up to `latestCloseDate(earliest, today)`, the later of today and the last purchase's stored day. The chart's change treats every flow as included in today's live value.
+
 ---
 
 ## XTB Cash Operations (XLSX / CSV)
