@@ -59,4 +59,11 @@ describe('migrateSettings', () => {
     const s = migrateSettings(JSON.stringify({ priceProvider: { id: 'eodhd', apiKey: 'fake-eodhd' } }))
     expect(s.priceProvider).toEqual({ id: 'eodhd', apiKey: 'fake-eodhd', enabled: false })
   })
+
+  it('loads settings saved with the old time zone setting, dropping it (#71)', () => {
+    const saved = { ...DEFAULT_SETTINGS, theme: 'dark', timezone: 'Europe/Warsaw' }
+    const s = migrateSettings(JSON.stringify(saved))
+    expect(s.theme).toBe('dark')
+    expect('timezone' in s).toBe(false)
+  })
 })

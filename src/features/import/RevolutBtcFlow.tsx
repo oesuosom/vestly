@@ -22,6 +22,7 @@ import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCard
 import { HoldingSyncStep } from './HoldingSyncStep'
 import { useApplyHoldingSync } from './useApplyHoldingSync'
 import type { DevSeed } from './devSeed'
+import { todayISO } from '@/utils/today'
 
 /** Footer source label shown on every step (left slot). */
 const FOOTER_LABEL = 'Revolut BTC'
@@ -235,7 +236,7 @@ export function RevolutBtcFlow({
         const inflows = btcRows
           .filter((t) => t.type === 'buy' || t.type === 'receive')
           .sort((a, b) => a.date.localeCompare(b.date))
-        const earliestDate = inflows[0]?.date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
+        const earliestDate = inflows[0]?.date?.slice(0, 10) ?? todayISO()
 
         setProposed({
           netQty,

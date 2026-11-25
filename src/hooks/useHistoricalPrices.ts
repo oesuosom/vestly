@@ -12,6 +12,7 @@ import {
   loadHistoricalPricesCache,
   saveHistoricalPricesCache,
 } from '@/storage/historicalPriceStorage'
+import { localDateOf, todayISO } from '@/utils/today'
 
 // No general loading/error state: a failed rebuild keeps the previous cache and
 // logs, and a series that came back empty is shown as such by the chart. Only an
@@ -127,8 +128,8 @@ export function useHistoricalPrices(
     const cacheIsStale = !isHistoricalCacheFresh(cache)
     // Rebuild when the cache was built on a previous calendar day so the chart always
     // shows prices for today and any days missed since the last open.
-    const today = new Date().toISOString().slice(0, 10)
-    const cacheDate = cache?.fetchedAt?.slice(0, 10) ?? null
+    const today = todayISO()
+    const cacheDate = cache?.fetchedAt ? localDateOf(cache.fetchedAt) : null
     const cacheIsFromPreviousDay = cacheDate !== null && cacheDate < today
     // Also rebuild when the price data itself has stopped advancing (e.g. a cache frozen by
     // an earlier bug). This heals on a plain page refresh instead of waiting for tomorrow's

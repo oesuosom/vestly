@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { format, parseISO, subMonths, subYears } from 'date-fns'
 import type { AssetCategory, Holding } from '@/types'
+import { todayISO } from '@/utils/today'
 
 // ─────────────────────────────────────────
 // Types
@@ -63,7 +64,7 @@ function calculateBondPurchaseDate(ticker: string, maturityDate: string): string
 
   if (duration === undefined) {
     console.warn(`[CSV] Unrecognised Polish bond type "${prefix}" from ticker "${ticker}". Falling back to today's date. Add it to POLISH_BOND_DURATIONS.`)
-    return new Date().toISOString().split('T')[0]
+    return todayISO()
   }
 
   const maturity = parseISO(maturityDate)

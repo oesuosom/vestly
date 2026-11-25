@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { validateBackup, applyBackup, BACKUP_KEY_MAP } from './backupValidation'
+import { migrateSettings } from '@/context/SettingsContext'
 
 // Tests run in the `node` environment (see vite.config.ts), which has no
 // localStorage. A minimal in-memory stub is enough here and avoids adding jsdom
@@ -275,6 +276,20 @@ describe('validateBackup — accepts real backups', () => {
       settings: { allocationTargets: { bonds: 50, stocks: 40, cash: 5, crypto: 5 } },
     })
     expect(r.ok).toBe(true)
+  })
+
+  it('restores a backup whose settings still have the old time zone setting (#71)', () => {
+    localStorage.clear()
+    const backup = { ...goodBackup, settings: { theme: 'dark', timezone: 'America/New_York' } }
+    const r = validateBackup(backup)
+    if (!r.ok) throw new Error(r.error)
+    applyBackup(r.backup, r.fields)
+
+    // Written as it was; loading it drops the field.
+    const raw = localStorage.getItem('ft_settings')!
+    const loaded = migrateSettings(raw)
+    expect(loaded.theme).toBe('dark')
+    expect('timezone' in loaded).toBe(false)
   })
 
   it('ignores fields explicitly set to null', () => {

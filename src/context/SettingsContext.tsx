@@ -30,7 +30,6 @@ type SettingsActions = {
   updateUserName: (name: string) => void
   updateUserAvatar: (avatar: string | undefined) => void
   updateTheme: (theme: ThemeMode) => void
-  updateTimezone: (tz: string) => void
   updateNbpEnabled: (enabled: boolean) => void
   updateCoinGeckoEnabled: (enabled: boolean) => void
   updateAnthropicEnabled: (enabled: boolean) => void
@@ -44,9 +43,13 @@ const SettingsContext = createContext<SettingsContextValue | null>(null)
  * Parse saved settings. Values that were saved are kept as they are; only
  * missing ones take the defaults — so a provider someone switched off stays off,
  * and AI stays off for anyone who never switched it on, even with a key saved.
+ * A `timezone` saved by earlier versions (the setting did nothing) is dropped.
  */
 export function migrateSettings(raw: string): Settings {
-  const parsed = JSON.parse(raw) as Settings & { allocationTargets?: AllocationTargets }
+  const { timezone: _timezone, ...parsed } = JSON.parse(raw) as Settings & {
+    allocationTargets?: AllocationTargets
+    timezone?: unknown
+  }
 
   // Migrate old allocationTargets → allocationGroups
   const allocationGroups = parsed.allocationGroups ?? (
@@ -189,14 +192,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  const updateTimezone = useCallback((tz: string) => {
-    setSettings((prev) => ({
-      ...prev,
-      timezone: tz,
-      updatedAt: new Date().toISOString(),
-    }))
-  }, [])
-
   const updateNbpEnabled = useCallback((enabled: boolean) => {
     setSettings((prev) => ({
       ...prev,
@@ -253,7 +248,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateUserName,
         updateUserAvatar,
         updateTheme,
-        updateTimezone,
         updateNbpEnabled,
         updateCoinGeckoEnabled,
         updateAnthropicEnabled,

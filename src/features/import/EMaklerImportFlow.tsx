@@ -5,7 +5,6 @@
  * UnifiedImportModal.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { format } from 'date-fns'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
 import { useSettings } from '@/context/SettingsContext'
 import {
@@ -45,6 +44,7 @@ import {
   type RowAction,
 } from './eMaklerPreview'
 import type { DevSeed } from './devSeed'
+import { todayISO } from '@/utils/today'
 
 export type { EMaklerPreviewRow } from './eMaklerPreview'
 
@@ -176,7 +176,7 @@ export function EMaklerImportFlow({
 
   // Holdings missing from a portfolio file: kept unless marked as sold.
   const [soldChoices, setSoldChoices] = useState<SoldChoices>({})
-  const [today] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [today] = useState(todayISO)
 
   // Done
   const [doneStats, setDoneStats] = useState<SyncStats>(devSeed?.state?.doneStats ?? { updated: 0, added: 0, closed: 0 })

@@ -157,7 +157,6 @@ export type Settings = {
   userName?: string
   userAvatar?: string
   theme: ThemeMode
-  timezone: string
   createdAt: string
   updatedAt: string
 }
@@ -192,7 +191,6 @@ export const DEFAULT_SETTINGS: Settings = {
   userName: undefined,
   userAvatar: undefined,
   theme: 'light',
-  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 }

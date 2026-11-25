@@ -7,6 +7,7 @@ import type { EMaklerOrderRow, EMaklerPortfolioRow } from './eMaklerParser'
 import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import { EXCHANGE_CODES } from '@/domain/exchanges'
 import { currencyCode } from '@/domain/priceCurrency'
+import { todayISO } from '@/utils/today'
 
 // ─────────────────────────────────────────
 // localStorage helpers for order deduplication
@@ -230,7 +231,7 @@ export async function buildEMaklerImport(
 ): Promise<EMaklerImportResult> {
   const warnings: string[] = unknownMarketWarnings([...portfolioRows, ...orderRows])
   let duplicatesSkipped = 0
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
 
   // ── Filter out already-processed order rows ──────────────────────────────
   const freshOrderRows = orderRows.filter((o) => {
