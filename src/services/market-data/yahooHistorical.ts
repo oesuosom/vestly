@@ -6,6 +6,7 @@ import { getNBPRateRange } from '@/services/nbp'
 import { fetchCoinGeckoHistory, getCoinGeckoId } from './coinGecko'
 import { assertProviderOn, isProviderOn, type ProviderSettings } from '@/services/providers'
 import { canFetchHistory } from '@/domain/historyCoverage'
+import { todayISO } from '@/utils/today'
 
 const EODHD_BASE = '/api/eodhd'
 
@@ -131,7 +132,7 @@ async function fetchEodhdHistory(holding: Holding, settings: ProviderSettings, f
   assertProviderOn(settings, 'eodhd')
   const apiKey = settings.priceProvider.apiKey
   const eodhdTicker = toEODHDTicker(holding.ticker!, holding.exchange!)
-  const to = format(new Date(), 'yyyy-MM-dd')
+  const to = todayISO()
   const url = `${EODHD_BASE}/eod/${eodhdTicker}?api_token=${apiKey}&fmt=json&from=${from}&to=${to}`
 
   const res = await fetch(url)
@@ -236,7 +237,7 @@ export async function buildHistoricalPricesCache(
   existingCache?: HistoricalPricesCache | null,
 ): Promise<HistoricalPricesCache> {
   const allHoldings = accounts.flatMap((a) => a.holdings)
-  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayStr = todayISO()
 
   // Reuse any holding that already has non-empty price history in the existing cache.
   // Empty histories are always re-fetched (e.g. first fetch without a key, now key is set).

@@ -3,6 +3,7 @@ import type { Account, DateRange, HistoricalPricesCache, Snapshot, Transaction }
 import { getHoldingValue, getTotalValue } from '@/domain/calculations'
 import { buildHistoriesMap, computePortfolioAt } from '@/domain/portfolioValue'
 import type { HistoryCoverage } from '@/domain/historyCoverage'
+import { todayISO } from '@/utils/today'
 
 export type ChartPoint = { date: string; totalValue: number | undefined }
 
@@ -72,7 +73,7 @@ function buildTimeline(startDate: string, dateRange: DateRange): string[] {
     const start = parseISO(startDate)
     if (start <= today) {
       dates.add(format(start, 'yyyy-MM-dd'))
-      dates.add(format(today, 'yyyy-MM-dd'))
+      dates.add(todayISO())
     }
     // Monthly ticks on the 1st, none before the start date (no data there yet)
     let cursor = startOfMonth(start)
@@ -150,7 +151,7 @@ export function buildChartData({
   const snapshotMap = new Map(snapshotsSorted.map((s) => [s.date, s.totalValue]))
 
   const today = new Date()
-  const todayStr = format(today, 'yyyy-MM-dd')
+  const todayStr = todayISO()
   const liveTotal = getTotalValue(accounts)
 
   // Anchor points: all snapshots + today's live value, sorted by date.

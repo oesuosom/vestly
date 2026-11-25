@@ -13,6 +13,8 @@ import {
   saveNewsCache,
   type InsightCache,
 } from '@/storage/portfolioStore'
+import { todayISO } from '@/utils/today'
+
 const INSIGHT_TTL_MS = 4 * 60 * 60 * 1000     // 4 hours
 const DIVIDEND_TTL_MS = 24 * 60 * 60 * 1000   // 24 hours
 const NEWS_TTL_MS = 60 * 60 * 1000            // 1 hour
@@ -22,7 +24,7 @@ function isFresh(cachedAt: string, ttlMs: number): boolean {
 }
 
 function buildInputHash(totalValue: number, delta: number, topHolding?: InsightTopHolding): string {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   return `${today}:${Math.round(totalValue)}:${Math.round(delta)}:${topHolding?.ticker ?? ''}`
 }
 

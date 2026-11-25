@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
-import { format } from 'date-fns'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { DateField } from '@/components/ui/DateField'
@@ -10,6 +9,7 @@ import { usePortfolio } from '@/context/PortfolioContext'
 import { earliestCloseDate, findSharedPositionHolding, planClose } from '@/domain/closePosition'
 import { formatDate, formatPLNDetail, formatPercent } from '@/utils/formatters'
 import type { Holding } from '@/types'
+import { todayISO } from '@/utils/today'
 
 type ClosePositionDialogProps = {
   holding: Holding | null
@@ -65,7 +65,7 @@ function ClosePositionForm({
   const account = accounts.find((a) => a.id === holding.accountId)
   const isBond = holding.category === 'bond'
 
-  const [today] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [today] = useState(todayISO)
   const earliest = account ? earliestCloseDate(holding, account, transactions) : holding.purchaseDate
   const shared = account ? findSharedPositionHolding(holding, account) : undefined
 

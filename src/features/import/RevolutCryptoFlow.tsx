@@ -16,6 +16,7 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { buildImportSummary, joinDoneParts } from './doneSummary'
 import { ImportDoneCard, ImportErrorCard, ImportSpinnerCard } from './ImportCards'
 import type { DevSeed } from './devSeed'
+import { todayISO } from '@/utils/today'
 
 /** Footer source label shown on every step (left slot). */
 const FOOTER_LABEL = 'Revolut ETH'
@@ -169,7 +170,7 @@ export function RevolutCryptoFlow({
         const ethBuys = mergedTransactions
           .filter((t) => t.accountId === accountId && t.type === 'buy' && t.ticker === 'ETH')
           .sort((a, b) => a.date.localeCompare(b.date))
-        const earliestDate = ethBuys[0]?.date?.slice(0, 10) ?? new Date().toISOString().slice(0, 10)
+        const earliestDate = ethBuys[0]?.date?.slice(0, 10) ?? todayISO()
 
         setProposed({
           totalQty: totalQuantity,

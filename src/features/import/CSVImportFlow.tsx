@@ -6,7 +6,6 @@
  * inside the modal's `card` chrome; the done step is a full-bleed success card.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { format } from 'date-fns'
 import { Dropdown, type DropdownOption } from '@/components/ui/Dropdown'
 import { exchangeOptions } from '@/domain/exchanges'
 import { usePortfolio, type ImportAction } from '@/context/PortfolioContext'
@@ -29,6 +28,7 @@ import { ImportDoneCard } from './ImportCards'
 import { NotInFile, WrongAccountNote } from './NotInFile'
 import { soldChoiceCloses, soldChoiceErrors, type SoldChoices } from './soldChoices'
 import type { DevSeed } from './devSeed'
+import { todayISO } from '@/utils/today'
 
 // ─────────────────────────────────────────
 // Types
@@ -150,7 +150,7 @@ export function CSVImportFlow({
 }: CSVImportFlowProps) {
   const { accounts, transactions, importHoldings, closeImportedHoldings } = usePortfolio()
   const account = accounts.find((a) => a.id === accountId)
-  const [today] = useState(() => format(new Date(), 'yyyy-MM-dd'))
+  const [today] = useState(todayISO)
 
   const [step, setStep] = useState<Step>(devSeed?.step ?? 'mapping')
 

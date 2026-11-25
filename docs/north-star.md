@@ -98,7 +98,7 @@ All achieved with minimal monthly maintenance (under 15 minutes).
 
 ### Settings
 - [x] Account: display name and avatar
-- [x] General: theme (light/dark/system) and timezone
+- [x] General: theme (light/dark/system)
 - [x] Contributions: IKE / IKZE annual limits
 - [x] Portfolio: allocation group targets + rebalancing threshold
 - [x] Market Data: EODHD, Yahoo Finance, NBP and CoinGecko providers

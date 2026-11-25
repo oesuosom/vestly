@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The time zone setting in Settings → General** — it was saved but nothing used it. Vestly
+  always uses your device's time zone for dates. Settings and backups that still contain it load
+  and restore as before.
+
 ### Fixed
 
+- **Dates around midnight agree everywhere** — for an hour or two around midnight (in Poland,
+  just after midnight; west of UTC, in the evening), some places used the next or previous day:
+  a holding imported from eMakler without a matching order could get a different purchase date
+  than today's snapshot and the chart, and the backup file name could be off by a day. "Today"
+  is now your device's local date everywhere.
 - **The ALL range draws a line as soon as the shorter ranges do** — early in a portfolio's
   history, ALL said "Not enough history yet" while 1M and 1Y already drew a line, on Overview and
   on the account page. ALL only plotted the 1st of each month, and the 1st of the month the

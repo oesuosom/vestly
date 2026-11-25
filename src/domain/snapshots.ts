@@ -1,7 +1,7 @@
-import { format } from 'date-fns'
 import { v4 as uuidv4 } from 'uuid'
 import type { Account, Snapshot } from '@/types'
 import { getAccountValues, getCurrentAllocation, getTotalValue } from './calculations'
+import { todayISO } from '@/utils/today'
 
 /**
  * Build a snapshot object from the current account data.
@@ -10,7 +10,7 @@ import { getAccountValues, getCurrentAllocation, getTotalValue } from './calcula
  */
 function buildSnapshot(accounts: Account[]): Omit<Snapshot, 'id'> {
   return {
-    date: format(new Date(), 'yyyy-MM-dd'),
+    date: todayISO(),
     totalValue: getTotalValue(accounts),
     allocation: getCurrentAllocation(accounts),
     accountValues: getAccountValues(accounts),
@@ -30,7 +30,7 @@ export function upsertTodaySnapshot(
   snapshots: Snapshot[],
   accounts: Account[]
 ): Snapshot[] {
-  const today = format(new Date(), 'yyyy-MM-dd')
+  const today = todayISO()
   const fresh = buildSnapshot(accounts)
 
   const existingIndex = snapshots.findIndex((s) => s.date === today)
