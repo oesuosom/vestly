@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { format, subMonths, subYears } from 'date-fns'
 import { useNavigate } from 'react-router-dom'
 import { slugify, formatDate, formatPLN, formatPercent, getDateRangeLabel } from '@/utils/formatters'
 import { usePortfolio } from '@/context/PortfolioContext'
@@ -31,6 +30,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { AccountCard } from '@/features/dashboard/AccountCard'
 import { PortfolioInsightCard } from '@/features/dashboard/PortfolioInsightCard'
 import { PortfolioAreaChart } from '@/components/charts/PortfolioAreaChart'
+import { buildChartData, rangeChange } from '@/components/charts/chartData'
 import { AccountFormModal } from '@/features/accounts/AccountFormModal'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { ProgressiveBlur } from '@/components/ui/ProgressiveBlur'
@@ -103,43 +103,25 @@ export function Overview() {
     [unrealizedPnL, realizedPnL, allTimeSummary]
   )
 
-  // Delta: find the snapshot closest to the start of the selected date range.
-  // For ALL: use the earliest snapshot. For time ranges: use the last snapshot
-  // at or before the cutoff date, falling back to the earliest if none exists.
-  const { delta, deltaPercent, period } = useMemo(() => {
-    if (snapshots.length === 0) return { delta: 0, deltaPercent: 0, period: '' }
-    const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date))
-    let ref: typeof snapshots[0]
-    let fellBack = false
-    if (dateRange === 'ALL') {
-      ref = sorted[0]
-    } else {
-      const now = new Date()
-      const cutoff = format(
-        dateRange === '1M' ? subMonths(now, 1) :
-        dateRange === '3M' ? subMonths(now, 3) :
-        dateRange === '6M' ? subMonths(now, 6) :
-        subYears(now, 1),
-        'yyyy-MM-dd'
-      )
-      const beforeCutoff = sorted.filter((s) => s.date <= cutoff)
-      if (beforeCutoff.length > 0) {
-        ref = beforeCutoff[beforeCutoff.length - 1]
-      } else {
-        // No snapshot reaches back to the selected range, so we fall back to
-        // the earliest snapshot. Flag it so the label reads "since inception"
-        // rather than implying the full range is covered.
-        ref = sorted[0]
-        fellBack = true
-      }
-    }
-    const d = totalValue - ref.totalValue
-    const dp = ref.totalValue === 0 ? 0 : (d / ref.totalValue) * 100
-    const period = fellBack
-      ? `since inception (${formatDate(ref.date)})`
-      : `since ${formatDate(ref.date)}`
-    return { delta: d, deltaPercent: dp, period }
-  }, [snapshots, totalValue, dateRange])
+  // The chart's points, built once here: the chart draws them and the change
+  // under the value is read from them, so the label's date is where the line starts.
+  const chartData = useMemo(
+    () => buildChartData({
+      snapshots, accounts, transactions, dateRange,
+      historicalPrices: historicalPrices ?? undefined, coverage,
+    }),
+    [snapshots, accounts, transactions, dateRange, historicalPrices, coverage],
+  )
+
+  // Change over the selected range, from the first point with a value to today.
+  // None when the chart has no line (or isn't drawn at all).
+  const change = useMemo(
+    () => (coverage.noHistory || coverage.allFailed ? null : rangeChange(chartData)),
+    [chartData, coverage],
+  )
+  const delta = change?.delta ?? 0
+  const deltaPercent = change?.deltaPercent ?? null
+  const period = change ? `since ${formatDate(change.sinceDate)}` : ''
 
   // Last updated: find the most recently updated account
   const lastUpdated = useMemo(() => {
@@ -180,7 +162,7 @@ export function Overview() {
     return {
       totalValue,
       delta,
-      deltaPercent,
+      deltaPercent: deltaPercent ?? 0,
       period,
       currentAllocation: insightAllocation,
       unrealizedPnL,
@@ -257,7 +239,7 @@ export function Overview() {
           <div className="flex items-center gap-1 text-sm leading-none tracking-[-0.35px]">
             {!isNeutral && (
               <span className={deltaColor}>
-                {delta > 0 ? '+' : ''}{formatPLN(delta)} ({formatPercent(deltaPercent, true)})
+                {delta > 0 ? '+' : ''}{formatPLN(delta)}{deltaPercent !== null && ` (${formatPercent(deltaPercent, true)})`}
               </span>
             )}
             <span className="text-accent">{period}</span>
@@ -283,6 +265,7 @@ export function Overview() {
               dateRange={dateRange}
               historicalPrices={historicalPrices ?? undefined}
               coverage={coverage}
+              chartData={chartData}
               simplified
             />
             {missingMessage && (

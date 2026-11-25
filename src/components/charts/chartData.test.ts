@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account, DateRange, Holding, Snapshot, Transaction } from '@/types'
-import { buildChartData, emptyChartMessage } from '@/components/charts/chartData'
+import { buildChartData, emptyChartMessage, rangeChange } from '@/components/charts/chartData'
 
 // Synthetic data only. "Today" is fixed so the timeline doesn't depend on the real date.
 const TODAY = '2026-11-25'
@@ -87,5 +87,73 @@ describe('buildChartData — other ranges are unchanged', () => {
     expect(dates[0]).toBe('2026-10-25')
     expect(dates.at(-1)).toBe(TODAY)
     expect(dates).toHaveLength(32)
+  })
+})
+
+describe('rangeChange', () => {
+  it('compares the first point with the last one', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 800 },
+      { date: '2026-11-01', totalValue: 900 },
+      { date: TODAY, totalValue: 1000 },
+    ])).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2026-10-25' })
+  })
+
+  it('reports a loss as a negative change', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 1000 },
+      { date: TODAY, totalValue: 900 },
+    ])).toEqual({ delta: -100, deltaPercent: -10, sinceDate: '2026-10-25' })
+  })
+
+  it('starts at the first point with a value, where the line starts', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: undefined },
+      { date: '2026-10-26', totalValue: undefined },
+      { date: '2026-11-01', totalValue: 500 },
+      { date: TODAY, totalValue: 1000 },
+    ])).toEqual({ delta: 500, deltaPercent: 100, sinceDate: '2026-11-01' })
+  })
+
+  it('is null without two points with a value', () => {
+    expect(rangeChange([])).toBeNull()
+    expect(rangeChange([{ date: TODAY, totalValue: 1000 }])).toBeNull()
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: undefined },
+      { date: TODAY, totalValue: 1000 },
+    ])).toBeNull()
+  })
+
+  it('has no percentage when the start value is 0', () => {
+    expect(rangeChange([
+      { date: '2026-10-25', totalValue: 0 },
+      { date: TODAY, totalValue: 1000 },
+    ])).toEqual({ delta: 1000, deltaPercent: null, sinceDate: '2026-10-25' })
+  })
+
+  it('history imported today, only today\'s snapshot: ALL runs from the first day with data, not today', () => {
+    // Bought 17 Mar 2023 for 800 PLN, worth 1,000 PLN today.
+    const points = buildChartData({
+      snapshots: [{ ...todaySnapshot, totalValue: 1000 }],
+      accounts: [account([{ ...bond('2023-03-17'), quantity: 8, currentPrice: 125 }])],
+      transactions: [],
+      dateRange: 'ALL',
+    })
+    expect(rangeChange(points)).toEqual({ delta: 200, deltaPercent: 25, sinceDate: '2023-03-17' })
+  })
+
+  it('a range that starts before the history does: since the first day with data', () => {
+    const points = chart('2026-11-05', '1Y')
+    const change = rangeChange(points)
+    expect(change?.sinceDate).toBe('2026-11-05')
+    expect(change?.sinceDate).toBe(points.find((p) => p.totalValue !== undefined)!.date)
+    expect(change?.delta).toBe(points.at(-1)!.totalValue! - points[0].totalValue!)
+  })
+
+  it('each range starts where its own line starts', () => {
+    for (const range of ['1M', '3M', '6M', '1Y', 'ALL'] as const) {
+      const points = chart('2023-03-17', range)
+      expect(rangeChange(points)?.sinceDate, range).toBe(points[0].date)
+    }
   })
 })
