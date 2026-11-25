@@ -9,7 +9,8 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Transaction } from '@/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { formatPLN } from '@/utils/formatters'
+import { formatDate, formatPLN } from '@/utils/formatters'
+import { transactionDay } from '@/domain/transactionDay'
 import { parseRevolutBtcPDFs, type BtcParseResult } from '@/importers/revolutBtcParser'
 import { planHoldingSync, type HoldingSyncRow } from '@/domain/holdingSync'
 import { walkPosition } from '@/domain/position'
@@ -71,10 +72,6 @@ function formatQty(n: number): string {
   const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
   const trimmedDec = decPart.replace(/0+$/, '').padEnd(2, '0')
   return `${intFormatted},${trimmedDec}`
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 /** Round to 8 decimal places to avoid floating-point noise in checksum display. */
@@ -574,7 +571,7 @@ function ReceiveCostStep({
 
         {/* Receive summary */}
         <div className="border border-borderLight rounded-lg p-4 bg-background flex items-center justify-between">
-          <span className="text-sm text-accent tracking-[-0.35px]">{date ? formatDate(date) : ''}</span>
+          <span className="text-sm text-accent tracking-[-0.35px]">{date ? formatDate(transactionDay({ date })) : ''}</span>
           <span className="text-sm font-medium text-foreground tracking-[-0.35px]">{formatQty(btcQty)} BTC received</span>
         </div>
 

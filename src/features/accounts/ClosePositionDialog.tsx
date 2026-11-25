@@ -6,7 +6,7 @@ import { DateField } from '@/components/ui/DateField'
 import { Button } from '@/components/ui/Button'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { usePortfolio } from '@/context/PortfolioContext'
-import { earliestCloseDate, findSharedPositionHolding, planClose } from '@/domain/closePosition'
+import { earliestCloseDate, findSharedPositionHolding, latestCloseDate, planClose } from '@/domain/closePosition'
 import { formatDate, formatPLNDetail, formatPercent } from '@/utils/formatters'
 import type { Holding } from '@/types'
 import { todayISO } from '@/utils/today'
@@ -17,7 +17,7 @@ type ClosePositionDialogProps = {
   onClose: () => void
   /** Runs after the position is closed, e.g. to close the panel it was opened from. */
   onClosed?: () => void
-  /** The date to start from, `yyyy-MM-dd`, instead of today (kept between the earliest allowed day and today). */
+  /** The date to start from, `yyyy-MM-dd`, instead of today (kept between the earliest and latest allowed days). */
   defaultDate?: string
 }
 
@@ -67,6 +67,7 @@ function ClosePositionForm({
 
   const [today] = useState(todayISO)
   const earliest = account ? earliestCloseDate(holding, account, transactions) : holding.purchaseDate
+  const latest = latestCloseDate(earliest, today)
   const shared = account ? findSharedPositionHolding(holding, account) : undefined
 
   const {
@@ -76,7 +77,7 @@ function ClosePositionForm({
     formState: { errors },
   } = useForm<FormValues>({
     defaultValues: {
-      date: defaultDate ? [defaultDate, earliest, today].sort()[1] : today,
+      date: [defaultDate ?? today, earliest, latest].sort()[1],
       saleAmount: undefined,
       fee: 0,
     },
@@ -88,9 +89,9 @@ function ClosePositionForm({
     if (!account || shared) return null
     const feePLN = Number.isFinite(fee) ? fee : 0
     if (!Number.isFinite(saleAmount) || saleAmount < 0 || feePLN < 0 || (!isBond && feePLN > saleAmount)) return null
-    if (!date || date < earliest || date > today) return null
+    if (!date || date < earliest || date > latest) return null
     return planClose(holding, account, transactions, { date, saleAmountPLN: saleAmount, feePLN })
-  }, [account, shared, isBond, holding, transactions, date, saleAmount, fee, earliest, today])
+  }, [account, shared, isBond, holding, transactions, date, saleAmount, fee, earliest, latest])
 
   function onSubmit(values: FormValues) {
     const plan = closePosition(holding.id, {
@@ -127,12 +128,12 @@ function ClosePositionForm({
                 rules={{
                   required: 'Pick the day of the sale',
                   validate: (v) =>
-                    v > today ? 'The sale can’t be in the future'
+                    v > latest ? 'The sale can’t be in the future'
                       : v < earliest ? `Pick ${formatDate(earliest)} or later: the last purchase was then`
                         : true,
                 }}
                 render={({ field }) => (
-                  <DateField id="closeDate" label="Date" min={earliest} max={today} error={errors.date?.message} {...field} />
+                  <DateField id="closeDate" label="Date" min={earliest} max={latest} error={errors.date?.message} {...field} />
                 )}
               />
 

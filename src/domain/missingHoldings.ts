@@ -1,5 +1,5 @@
 import type { Account, Holding, Transaction } from '@/types'
-import { earliestCloseDate, findSharedPositionHolding } from './closePosition'
+import { earliestCloseDate, findSharedPositionHolding, latestCloseDate } from './closePosition'
 
 /**
  * Holdings missing from a holdings file.
@@ -90,7 +90,8 @@ export type MarkAsSoldErrors = {
 /**
  * Why a "Mark as sold" row can't be closed as entered, with the rules of the
  * Close position dialog: a date from the last purchase (or the upload's last
- * sale of it) to today, an amount of 0 or more, and no other open holding
+ * sale of it) to today (or that day, when it is stored after today: see
+ * `latestCloseDate`), an amount of 0 or more, and no other open holding
  * with the same ticker. Empty when valid.
  */
 export function markAsSoldErrors(
@@ -108,7 +109,7 @@ export function markAsSoldErrors(
   const shared = findSharedPositionHolding(holding, account)
   if (shared) errors.sharedWith = shared
   if (!input.date) errors.date = 'required'
-  else if (input.date > today) errors.date = 'future'
+  else if (input.date > latestCloseDate(earliest, today)) errors.date = 'future'
   else if (input.date < earliest) errors.date = 'beforePurchase'
   const amount = parseAmount(input.amount)
   if (!Number.isFinite(amount)) errors.amount = 'required'

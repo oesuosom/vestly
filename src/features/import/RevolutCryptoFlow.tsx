@@ -7,7 +7,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { formatPLN } from '@/utils/formatters'
+import { formatMonth, formatPLN } from '@/utils/formatters'
+import { transactionDay } from '@/domain/transactionDay'
 import { parseRevolutCryptoPDFs, type ParseResult } from '@/importers/revolutCryptoParser'
 import { calculateAverageCostBasis } from '@/domain/calculations'
 import { usePortfolio } from '@/context/PortfolioContext'
@@ -66,8 +67,9 @@ function formatQty(n: number): string {
   return `${intFormatted},${trimmedDec}`
 }
 
+/** A transaction's month, e.g. "Nov 2026", by the day it is stored under (see `transactionDay`). */
 function formatMonthYear(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+  return formatMonth(transactionDay({ date: iso }).slice(0, 7))
 }
 
 /** Round to 8 decimal places to avoid floating-point noise in checksum display. */
