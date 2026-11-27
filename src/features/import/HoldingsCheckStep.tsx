@@ -6,6 +6,8 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { HoldingDifference, HoldingsCheck } from '@/domain/holdingsCheck'
 import { initiallyChecked, isApplicable } from './holdingsCheckApply'
 import { formatDate, formatQuantity } from '@/utils/formatters'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 /**
  * The last step of an XTB .xlsx import: the holdings that differ from what
@@ -100,8 +102,8 @@ export function HoldingsCheckStep({
   }
 
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5 flex flex-col gap-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5 flex flex-col gap-5">
         <p className="text-sm leading-normal text-foregroundMuted tracking-[-0.35px]">
           XTB’s statement shows what you held on {formatDate(format(new Date(check.asOf), 'yyyy-MM-dd'))}.
           <br />
@@ -166,7 +168,7 @@ export function HoldingsCheckStep({
         </div>
 
         {error && <InlineAlert variant="negative">{error}</InlineAlert>}
-      </div>
+      </ImportScrollBody>
 
       <div className="border-t border-borderLight p-5 flex items-center justify-between">
         <Button variant="secondary" onClick={onSkip} disabled={busy} className="w-20">Skip</Button>
