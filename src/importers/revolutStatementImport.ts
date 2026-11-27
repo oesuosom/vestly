@@ -264,7 +264,8 @@ export function checkStatementHoldings(
     const traded = statement.rows.some((r) => r.symbol === symbol && (r.type === 'buy' || r.type === 'sell'))
     const reasons: string[] = []
     if ((statement.opening[symbol] ?? 0) > 0 && delta > 0) reasons.push('Held before the statement’s period')
-    if (statement.staking[symbol]) reasons.push('Staking rewards left out')
+    // Left-out staking rewards only explain Revolut holding more.
+    if (statement.staking[symbol] && delta > 0) reasons.push('Staking rewards left out')
     if (unreadable.has(symbol)) reasons.push('A row couldn’t be read')
     if (traded) reasons.push('Fees estimated from the statement')
     if (reasons.length === 0) reasons.push('Not explained by the statement’s rows')

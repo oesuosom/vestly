@@ -82,7 +82,8 @@ describe('preview', () => {
 
   it('fills in the received coins’ cost from the statement, editable, and stores what was typed', async () => {
     renderFlow()
-    const btc = (await screen.findByRole('textbox', { name: /Cost in PLN of 0,005 BTC received on 1 Jun 2025/ })) as HTMLInputElement
+    // Received at midnight local time: shown on its stored UTC day, which depends on the zone.
+    const btc = (await screen.findByRole('textbox', { name: /Cost in PLN of 0,005 BTC received on / })) as HTMLInputElement
     expect(btc.value).toBe('2000,00')
     expect((screen.getByRole('textbox', { name: /of 10 ADA/ }) as HTMLInputElement).value).toBe('20,00')
 

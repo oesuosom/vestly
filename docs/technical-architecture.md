@@ -18,7 +18,7 @@
 | Animation | Framer Motion 12 | |
 | Dates | date-fns 4 + React Day Picker 10 | |
 | Icons | Generated set in `src/generated/icons` | Built from Figma by `npm run icons`; `@web3icons/react` for crypto logos |
-| PDF parsing | pdfjs-dist 5 | Revolut statements, XTB daily confirmations |
+| PDF parsing | pdfjs-dist 5 | Revolut crypto account statements, XTB daily confirmations |
 | Spreadsheets | SheetJS (`xlsx`) | Installed from the SheetJS CDN tarball, not npm |
 | Testing | Vitest 4 + Playwright | |
 | Package manager | npm | |
@@ -101,8 +101,7 @@ A typed wrapper over `Settings`, persisted to `ft_settings` on every change. It 
 | `xtb_confirmation` | XTB daily confirmation PDF | Transactions |
 | `emakler_portfolio` | eMakler Portfolio CSV (CP1250) | Holdings |
 | `emakler_order_history` | eMakler Order History CSV (CP1250) | Holdings |
-| `revolut_crypto` | Revolut crypto statement PDF | Transactions |
-| `revolut_btc_transfer` | Revolut BTC transfer CSV | Transactions |
+| `revolut_statement` | Revolut Crypto Account Statement PDF (recognised by content), then a holdings check against its closing amounts | Transactions |
 | `unknown_csv` | Generic CSV — user maps columns manually | Holdings |
 | `unsupported` | Unrecognised; carries a `reason` | — |
 
@@ -124,7 +123,7 @@ Parser: `importers/xtbConfirmationParser.ts`. These PDFs are rotated and must be
 
 ### Revolut
 
-`revolutCryptoParser.ts` turns each crypto statement PDF into two transactions — a `buy` for the net fiat paid and a `fee` — both negative PLN. `revolutBtcParser.ts` handles BTC transfer CSVs as `send` / `receive` records.
+`revolutStatement.ts` reads the Crypto Account Statement (every coin's buys, sells, sends and receives, and the closing amounts); `revolutStatementImport.ts` turns its rows into transactions, with fees as their own rows, and checks the holdings against the closing amounts, offering one 0 PLN adjustment per coin. Details in [transaction-system.md](transaction-system.md#revolut).
 
 ---
 

@@ -1,6 +1,6 @@
 # Vestly — Transaction System
 
-*Last updated: September 2026 · Status: implemented; this is a reference, not a plan*
+*Last updated: November 2026 · Status: implemented; this is a reference, not a plan*
 
 Parser-level detail for the transaction and import pipeline — file layouts, field mappings, and the decisions behind them. For data shapes see [data-schema.md](data-schema.md); for how the pieces fit together see [technical-architecture.md](technical-architecture.md). Type definitions are not restated here: [`src/types/index.ts`](../src/types/index.ts) is the source of truth.
 
@@ -178,9 +178,34 @@ A sale already recorded with Close position takes the file's fee rows charged on
 
 ## Revolut
 
-**Crypto statements** ([`revolutCryptoParser.ts`](../src/importers/revolutCryptoParser.ts), PDF via pdfjs-dist) — each statement produces two transactions: a `buy` for the net fiat paid and a `fee`, both negative PLN, both `source: 'revolut_crypto'`. `externalId` derives from the filename and date so re-imports dedup.
+**Crypto Account Statement** (PDF). Parser: [`revolutStatement.ts`](../src/importers/revolutStatement.ts); rows, ids and the holdings check: [`revolutStatementImport.ts`](../src/importers/revolutStatementImport.ts); flow: [`RevolutStatementFlow.tsx`](../src/features/import/RevolutStatementFlow.tsx). One PDF for a chosen period lists every crypto transaction of every coin, and each coin's amounts at the start and end of the period. It replaces the per-transaction PDFs (one statement per buy or sell, one transfer confirmation per send or receive), which had no transaction id and covered only BTC and ETH buys; that import was removed in #81.
 
-**BTC transfers** ([`revolutBtcParser.ts`](../src/importers/revolutBtcParser.ts), CSV) — produces `send` and `receive` records. `send` carries `amountPLN: 0` (no fiat proceeds); `receive` carries the cost basis in PLN, or `0` when unknown.
+**Recognised by content**, not file name (the name is only an id): the title "Crypto Account Statement" and the Transactions table's header (`Symbol Type Quantity Price Value Fees Date`). The PDF is read with `extractPDFLayout`, one line of text per row.
+
+**Sections.** *Account summary* (per coin: opening value, amount out, amount in, closing value; each value cell has the coin amount and, under it, PLN), *Portfolio breakdown* (amount, price, value, % of portfolio; may list only coins still held), *Transactions* (runs over several pages, its header repeated on each), *Staking rewards*. Lines repeated on every page (title, "Generated on…", "Period…", page numbers) are skipped.
+
+**Rows.** `ETH Buy 0.01000000 10,000.00 PLN 100.00 PLN 2.49 PLN Jan 5, 2025, 3:04:12PM`: comma thousands, dot decimals, quantities to 8 decimals or none, no space before AM/PM (one is accepted). A row whose date wrapped onto the next line is joined. Anything that can't be read — the coin, the type, the quantity, the date, amounts in a currency other than PLN — becomes a warning with its page, row and raw text; nothing is dropped silently. Staking rewards are counted per coin and not imported (the Transactions table's staking rows, or else the Staking rewards section's).
+
+**Times are local** (the owner checked them against the app). Each is converted to a real UTC instant with the browser's time zone and stored as such; rows count on their UTC day (`transactionDay`, #78), like XTB.
+
+**What the columns mean.** Quantity is Value ÷ Price, Value being the PLN paid (buy) or received (sell). The fee is taken in coins, so a buy brings fewer coins than Quantity and a sell removes more. Price is rounded to 2 decimals and the statement's fee is a grosz below the app's, so quantities are close, not exact; the holdings check closes the gap.
+
+| Type | `amountPLN` | fee row | `quantity` |
+|---|---|---|---|
+| `buy` | −(Value − Fee) | −Fee | Quantity × (Value − Fee) ÷ Value |
+| `sell` | Value + Fee | −Fee | Quantity × (Value + Fee) ÷ Value |
+| `send` | 0 | — | Quantity |
+| `receive` | its cost: the statement's Value, editable in the preview | — | Quantity |
+
+So the position walk gives cost = buy Value and proceeds = sell Value. Fee rows carry the coin in `relatedInstrument`/`relatedTicker` (Activity shows it) and pair with their trade through the id. Sends and receives have `affectsCash: false`. Rows are `source: 'revolut_crypto'`.
+
+**Ids.** `revolut-stmt-{coin}-{type}-{utcISO}-{quantity}-{n}`, the fee row's is the trade's plus `-fee` (`pairTradeFees` in [`tradeFees.ts`](../src/domain/tradeFees.ts)). There are no transaction ids in the statement; coin, type, time to the second and quantity are practically unique, and `{n}` (1, 2, …) counts identical rows within one statement so both import. Re-importing an overlapping period gives the same ids, so it adds nothing.
+
+**Holdings check** (`checkStatementHoldings`). After the rows are imported, each coin's quantity in the log as of the statement's end date (the end of that UTC day, or the statement's last row if later) is compared with its closing amount: Account summary's closing value, else Portfolio breakdown's amount (a coin the breakdown doesn't list is then 0). The tolerance is one satoshi (1e-8). For each coin that differs the step offers, ticked, one **adjustment row**: a `receive` (to add coins) or `send` (to remove them) of the difference at 0 PLN, dated `{end date}T23:59:59Z`, with `affectsCash: false`, the note "Adjustment to match Revolut statement" in `comment` and the id `revolut-stmt-adjust-{coin}-{end date}-{difference}`. At 0 PLN it doesn't change what was paid: the walk adds received coins at no cost and removes sent ones at the average, realizing nothing. Activity shows the note on the row (`holdingsCheckNote`). Coins with no closing amount are listed in the preview as not checked.
+
+**Holdings.** Coins the account doesn't hold yet become crypto holdings (`exchange: 'CC'`, so CoinGecko prices them) with the walk's quantity and average cost, and the Portfolio breakdown's price as the current price. The preview warns about coins CoinGecko doesn't know (`getCoinGeckoId`). Holdings the account already had go through the shared holding-changes step (below).
+
+**Rows from the retired per-transaction import** (`revolut-btc-…`, `revolut-eth-…`) still load and show, but their fees are no longer paired with their trades.
 
 ---
 
@@ -190,7 +215,7 @@ A sale already recorded with Close position takes the file's fee rows charged on
 
 ### Holdings missing from a file
 
-No import deletes a holding ([`domain/missingHoldings.ts`](../src/domain/missingHoldings.ts)). Only a file that lists everything an account holds — the eMakler portfolio, PKO IKE and other holdings CSVs — can say a holding is gone, and even then the preview lists it under "Not in this file" with **Keep** selected. **Mark as sold** closes it through Close position (`planClose`) with an amount prefilled from quantity × current price and a date prefilled from the file's statement date. Neither format carries one today, so the date is today; with a statement date, holdings bought after it would not be listed. When the file shares no holding with the account, the preview warns that it may be the wrong account and lists none. Files that list only some instruments (eMakler order history, XTB and Revolut trade files) never list missing holdings. eMakler order history alone doesn't change existing holdings either: they show as "Kept", and their orders are recorded as transactions.
+No import deletes a holding ([`domain/missingHoldings.ts`](../src/domain/missingHoldings.ts)). Only a file that lists everything an account holds — the eMakler portfolio, PKO IKE and other holdings CSVs — can say a holding is gone, and even then the preview lists it under "Not in this file" with **Keep** selected. **Mark as sold** closes it through Close position (`planClose`) with an amount prefilled from quantity × current price and a date prefilled from the file's statement date. Neither format carries one today, so the date is today; with a statement date, holdings bought after it would not be listed. When the file shares no holding with the account, the preview warns that it may be the wrong account and lists none. Files that list only some instruments (eMakler order history, XTB trade files) never list missing holdings; the Revolut statement checks its coins against their closing amounts instead. eMakler order history alone doesn't change existing holdings either: they show as "Kept", and their orders are recorded as transactions.
 
 When an eMakler upload has both files and the order history sells a holding the portfolio lacks, `accountForUploadSales` works out what those sales leave, after a buy filled in for units the log never recorded (dated no later than the first sale). Nothing left — or more sold than held — closes it on the last sale's day with no sale of its own (`planCloseFromSales`). Units left keep it under "Not in this file" with that remaining quantity: Mark as sold then sells only those (`planClose` with `priorSales`), on or after the last upload sale.
 
@@ -223,7 +248,7 @@ It runs after every import, on app mount (a holding may not have existed when th
 
 ## Trades update their holdings
 
-[`domain/holdingSync.ts`](../src/domain/holdingSync.ts). After an import that brings trades — XTB Cash Operations, XTB confirmations, Revolut BTC, eMakler order history on its own — every open holding the file traded is walked again (`walkPosition`) with the new rows. Where the quantity differs from the holding's, a shared step (`HoldingSyncStep`) proposes the change before anything is written: "10 → 15 shares" (new quantity and average cost), or "Sold out → close" when nothing is left, which closes the holding with the file's own sales (`planCloseFromSales`: closed on the last sale's or send's day, no extra sale added). A holding is touched only when the log explained its quantity *before* the import; otherwise (bought before the first import, entered by hand, edited since) it is listed as left alone. Two open holdings with one ticker are left alone too. For XTB the step runs between "create holdings for new instruments" and the purchase-price step; for Revolut BTC it replaces the flow's own update of an existing BTC holding; for eMakler it follows an orders-only import, for the holdings shown as Kept (with a portfolio file, the portfolio sets the quantities). Quantities are rounded to 8 decimals.
+[`domain/holdingSync.ts`](../src/domain/holdingSync.ts). After an import that brings trades — XTB Cash Operations, XTB confirmations, the Revolut statement, eMakler order history on its own — every open holding the file traded is walked again (`walkPosition`) with the new rows. Where the quantity differs from the holding's, a shared step (`HoldingSyncStep`) proposes the change before anything is written: "10 → 15 shares" (new quantity and average cost), or "Sold out → close" when nothing is left, which closes the holding with the file's own sales (`planCloseFromSales`: closed on the last sale's or send's day, no extra sale added). A holding is touched only when the log explained its quantity *before* the import; otherwise (bought before the first import, entered by hand, edited since) it is listed as left alone. Two open holdings with one ticker are left alone too. For XTB the step runs between "create holdings for new instruments" and the purchase-price step; for the Revolut statement it follows the holdings check, for coins the account already held; for eMakler it follows an orders-only import, for the holdings shown as Kept (with a portfolio file, the portfolio sets the quantities). Quantities are rounded to 8 decimals.
 
 ## Cost basis recalculation
 

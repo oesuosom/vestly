@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Import Revolut's Crypto Account Statement** — one PDF from Revolut now imports the buys,
+  sells, sends and receives of every coin for the period you chose, with each trade's fee as its
+  own row and each transaction at its real time. The preview counts them per coin, lets you
+  change what received coins cost you (Revolut's value on the day is filled in), and lists any
+  row it couldn't read. Staking rewards are left out for now. Afterwards, each coin is compared
+  with what the statement says you held on its last day; where they differ, a 0 PLN adjustment
+  (ticked, shown in Activity) brings it in line without changing what you paid. New coins
+  become crypto holdings. Importing the same or an overlapping period again adds nothing.
+
+### Changed
+
+- **Import dialogs scroll instead of growing past the screen** — every import step is now at
+  most 576 px tall (less on short screens). The title and the buttons stay in place and only
+  the middle scrolls, with a soft fade where there is more to see.
+
 ### Removed
 
+- **The per-transaction Revolut PDF import** — one statement per buy or sell and one transfer
+  confirmation per send or receive, for BTC and ETH only. Use the Crypto Account Statement
+  instead. Transactions it imported still show; their fees are no longer added to the trade's
+  cost.
 - **The time zone setting in Settings → General** — it was saved but nothing used it. Vestly
   always uses your device's time zone for dates. Settings and backups that still contain it load
   and restore as before.

@@ -60,8 +60,7 @@ All achieved with minimal monthly maintenance (under 15 minutes).
 - [x] eMakler Portfolio CSV (holdings, with NBP FX conversion)
 - [x] eMakler Order History CSV (holdings, with NBP FX conversion)
 - [x] XTB daily confirmation PDFs (transactions — rotated-layout parsing, hue-read buy/sell)
-- [x] Revolut individual crypto statement PDFs (transactions — via pdfjs-dist)
-- [x] Revolut BTC transfer CSV (transactions)
+- [x] Revolut Crypto Account Statement PDF (every coin's transactions, plus a holdings check against its closing amounts — via pdfjs-dist)
 - [x] Generic CSV / spreadsheet fallback with manual column mapping
 - [x] XLS/XLSX reading (via SheetJS) alongside CSV
 - [x] Unified Import Modal with auto-format detection
@@ -70,8 +69,7 @@ All achieved with minimal monthly maintenance (under 15 minutes).
 ### Transaction History
 - [x] Full XTB Cash Operations import and deduplication
 - [x] Cross-format duplicate detection — the same XTB trade arriving via CSV and confirmation PDF is matched on economic identity and surfaced for review
-- [x] Revolut crypto (ETH/BTC/etc.) transaction import from PDFs
-- [x] Revolut BTC transfer import
+- [x] Revolut crypto transaction import from the Crypto Account Statement (buys, sells, sends, receives; staking rewards left out)
 - [x] Transaction types: buy, sell, deposit, withdrawal, dividend, withholding_tax, interest, interest_tax, fee, send, receive
 - [x] Activity page with two-level filter panel and summary bar
 - [x] Automatic cost basis recalculation from transaction history

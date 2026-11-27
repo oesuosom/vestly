@@ -160,6 +160,13 @@ describe('holdings check', () => {
     expect(why.XRP).toEqual(['A row couldn’t be read', 'Fees estimated from the statement'])
   })
 
+  it('doesn’t blame staking when Vestly holds more', () => {
+    const sol: Transaction = { ...log.find((t) => t.ticker === 'ADA' && t.type === 'receive')!, id: 'sol', externalId: 'sol', ticker: 'SOL', instrument: 'Solana', quantity: 5 }
+    const d = checkStatementHoldings(statement, [...log, sol], 'revolut')!.differences.find((x) => x.symbol === 'SOL')!
+    expect(d.delta).toBeLessThan(0)
+    expect(d.reasons).toEqual(['Not explained by the statement’s rows'])
+  })
+
   it('leaves out rows after the end date', () => {
     const later: Transaction = { ...log.find((t) => t.ticker === 'ADA')!, id: 'later', externalId: 'later', date: '2026-02-01T10:00:00.000Z' }
     expect(checkStatementHoldings(statement, [...log, later], 'revolut')!.matching).toEqual(['ADA'])
