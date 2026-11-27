@@ -2,6 +2,8 @@ import { Button } from '@/components/ui/Button'
 import { actionableSyncRows, type HoldingSyncRow } from '@/domain/holdingSync'
 import { formatDate, formatPLN, formatQuantity } from '@/utils/formatters'
 import type { Holding } from '@/types'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 /**
  * The step after an import that brings trades: the holdings those trades
@@ -9,7 +11,7 @@ import type { Holding } from '@/types'
  * with the sale's date and proceeds. Holdings whose history doesn't explain
  * what they hold are listed apart and left alone.
  *
- * Shared by the XTB imports and Revolut BTC, like the purchase-price step.
+ * Shared by the XTB imports and the Revolut statement import.
  */
 export function HoldingSyncStep({
   rows,
@@ -27,8 +29,8 @@ export function HoldingSyncStep({
   const flagged = rows.filter((r) => r.kind === 'unexplained')
 
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5 flex flex-col gap-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5 flex flex-col gap-5">
         {actionable.length > 0 && (
           <>
             <p className="text-sm text-foregroundMuted tracking-[-0.35px]">
@@ -94,7 +96,7 @@ export function HoldingSyncStep({
             </ul>
           </div>
         )}
-      </div>
+      </ImportScrollBody>
 
       <div className="border-t border-borderLight p-5 flex items-center gap-2">
         <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{footerLabel}</p>

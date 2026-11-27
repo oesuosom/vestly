@@ -19,6 +19,7 @@ import { getNBPRateRange, getNBPTable } from '@/services/nbp'
 import { isProviderOn, type ProviderSettings } from '@/services/providers'
 import type { Account, Holding, Transaction } from '@/types'
 import { formatQuantity } from '@/utils/formatters'
+import { ADJUSTMENT_NOTE, isAdjustmentRow } from '@/importers/revolutStatementImport'
 
 /**
  * Apply the rows checked in the holdings-check step (see `domain/holdingsCheck.ts`):
@@ -268,9 +269,11 @@ export async function applyHoldingsCheck({
  * The note Activity shows on a row the holdings check added, in its tooltip:
  * "Added from XTB’s Open Positions: 2 @ 2,4 USD" for shares bought at XTB's
  * open price, "…: 3 received at cost 0 (free shares or a spin-off)" for free
- * shares. Undefined for every other row.
+ * shares, "Adjustment to match Revolut statement" for the 0 PLN row the
+ * Revolut statement's check adds. Undefined for every other row.
  */
 export function holdingsCheckNote(t: Transaction): string | undefined {
+  if (isAdjustmentRow(t)) return ADJUSTMENT_NOTE
   if (!isHoldingsCheckRow(t)) return undefined
   const quantity = formatQuantity(t.quantity ?? 0)
   const lead = 'Added from XTB’s Open Positions:'

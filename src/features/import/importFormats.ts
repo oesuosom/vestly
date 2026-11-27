@@ -69,16 +69,9 @@ export const FORMAT_SPECS: Record<DetectedFormatType, FormatSpec> = {
     accounts: ['ikze'],
     transactional: false,
   },
-  revolut_crypto: {
-    label: 'Revolut Crypto',
-    fileBadge: 'Crypto',
-    badge: { label: 'Crypto', variant: 'orange' },
-    accounts: ['crypto'],
-    transactional: true,
-  },
-  revolut_btc_transfer: {
-    label: 'Revolut BTC Transfer',
-    fileBadge: 'BTC Transfer',
+  revolut_statement: {
+    label: 'Revolut Crypto Account Statement',
+    fileBadge: 'Revolut crypto statement',
     badge: { label: 'Crypto', variant: 'orange' },
     accounts: ['crypto'],
     transactional: true,

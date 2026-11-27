@@ -8,7 +8,7 @@
  * These PDFs are hostile to plain text extraction in two ways:
  *
  *  1. The table is drawn **rotated 90°** on a portrait page, so grouping text
- *     runs by Y — what the Revolut parsers do — yields one "line" per table
+ *     runs by Y — what `extractPDFText` does — yields one "line" per table
  *     *column*, not per row. {@link extractPDFLayout} projects onto reading-order
  *     axes so rows come out as rows.
  *

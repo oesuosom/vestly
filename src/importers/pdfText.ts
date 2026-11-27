@@ -4,7 +4,7 @@
  * Two extraction modes:
  *
  *   extractPDFText()    — plain reading-order text. Groups items into lines by Y
- *                         and joins with spaces. Used by the Revolut parsers,
+ *                         and joins with spaces, for parsers
  *                         which only ever regex over the resulting string.
  *
  *   extractPDFLayout()  — rotation-aware, position-preserving cells plus the

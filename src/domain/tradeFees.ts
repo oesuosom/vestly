@@ -9,22 +9,18 @@ export type TradeFees = ReadonlyMap<string, number>
 /**
  * How each Revolut trade's `externalId` maps to the `externalId` of its fee row.
  *
- * Revolut imports store a trade's fee as a separate `fee` transaction with no
- * ticker and no link to the trade, so the ids — built in `revolutBtcParser.ts`
- * and `revolutCryptoParser.ts` — are the only thing that ties the two together.
- * They do not all carry the same fields:
+ * Revolut imports store a trade's fee as a separate `fee` transaction, so the
+ * ids — built in `importers/revolutStatementImport.ts` from the Crypto Account
+ * Statement — are what ties the two together:
  *
- * | Trade    | Trade id                                   | Fee id                                 |
- * |----------|--------------------------------------------|----------------------------------------|
- * | BTC buy  | `revolut-btc-{date}-{qty}-{net}`           | `revolut-btc-fee-{date}-{qty}`         |
- * | BTC sell | `revolut-btc-sell-{date}-{qty}-{gross}`    | `revolut-btc-sell-fee-{date}-{qty}`    |
- * | ETH buy  | `revolut-eth-{date}-{qty}-{net}-{fee}`     | `revolut-eth-fee-{date}-{qty}-{fee}`   |
+ * | Trade       | Trade id                                              | Fee id            |
+ * |-------------|-------------------------------------------------------|-------------------|
+ * | buy, sell   | `revolut-stmt-{coin}-{type}-{utcISO}-{qty}-{n}`       | trade id + `-fee` |
  *
- * `{date}` is `YYYY-MM-DD`; the numbers are written as JavaScript prints them.
- * Each pattern captures `{date}-{qty}` (and, for ETH, `{fee}`) and drops the
- * trade amount, which the fee id does not have. The date right after the
- * prefix is what keeps the BTC buy pattern from matching the `sell-`, `fee-`,
- * `send-` and `receive-` ids that share its prefix.
+ * `{n}` is which of the statement's identical rows it is, so each trade has
+ * its own fee id. Rows from the retired per-transaction PDF import
+ * (`revolut-btc-…`, `revolut-eth-…`) are no longer paired: their fees stay in
+ * the log and in Cash, but are not added to the trade's cost.
  */
 const FEE_ID_RULES: {
   type: 'buy' | 'sell'
@@ -33,18 +29,13 @@ const FEE_ID_RULES: {
 }[] = [
   {
     type: 'buy',
-    tradeId: /^revolut-btc-(\d{4}-\d{2}-\d{2}-.+)-[^-]+$/,
-    feeId: (m) => `revolut-btc-fee-${m[1]}`,
+    tradeId: /^(revolut-stmt-[^-]+-buy-.+)$/,
+    feeId: (m) => `${m[1]}-fee`,
   },
   {
     type: 'sell',
-    tradeId: /^revolut-btc-sell-(\d{4}-\d{2}-\d{2}-.+)-[^-]+$/,
-    feeId: (m) => `revolut-btc-sell-fee-${m[1]}`,
-  },
-  {
-    type: 'buy',
-    tradeId: /^revolut-eth-(\d{4}-\d{2}-\d{2}-.+)-[^-]+-([^-]+)$/,
-    feeId: (m) => `revolut-eth-fee-${m[1]}-${m[2]}`,
+    tradeId: /^(revolut-stmt-[^-]+-sell-.+)$/,
+    feeId: (m) => `${m[1]}-fee`,
   },
 ]
 
@@ -65,12 +56,10 @@ function expectedFeeId(trade: Transaction): string | undefined {
  * every other source either has no trade fees or already includes them in the
  * trade's amount (XTB confirmations), so its trades get no entry here.
  *
- * Pairing never crosses accounts. A fee id carries less than its trade's id, so
- * several trades can point at the same fee id — two BTC buys of the same
- * quantity on the same day, for instance. The fees recorded under that id are
- * then split evenly between those trades (they have the same quantity, so that
- * is also pro rata). However the rows pair up, the fees handed out add up to
- * exactly the fee rows that were matched: no fee is counted twice.
+ * Pairing never crosses accounts. Should several trades ever point at the same
+ * fee id, the fees recorded under it are split evenly between them. However
+ * the rows pair up, the fees handed out add up to exactly the fee rows that
+ * were matched: no fee is counted twice.
  *
  * A fee row with no matching trade (the trade was deleted, or the fee has
  * nothing to do with a trade) is left out.

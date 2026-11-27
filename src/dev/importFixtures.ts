@@ -16,8 +16,10 @@ import type {
   EMaklerPreviewRow,
 } from '@/features/import/EMaklerImportFlow'
 import type { XTBTransactionFlowDevState } from '@/features/import/XTBTransactionFlow'
-import type { RevolutBtcFlowDevState } from '@/features/import/RevolutBtcFlow'
-import type { RevolutCryptoFlowDevState } from '@/features/import/RevolutCryptoFlow'
+import type { RevolutStatementFlowDevState } from '@/features/import/RevolutStatementFlow'
+import { parseRevolutStatement } from '@/importers/revolutStatement'
+import { STATEMENT_PAGES } from '@/importers/revolutStatement.fixture'
+import { buildStatementTransactions, checkStatementHoldings, planStatementRows } from '@/importers/revolutStatementImport'
 import type { XTBConfirmationFlowDevState } from '@/features/import/XTBConfirmationFlow'
 import type { ConfirmationParseResult, ParsedTrade } from '@/importers/xtbConfirmationParser'
 import type { EMaklerHoldingResult } from '@/importers/eMaklerImport'
@@ -261,75 +263,33 @@ export const xtbSeed = {
 }
 
 // ─────────────────────────────────────────
-// Revolut BTC
+// Revolut Crypto Account Statement
 // ─────────────────────────────────────────
 
-const btcParseResult: RevolutBtcFlowDevState['parseResult'] = {
-  transactions: [
-    tx({ type: 'buy', date: '2024-11-02T12:00:00.000Z', amountPLN: -8200, ticker: 'BTC', quantity: 0.05 }),
-    tx({ type: 'receive', date: '2025-01-15T09:30:00.000Z', amountPLN: 0, ticker: 'BTC', quantity: 0.012 }),
-  ],
-  skipped: 1,
-  warnings: [],
-  buyQty: 0.05,
-  sellQty: 0,
-  sendQty: 0,
-  receiveQty: 0.012,
-}
+// The made-up statement the parser's tests read, as the preview shows it.
+const revolutStatement = parseRevolutStatement(STATEMENT_PAGES)
+const revolutLog = buildStatementTransactions({
+  rows: planStatementRows(revolutStatement, new Set()),
+  statement: revolutStatement,
+  accountId: 'dev',
+  now: '2026-01-01T00:00:00.000Z',
+})
+const revolutCheck = checkStatementHoldings(revolutStatement, revolutLog, 'dev')!
 
-export const btcSeed = {
-  parsing: { step: 'parsing' } as const,
+export const revolutStatementSeed = {
   preview: {
     step: 'preview',
-    state: { parseResult: btcParseResult } satisfies Partial<RevolutBtcFlowDevState>,
+    state: { statement: revolutStatement } satisfies Partial<RevolutStatementFlowDevState>,
   } as const,
-  receiveCost: {
-    step: 'receive_cost',
-    state: { parseResult: btcParseResult, receiveIndex: 0 } satisfies Partial<RevolutBtcFlowDevState>,
-  } as const,
-  createHolding: {
-    step: 'create_holding',
-    state: {
-      proposed: { netQty: 0.062, avgCostPLN: 145000, totalCostPLN: 8990, earliestDate: '2024-11-02' },
-    } satisfies Partial<RevolutBtcFlowDevState>,
+  holdingsCheck: {
+    step: 'holdings_check',
+    state: { statement: revolutStatement, check: { ...revolutCheck, differences: revolutCheck.differences.slice(0, 2) } } satisfies Partial<RevolutStatementFlowDevState>,
   } as const,
   done: {
     step: 'done',
-    state: { doneParts: ['2 transactions imported', 'BTC holding created'], doneDetail: '1 buy · 1 receive' } satisfies Partial<RevolutBtcFlowDevState>,
-  } as const,
-}
-
-// ─────────────────────────────────────────
-// Revolut ETH (crypto statements)
-// ─────────────────────────────────────────
-
-const ethParseResult: RevolutCryptoFlowDevState['parseResult'] = {
-  transactions: [
-    tx({ type: 'buy', date: '2024-09-10T11:00:00.000Z', amountPLN: -2400, ticker: 'ETH', quantity: 0.4 }),
-    tx({ type: 'fee', date: '2024-09-10T11:00:00.000Z', amountPLN: -24, ticker: 'ETH' }),
-    tx({ type: 'buy', date: '2024-12-01T16:30:00.000Z', amountPLN: -1850, ticker: 'ETH', quantity: 0.28 }),
-    tx({ type: 'fee', date: '2024-12-01T16:30:00.000Z', amountPLN: -18.5, ticker: 'ETH' }),
-  ],
-  skipped: 0,
-  warnings: [],
-  totalEthFromPDFs: 0.68,
-}
-
-export const ethSeed = {
-  parsing: { step: 'parsing' } as const,
-  preview: {
-    step: 'preview',
-    state: { parseResult: ethParseResult } satisfies Partial<RevolutCryptoFlowDevState>,
-  } as const,
-  createHolding: {
-    step: 'create_holding',
     state: {
-      proposed: { totalQty: 0.68, avgCostPLN: 6262, totalCostPLN: 4292.5, earliestDate: '2024-09-10', existingHoldingId: null },
-    } satisfies Partial<RevolutCryptoFlowDevState>,
-  } as const,
-  done: {
-    step: 'done',
-    state: { doneParts: ['4 transactions imported', 'ETH holding created'], doneDetail: '2 buys · 2 fees' } satisfies Partial<RevolutCryptoFlowDevState>,
+      outcome: { imported: 48, accountName: 'Revolut Crypto', asOf: '2025-12-31', coins: 5, matching: 5, adjustments: 2, staking: 3, holdings: [] },
+    } satisfies Partial<RevolutStatementFlowDevState>,
   } as const,
 }
 

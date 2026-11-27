@@ -8,7 +8,7 @@ import { pairTradeFees } from './tradeFees'
  * Trades update the holdings they belong to.
  *
  * After an import that brings trades (XTB Cash Operations, XTB confirmations,
- * Revolut BTC), every open holding the file has trades for is walked again
+ * the Revolut statement), every open holding the file has trades for is walked again
  * (`walkPosition`) with the new rows. Where the walk's quantity differs from
  * the holding's, the import proposes the change: a new quantity and average
  * cost, or — when nothing is left — closing the holding with the sales the

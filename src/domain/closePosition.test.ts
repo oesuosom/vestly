@@ -179,10 +179,10 @@ describe('Close position — Revolut crypto', () => {
   // Revolut stores the buy's fee as its own row, paired by externalId (pairTradeFees).
   const buy = tx({
     type: 'buy', date: '2026-01-10', amountPLN: -3990, quantity: 0.01, ticker: 'BTC', source: 'revolut_crypto',
-    externalId: 'revolut-btc-2026-01-10-0.01-3990',
+    externalId: 'revolut-stmt-BTC-buy-2026-01-10T09:00:00.000Z-0.01-1',
   })
   const buyFee = tx({
-    type: 'fee', date: '2026-01-10', amountPLN: -10, source: 'revolut_crypto', externalId: 'revolut-btc-fee-2026-01-10-0.01',
+    type: 'fee', date: '2026-01-10', amountPLN: -10, source: 'revolut_crypto', externalId: 'revolut-stmt-BTC-buy-2026-01-10T09:00:00.000Z-0.01-1-fee',
   })
   const btc = holding({ id: 'btc', name: 'Bitcoin', ticker: 'BTC', category: 'crypto', quantity: 0.01, purchasePrice: 400000 })
   const acc = account('crypto', [btc])

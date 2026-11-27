@@ -118,7 +118,7 @@ const MONTH = '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\\.?'
 
 /** Collapse whitespace (including non-breaking spaces) to single spaces. */
 function normalise(line: string): string {
-  return line.replace(/[\s  ]+/g, ' ').trim()
+  return line.replace(/[\s\u00a0\u202f]+/g, ' ').trim()
 }
 
 /** "1,234.56" → 1234.56; "25" → 25. Null when it isn't a plain number. */

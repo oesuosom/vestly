@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { Activity } from '@/pages/Activity'
 import { SettingsProvider } from '@/context/SettingsContext'
 import { XTBConfirmationFlow } from '@/features/import/XTBConfirmationFlow'
-import { RevolutBtcFlow } from '@/features/import/RevolutBtcFlow'
+import { RevolutStatementFlow } from '@/features/import/RevolutStatementFlow'
+import type { RevolutStatement } from '@/importers/revolutStatement'
 import { HoldingSyncStep } from '@/features/import/HoldingSyncStep'
 import { ClosePositionDialog } from '@/features/accounts/ClosePositionDialog'
 import { transactionDay } from '@/domain/transactionDay'
@@ -119,28 +120,27 @@ export function runTransactionDayCases(c: TransactionDayCase, portfolio: MockPor
       })
     })
 
-    describe('Revolut BTC import', () => {
-      it('asks for the cost of a receive on its stored day (rows at T00:00:00Z)', () => {
+    describe('Revolut statement import', () => {
+      it('asks for the cost of a receive on its stored (UTC) day', () => {
         portfolio.accounts = [account]
         portfolio.transactions = []
-        // Revolut rows are stored at midnight UTC: the previous evening west of UTC.
-        const receive: Transaction = {
-          id: 'r1', accountId: account.id, type: 'receive', date: `${stored}T00:00:00.000Z`, amountPLN: 0, ticker: 'BTC',
-          quantity: 0.5, externalId: 'r1', source: 'revolut_crypto', createdAt: NOW,
+        // The statement's local time, converted to UTC: the stored day can be another local day.
+        const statement: RevolutStatement = {
+          period: { from: '2026-01-01', to: '2026-12-31' },
+          rows: [{ page: 1, row: 1, raw: '', symbol: 'BTC', type: 'receive', quantity: 0.5, price: 400000, value: 200000, fee: 0, date: c.date }],
+          staking: {}, closing: {}, opening: {}, names: {}, prices: {}, warnings: [],
         }
         render(
-          <RevolutBtcFlow
+          <RevolutStatementFlow
             accountId={account.id}
-            files={[]}
+            file={new File([], 'statement.pdf')}
             onComplete={() => {}}
             onBack={() => {}}
-            devSeed={{
-              step: 'receive_cost',
-              state: { parseResult: { transactions: [receive], skipped: 0, warnings: [], buyQty: 0, sellQty: 0, sendQty: 0, receiveQty: 0.5 } },
-            }}
+            devSeed={{ step: 'preview', state: { statement } }}
           />,
         )
         expect(screen.getByText(longDay(stored))).toBeTruthy()
+        expect(screen.queryByText(longDay(c.localDay))).toBeNull()
       })
     })
 

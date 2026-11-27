@@ -3,6 +3,7 @@ import { cashOperationsHeaderIndex, detectSeparator, findCashOperationsSheet, sp
 import { detectFormat, parseCSVRaw } from './csvParser'
 import { detectEMaklerFileType } from './eMaklerParser'
 import { extractPDFLayout } from './pdfText'
+import { isRevolutStatementText } from './revolutStatement'
 
 // ─────────────────────────────────────────
 // Types
@@ -14,8 +15,7 @@ export type DetectedFormat =
   | { type: 'xtb_confirmation' }
   | { type: 'emakler_portfolio' }
   | { type: 'emakler_order_history' }
-  | { type: 'revolut_crypto' }
-  | { type: 'revolut_btc_transfer' }
+  | { type: 'revolut_statement' }
   | { type: 'unknown_csv'; headers: string[] }
   | { type: 'unsupported'; reason: string }
 
@@ -30,7 +30,8 @@ export type DetectedFormatType = DetectedFormat['type']
  *
  * Detection order:
  * 1. Reject unsupported extensions outright
- * 2. PDFs — Revolut by filename, XTB confirmations by table headers
+ * 2. PDFs, by content: Revolut's Crypto Account Statement by its title and
+ *    Transactions header, XTB confirmations by their table headers
  * 3. eMakler (CP1250-encoded CSV with characteristic Polish strings)
  * 4. XTB's .xlsx statement: a sheet with the Cash Operations header row, wherever it is
  * 5. Decode to CSV text (handles CSV, and the first sheet of other XLS/XLSX files)
@@ -44,25 +45,15 @@ export async function detectFileFormat(file: File): Promise<DetectedFormat> {
     return { type: 'unsupported', reason: `Unsupported file type: ${file.name}` }
   }
 
-  // 2. PDFs — Revolut by filename pattern, XTB confirmations by content
+  // 2. PDFs, recognised by their content. File names are only ids (Revolut's
+  //    statement) or too generic to trust (XTB's 00000000_20260908_DailyStatement.pdf).
   if (file.name.toLowerCase().endsWith('.pdf')) {
-    // BTC send/receive: "Transfer Confirmation" PDFs
-    // e.g. p2p-transaction-confirmation-report_en_3ddaf1.pdf
-    if (/^p2p-transaction-confirmation-report_/i.test(file.name)) {
-      return { type: 'revolut_btc_transfer' }
-    }
-    // ETH/BTC buy/sell: individual transaction statement PDFs
-    // e.g. transaction-statement_00000000-0000-4000-8000-000000000000_en_9d4969.pdf
-    if (/^transaction-statement_/i.test(file.name)) {
-      return { type: 'revolut_crypto' }
-    }
-    // XTB daily order confirmation — sniffed by content rather than filename.
-    // The filename (00000000_20260908_DailyStatement.pdf) is too generic to
-    // trust, and the document's *title* is rasterised, so we key off the table's
-    // column headers, which are real text.
-    if (await isXTBConfirmation(file)) {
-      return { type: 'xtb_confirmation' }
-    }
+    const lines = await pdfLines(file)
+    if (isRevolutStatementText(lines)) return { type: 'revolut_statement' }
+    // XTB daily order confirmation. The document's *title* is rasterised, so
+    // we key off the table's column headers, which are real text.
+    const text = lines.join(' ')
+    if (XTB_CONFIRMATION_MARKERS.every((re) => re.test(text))) return { type: 'xtb_confirmation' }
     return { type: 'unsupported', reason: `Unrecognised PDF: ${file.name}` }
   }
 
@@ -113,21 +104,19 @@ export async function detectFileFormat(file: File): Promise<DetectedFormat> {
 const XTB_CONFIRMATION_MARKERS = [/Numer zlecenia/i, /Łączne koszty/i, /Wolne środki/i]
 
 /**
- * True when the PDF's text layer carries XTB's confirmation table headers.
+ * The PDF's text, one string per line, in reading order; empty when it can't
+ * be read.
  *
- * Uses the layout extractor rather than the plain-text one because that is what
- * the parser needs next — `extractPDFLayout` memoises per File, so detecting and
- * then importing decodes the PDF once, not twice.
+ * Uses the layout extractor because that is what the parsers read next —
+ * `extractPDFLayout` memoises per File, so detecting and then importing
+ * decodes the PDF once, not twice.
  */
-async function isXTBConfirmation(file: File): Promise<boolean> {
+async function pdfLines(file: File): Promise<string[]> {
   try {
     const pages = await extractPDFLayout(file)
-    const text = pages
-      .flatMap((page) => page.lines.flatMap((line) => line.cells.map((c) => c.text)))
-      .join(' ')
-    return XTB_CONFIRMATION_MARKERS.every((re) => re.test(text))
+    return pages.flatMap((page) => page.lines.map((line) => line.cells.map((c) => c.text).join(' ')))
   } catch {
-    return false
+    return []
   }
 }
 
