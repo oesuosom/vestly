@@ -10,8 +10,9 @@
  *   Period Jan 1, 2025 - Nov 25, 2026        ←  "
  *   Account summary
  *   Symbol Asset Opening value Amount out Amount in Closing value
- *   BTC Bitcoin 0.50000000 0.10000000 0.20000000 0.60000000      ← coin amounts
- *   20,000.00 PLN 4,000.00 PLN 8,000.00 PLN 24,000.00 PLN         ← PLN, under them
+ *   0.50000000 BTC 0.60000000 BTC                        ← opening, closing (0 left out)
+ *   BTC Bitcoin 0.10000000 BTC 0.20000000 BTC            ← amount out, amount in
+ *   20,000.00 PLN 4,000.00 PLN 8,000.00 PLN 24,000.00 PLN ← PLN, under them
  *   Portfolio breakdown
  *   Symbol Asset Amount Price Value % of portfolio
  *   BTC Bitcoin 0.60000000 400,000.00 PLN 240,000.00 PLN 100%
@@ -26,8 +27,9 @@
  * app: Warsaw time, not UTC), with no space before AM/PM.
  *
  * Everything here is pure: it reads lines of text, so it can be tested on
- * synthetic statements. Anything it can't read becomes a warning with its page,
- * row and raw text; nothing is dropped silently.
+ * synthetic statements. A Transactions row it can't read becomes a warning with
+ * its page, row and raw text; nothing is dropped silently. A coin whose Account
+ * summary can't be read takes its closing amount from Portfolio breakdown.
  */
 
 // ─────────────────────────────────────────
@@ -62,13 +64,16 @@ export type StatementRow = {
 
 export type StatementWarning = {
   page: number
-  /** 1-based row of the table on that page; 0 when it isn't a table row. */
+  /** 1-based row of the Transactions table on that page. */
   row: number
   message: string
   raw: string
   /** "XRP · Buy · 5,00 PLN" — what the row seems to be, when that much is readable. */
   summary?: string
 }
+
+/** A coin's line in Account summary, in coins. */
+export type SummaryAmounts = { opening: number; out: number; in: number; closing: number }
 
 /** A coin's amount at the end of the period. */
 export type ClosingAmount = {
@@ -90,6 +95,8 @@ export type RevolutStatement = {
   closing: Record<string, ClosingAmount>
   /** Coin amount at the start of the period, from Account summary. */
   opening: Record<string, number>
+  /** Account summary's amounts per coin, when it could be read. */
+  summary: Record<string, SummaryAmounts>
   /** Asset names by symbol ("Bitcoin"), from either table. */
   names: Record<string, string>
   /** Portfolio breakdown's price per coin in PLN, for a new holding's current price. */
@@ -253,6 +260,51 @@ function sectionHeading(line: string): Section | null {
 
 const isTableHeader = (line: string) => /^Symbol\b/i.test(line)
 
+/**
+ * A line of coin amounts only, all of one coin: "0 ETH 0.25000000 ETH". In
+ * Account summary it is the line above a coin's name line: its opening and
+ * closing amounts (either is left out when it is 0).
+ */
+function readAmountLine(line: string): { symbol: string; amounts: number[] } | null {
+  const tokens = line.split(' ')
+  if (tokens.length % 2 !== 0) return null
+  const amounts: number[] = []
+  let symbol: string | null = null
+  for (let i = 0; i < tokens.length; i += 2) {
+    const n = parseStatementNumber(tokens[i])
+    const sym = tokens[i + 1]
+    if (n === null || !SYMBOL.test(sym) || sym === 'PLN' || (symbol !== null && sym !== symbol)) return null
+    symbol = sym
+    amounts.push(n)
+  }
+  return symbol ? { symbol, amounts } : null
+}
+
+/** Below this the summary's amounts agree (they are given to 8 decimals). */
+const SUMMARY_TOLERANCE = 1e-8 + 1e-12
+
+/**
+ * A coin's Account summary amounts. `above` is the line above its name line
+ * (opening and closing, either left out when 0); `own` the coin amounts on the
+ * name line (amount out, amount in). Older layouts put all four on the name
+ * line. With one amount above, it is the one that agrees with
+ * opening − out + in = closing. Null when they can't be told apart.
+ */
+export function readSummaryAmounts(above: number[], own: number[]): SummaryAmounts | null {
+  if (own.length >= 4) return { opening: own[0], out: own[1], in: own[2], closing: own[own.length - 1] }
+  if (own.length !== 2 || above.length > 2) return null
+  const [out, inn] = own
+  if (above.length === 2) return { opening: above[0], out, in: inn, closing: above[1] }
+  if (above.length === 0) return { opening: 0, out, in: inn, closing: 0 }
+  const x = above[0]
+  const asClosing = Math.abs(0 - out + inn - x) < SUMMARY_TOLERANCE
+  const asOpening = Math.abs(x - out + inn) < SUMMARY_TOLERANCE
+  if (asClosing && !asOpening) return { opening: 0, out, in: inn, closing: x }
+  if (asOpening && !asClosing) return { opening: x, out, in: inn, closing: 0 }
+  // Both or neither agree: a lone amount is most often what is still held.
+  return { opening: 0, out, in: inn, closing: x }
+}
+
 /** A row of Account summary or Portfolio breakdown: symbol, asset name, then the numbers. */
 type CoinLine = { symbol: string; name: string; coinAmounts: number[]; plnAmounts: number[] }
 
@@ -299,10 +351,13 @@ export function parseRevolutStatement(pages: string[][]): RevolutStatement {
     staking: {},
     closing: {},
     opening: {},
+    summary: {},
     names: {},
     prices: {},
     warnings: [],
   }
+  /** The amounts line just read in Account summary, for the name line after it. */
+  let above: { symbol: string; amounts: number[] } | null = null
   const summaryClosing: Record<string, number> = {}
   const breakdown: Record<string, number> = {}
   let breakdownSeen = false
@@ -334,16 +389,24 @@ export function parseRevolutStatement(pages: string[][]): RevolutStatement {
       if (isTableHeader(line)) continue
 
       if (section === 'summary') {
+        // Each coin is three lines: opening and closing above its name line,
+        // amount out and in on it, the PLN values below.
+        const amountLine = readAmountLine(line)
+        if (amountLine) {
+          above = amountLine
+          continue
+        }
         const coin = readCoinLine(line)
+        const aboveAmounts = above && coin && above.symbol === coin.symbol ? above.amounts : []
+        above = null
         if (!coin || coin.coinAmounts.length === 0) continue
         if (coin.name) result.names[coin.symbol] ??= coin.name
-        // Opening, amount out, amount in, closing: closing is the last.
-        if (coin.coinAmounts.length >= 4) {
-          result.opening[coin.symbol] = coin.coinAmounts[0]
-          summaryClosing[coin.symbol] = coin.coinAmounts[coin.coinAmounts.length - 1]
-        } else {
-          result.warnings.push({ page, row: 0, raw: line, message: `Couldn’t read ${coin.symbol}’s closing amount in Account summary.` })
-        }
+        // Not readable: the closing amount comes from Portfolio breakdown, quietly.
+        const amounts = readSummaryAmounts(aboveAmounts, coin.coinAmounts)
+        if (!amounts) continue
+        result.summary[coin.symbol] = amounts
+        result.opening[coin.symbol] = amounts.opening
+        summaryClosing[coin.symbol] = amounts.closing
         continue
       }
 

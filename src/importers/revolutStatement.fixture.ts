@@ -4,7 +4,11 @@
  *
  * Coins: BTC (bought, sold, sent, received), ETH (bought), XRP (bought, sold,
  * one unreadable row), SOL (held before the period, staked), ADA (received;
- * matches the statement).
+ * matches the statement), DOT (bought and sold out during the period).
+ *
+ * Account summary has the three-line shape of the real file: opening and
+ * closing above a coin's name line (either left out when 0), amount out and in
+ * on it, the PLN values below. XRP's asset name is also "XRP".
  */
 export const HEADER = ['Crypto Account Statement', 'Generated on the 1 Jan 2026', 'Period Jan 1, 2025 - Dec 31, 2025']
 export const TX_HEADER = 'Symbol Type Quantity Price Value Fees Date'
@@ -14,16 +18,24 @@ export const STATEMENT_PAGES: string[][] = [
     ...HEADER,
     'Account summary',
     'Symbol Asset Opening value Amount out Amount in Closing value',
-    'BTC Bitcoin 0.00000000 0.01001000 0.03000000 0.02000000',
+    // Each coin is three lines: opening and closing above (0 left out), out and in, then PLN.
+    '0.02000000 BTC',
+    'BTC Bitcoin 0.01000000 BTC 0.03000000 BTC',
     '0.00 PLN 4,000.00 PLN 12,000.00 PLN 8,000.00 PLN',
-    'ETH Ethereum 0 0 0.02000000 0.02000000',
+    '0.02000000 ETH',
+    'ETH Ethereum 0 ETH 0.02000000 ETH',
     '0.00 PLN 0.00 PLN 200.00 PLN 200.00 PLN',
-    'XRP XRP 0 25 100 75',
+    '75.000000 XRP',
+    'XRP XRP 25.000000 XRP 100.000000 XRP',
     '0.00 PLN 50.00 PLN 200.00 PLN 150.00 PLN',
-    'SOL Solana 2.00000000 0 0.10000000 2.10000000',
+    '2.00000000 SOL 2.10000000 SOL',
+    'SOL Solana 0 SOL 0.10000000 SOL',
     '800.00 PLN 0.00 PLN 40.00 PLN 840.00 PLN',
-    'ADA Cardano 0 0 10 10',
+    '10 ADA',
+    'ADA Cardano 0 ADA 10 ADA',
     '0.00 PLN 0.00 PLN 20.00 PLN 20.00 PLN',
+    'DOT Polkadot 20 DOT 20 DOT',
+    '0.00 PLN 120.00 PLN 100.00 PLN 0.00 PLN',
     'Portfolio breakdown',
     'Symbol Asset Amount Price Value % of portfolio',
     'BTC Bitcoin 0.02000000 400,000.00 PLN 8,000.00 PLN 86%',
@@ -42,6 +54,8 @@ export const STATEMENT_PAGES: string[][] = [
     'ETH Buy 0.01000000 10,000.00 PLN 100.00 PLN 1.00 PLN Feb 1, 2025, 9:00:00AM',
     'XRP Buy 100 2.00 PLN 200.00 PLN 2.00 PLN Feb 3, 2025, 12:15:00PM',
     'XRP Sell 25 2.00 PLN 50.00 PLN 1.00 PLN Feb 4, 2025, 7:31:58AM',
+    'DOT Buy 20 5.00 PLN 100.00 PLN 1.00 PLN Mar 2, 2025, 10:00:00AM',
+    'DOT Sell 20 6.00 PLN 120.00 PLN 1.00 PLN Apr 2, 2025, 10:00:00AM',
     'Page 2 of 3',
   ],
   [

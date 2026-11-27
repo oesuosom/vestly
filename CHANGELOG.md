@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change what received coins cost you (Revolut's value on the day is filled in), and lists any
   row it couldn't read. Staking rewards are left out for now. Afterwards, each coin is compared
   with what the statement says you held on its last day; where they differ, a 0 PLN adjustment
-  (ticked, shown in Activity) brings it in line without changing what you paid. New coins
-  become crypto holdings. Importing the same or an overlapping period again adds nothing.
+  (ticked, shown in Activity) brings it in line without changing what you paid; where the coins
+  in or out differ from the statement's totals, the check says so. New coins become crypto
+  holdings, and coins sold out during the period are kept as closed positions. Importing the
+  same or an overlapping period again adds nothing. Prices for The Graph (GRT) and Orchid (OXT)
+  now come from CoinGecko.
 
 ### Changed
 

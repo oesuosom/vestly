@@ -27,9 +27,10 @@ import { v4 as uuidv4 } from 'uuid'
 import type { Account, Holding, Transaction } from '@/types'
 import { positionKey } from '@/domain/calculations'
 import { holdingPositionKey } from '@/domain/closePosition'
-import { walkPosition } from '@/domain/position'
+import { lastClosedCycle, walkPosition } from '@/domain/position'
 import { pairTradeFees } from '@/domain/tradeFees'
 import { transactionDay } from '@/domain/transactionDay'
+import { formatQuantity } from '@/utils/formatters'
 import type { RevolutStatement, StatementRow, StatementRowType } from './revolutStatement'
 
 // ─────────────────────────────────────────
@@ -202,6 +203,12 @@ export type CoinDifference = {
   reasons: string[]
 }
 
+/** Coins in and out over the period: what the imported rows add up to, and Account summary's amounts. */
+export type CoinFlows = {
+  in: { vestly: number; revolut: number }
+  out: { vestly: number; revolut: number }
+}
+
 export type StatementHoldingsCheck = {
   /** The statement's end day, `yyyy-MM-dd`. */
   asOf: string
@@ -209,6 +216,40 @@ export type StatementHoldingsCheck = {
   differences: CoinDifference[]
   /** Coins with no closing amount to compare against. */
   unchecked: string[]
+  /**
+   * Per coin with an Account summary: the rows' coins in and out against the
+   * summary's amount in and amount out. Only reported (in the "Why" text), so
+   * a systematic quantity problem is visible; nothing is corrected with it.
+   */
+  flows: Record<string, CoinFlows>
+}
+
+/**
+ * The statement rows' coins in (buys, receives) and out (sells, sends) for a
+ * coin, as stored (`storedQuantity`), against Account summary's amount in and
+ * amount out. Undefined without a summary for the coin.
+ */
+export function coinFlows(statement: Pick<RevolutStatement, 'rows' | 'summary'>, symbol: string): CoinFlows | undefined {
+  const summary = statement.summary[symbol]
+  if (!summary) return undefined
+  let inQ = 0
+  let outQ = 0
+  for (const r of statement.rows) {
+    if (r.symbol !== symbol) continue
+    if (r.type === 'buy' || r.type === 'receive') inQ += storedQuantity(r)
+    else outQ += storedQuantity(r)
+  }
+  return { in: { vestly: round8(inQ), revolut: summary.in }, out: { vestly: round8(outQ), revolut: summary.out } }
+}
+
+/** "Coins in 0,0297 vs Revolut’s 0,03" for each of in and out that differs. */
+function flowReasons(flows: CoinFlows | undefined): string[] {
+  if (!flows) return []
+  const out: string[] = []
+  const fmt = (n: number) => formatQuantity(n, 8)
+  if (Math.abs(flows.in.vestly - flows.in.revolut) >= CRYPTO_TOLERANCE) out.push(`Coins in ${fmt(flows.in.vestly)} vs Revolut’s ${fmt(flows.in.revolut)}`)
+  if (Math.abs(flows.out.vestly - flows.out.revolut) >= CRYPTO_TOLERANCE) out.push(`Coins out ${fmt(flows.out.vestly)} vs Revolut’s ${fmt(flows.out.revolut)}`)
+  return out
 }
 
 /**
@@ -249,7 +290,10 @@ export function checkStatementHoldings(
   const matching: string[] = []
   const differences: CoinDifference[] = []
   const unchecked: string[] = []
+  const flows: Record<string, CoinFlows> = {}
   for (const symbol of coins) {
+    const flow = coinFlows(statement, symbol)
+    if (flow) flows[symbol] = flow
     const closing = statement.closing[symbol]
     if (!closing) {
       unchecked.push(symbol)
@@ -267,11 +311,12 @@ export function checkStatementHoldings(
     // Left-out staking rewards only explain Revolut holding more.
     if (statement.staking[symbol] && delta > 0) reasons.push('Staking rewards left out')
     if (unreadable.has(symbol)) reasons.push('A row couldn’t be read')
+    reasons.push(...flowReasons(flow))
     if (traded) reasons.push('Fees estimated from the statement')
     if (reasons.length === 0) reasons.push('Not explained by the statement’s rows')
     differences.push({ symbol, name: statement.names[symbol] ?? symbol, vestly, revolut: closing.quantity, delta, reasons })
   }
-  return { asOf, matching, differences, unchecked }
+  return { asOf, matching, differences, unchecked, flows }
 }
 
 /**
@@ -348,6 +393,58 @@ export function newCoinHoldings(
       purchaseDate: days[0] ?? now.slice(0, 10),
       createdAt: now,
       updatedAt: now,
+    })
+  }
+  return out
+}
+
+/**
+ * Closed holdings for the statement's coins that were sold or sent out
+ * completely and aren't held at the end: kept like any closed position
+ * (`Account.closedHoldings`), so Activity shows their icon and Closed
+ * positions their result. The quantity and average cost are those of the
+ * last round, from when the coin was last bought or received until it was
+ * emptied; closed on that last sale's or send's day. Its result is read from
+ * the walk (`closedPositionResult`), so it agrees with realized profit.
+ *
+ * Skipped: coins still held, coins the account has an open holding for
+ * (`planHoldingSync` closes those), and coins already closed on that day.
+ */
+export function closedCoinHoldings(
+  account: Account,
+  transactions: Transaction[],
+  statement: Pick<RevolutStatement, 'names' | 'prices'>,
+  coins: string[],
+  now = new Date().toISOString(),
+): Holding[] {
+  const open = new Set(account.holdings.filter((h) => !h.isSynthetic).map(holdingPositionKey))
+  const closed = new Set((account.closedHoldings ?? []).map((h) => `${holdingPositionKey(h)}\n${h.closedAt}`))
+  const fees = pairTradeFees(transactions)
+  const out: Holding[] = []
+  for (const symbol of coins) {
+    if (open.has(symbol)) continue
+    const rows = transactions.filter((t) => t.accountId === account.id && positionKey(t) === symbol)
+    const cycle = lastClosedCycle(rows, fees)
+    if (!cycle || cycle.quantity <= 0) continue
+    const closedAt = transactionDay(cycle.closedBy)
+    if (closed.has(`${symbol}\n${closedAt}`)) continue
+    const quantity = round8(cycle.quantity)
+    const purchasePrice = cycle.costPLN / cycle.quantity
+    const sale = cycle.closedBy.type === 'sell' ? cycle.closedBy : null
+    out.push({
+      id: uuidv4(),
+      accountId: account.id,
+      name: statement.names[symbol] ?? symbol,
+      ticker: symbol,
+      exchange: 'CC',
+      category: 'crypto',
+      quantity,
+      purchasePrice,
+      currentPrice: sale?.pricePerUnitPLN ?? statement.prices[symbol] ?? purchasePrice,
+      purchaseDate: transactionDay(cycle.openedBy),
+      createdAt: now,
+      updatedAt: now,
+      closedAt,
     })
   }
   return out

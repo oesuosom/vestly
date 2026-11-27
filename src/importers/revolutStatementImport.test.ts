@@ -6,6 +6,9 @@ import {
   adjustmentTransactions,
   buildStatementTransactions,
   checkStatementHoldings,
+  closedCoinHoldings,
+  coinFlows,
+  round8,
   countByCoin,
   newCoinHoldings,
   planStatementRows,
@@ -17,6 +20,7 @@ import { HEADER, STATEMENT_PAGES, TX_HEADER } from '@/importers/revolutStatement
 import { pairTradeFees } from '@/domain/tradeFees'
 import { walkPosition, walkSales } from '@/domain/position'
 import { getRealizedPnL } from '@/domain/calculations'
+import { closedPositionResult } from '@/domain/closePosition'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 const statement = parseRevolutStatement(STATEMENT_PAGES)
@@ -61,7 +65,7 @@ describe('buildStatementTransactions', () => {
   it('stores each row once, with a fee row for each buy and sell that has a fee', () => {
     const byType = (type: Transaction['type']) => log.filter((t) => t.type === type).length
     expect({ buy: byType('buy'), sell: byType('sell'), send: byType('send'), receive: byType('receive'), fee: byType('fee') })
-      .toEqual({ buy: 4, sell: 1, send: 1, receive: 2, fee: 5 })
+      .toEqual({ buy: 5, sell: 2, send: 1, receive: 2, fee: 7 })
     expect(log.every((t) => t.source === 'revolut_crypto' && t.accountId === 'revolut')).toBe(true)
   })
 
@@ -69,7 +73,7 @@ describe('buildStatementTransactions', () => {
     const fees = pairTradeFees(log)
     const btcBuy = log.find((t) => t.type === 'buy' && t.ticker === 'BTC')!
     expect(fees.get(btcBuy.id)).toBe(100)
-    expect([...fees.values()].reduce((a, b) => a + b, 0)).toBe(100 + 1 + 1 + 2 + 1)
+    expect([...fees.values()].reduce((a, b) => a + b, 0)).toBe(100 + 1 + 1 + 2 + 1 + 1 + 1)
   })
 
   it('keeps two identical rows of one statement apart, so both import', () => {
@@ -108,6 +112,7 @@ describe('buildStatementTransactions', () => {
       { symbol: 'BTC', counts: { buy: 1, sell: 0, send: 1, receive: 1 } },
       { symbol: 'ETH', counts: { buy: 2, sell: 0, send: 0, receive: 0 } },
       { symbol: 'XRP', counts: { buy: 1, sell: 1, send: 0, receive: 0 } },
+      { symbol: 'DOT', counts: { buy: 1, sell: 1, send: 0, receive: 0 } },
       { symbol: 'ADA', counts: { buy: 0, sell: 0, send: 0, receive: 1 } },
     ])
   })
@@ -144,7 +149,7 @@ describe('holdings check', () => {
 
   it('compares each coin as of the statement’s end date', () => {
     expect(check.asOf).toBe('2025-12-31')
-    expect(check.matching).toEqual(['ADA'])
+    expect(check.matching).toEqual(['ADA', 'DOT'])
     expect(check.differences.map((d) => [d.symbol, d.vestly, d.revolut, d.delta])).toEqual([
       ['BTC', 0.01975, 0.02, 0.00025],
       ['ETH', 0.0198, 0.02, 0.0002],
@@ -155,21 +160,35 @@ describe('holdings check', () => {
 
   it('says why they may differ', () => {
     const why = Object.fromEntries(check.differences.map((d) => [d.symbol, d.reasons]))
-    expect(why.BTC).toEqual(['Fees estimated from the statement'])
-    expect(why.SOL).toEqual(['Held before the statement’s period', 'Staking rewards left out'])
-    expect(why.XRP).toEqual(['A row couldn’t be read', 'Fees estimated from the statement'])
+    expect(why.BTC).toEqual(['Coins in 0,02975 vs Revolut’s 0,03', 'Fees estimated from the statement'])
+    expect(why.SOL).toEqual(['Held before the statement’s period', 'Staking rewards left out', 'Coins in 0 vs Revolut’s 0,1'])
+    expect(why.XRP).toEqual([
+      'A row couldn’t be read',
+      'Coins in 99 vs Revolut’s 100',
+      'Coins out 25,5 vs Revolut’s 25',
+      'Fees estimated from the statement',
+    ])
+  })
+
+  it('compares the rows’ coins in and out with Account summary’s amount in and out, for every coin', () => {
+    expect(check.flows.BTC).toEqual({ in: { vestly: 0.02975, revolut: 0.03 }, out: { vestly: 0.01, revolut: 0.01 } })
+    expect(check.flows.ADA).toEqual({ in: { vestly: 10, revolut: 10 }, out: { vestly: 0, revolut: 0 } })
+    // DOT matches its closing amount (0) but its flows still show the fee estimate.
+    expect(check.flows.DOT).toEqual({ in: { vestly: 19.8, revolut: 20 }, out: { vestly: round8((20 * 121) / 120), revolut: 20 } })
+    expect(coinFlows({ ...statement, summary: {} }, 'BTC')).toBeUndefined()
   })
 
   it('doesn’t blame staking when Vestly holds more', () => {
     const sol: Transaction = { ...log.find((t) => t.ticker === 'ADA' && t.type === 'receive')!, id: 'sol', externalId: 'sol', ticker: 'SOL', instrument: 'Solana', quantity: 5 }
     const d = checkStatementHoldings(statement, [...log, sol], 'revolut')!.differences.find((x) => x.symbol === 'SOL')!
     expect(d.delta).toBeLessThan(0)
-    expect(d.reasons).toEqual(['Not explained by the statement’s rows'])
+    expect(d.reasons).not.toContain('Staking rewards left out')
+    expect(d.reasons).toEqual(['Coins in 0 vs Revolut’s 0,1'])
   })
 
   it('leaves out rows after the end date', () => {
     const later: Transaction = { ...log.find((t) => t.ticker === 'ADA')!, id: 'later', externalId: 'later', date: '2026-02-01T10:00:00.000Z' }
-    expect(checkStatementHoldings(statement, [...log, later], 'revolut')!.matching).toEqual(['ADA'])
+    expect(checkStatementHoldings(statement, [...log, later], 'revolut')!.matching).toEqual(['ADA', 'DOT'])
   })
 
   it('makes one 0 PLN adjustment per coin that brings it to the closing amount', () => {
@@ -185,7 +204,7 @@ describe('holdings check', () => {
     const after = [...log, ...adjustments]
     const recheck = checkStatementHoldings(statement, after, 'revolut')!
     expect(recheck.differences).toEqual([])
-    expect(recheck.matching).toEqual(['ADA', 'BTC', 'ETH', 'SOL', 'XRP'])
+    expect(recheck.matching).toEqual(['ADA', 'BTC', 'DOT', 'ETH', 'SOL', 'XRP'])
   })
 
   it('removes coins with a send when the log holds more, without realizing anything', () => {
@@ -202,7 +221,7 @@ describe('holdings check', () => {
 
   it('counts coins with no closing amount as unchecked', () => {
     const noClosing = { ...statement, closing: {} }
-    expect(checkStatementHoldings(noClosing, log, 'revolut')!.unchecked).toEqual(['ADA', 'BTC', 'ETH', 'XRP'])
+    expect(checkStatementHoldings(noClosing, log, 'revolut')!.unchecked).toEqual(['ADA', 'BTC', 'DOT', 'ETH', 'XRP'])
   })
 
   it('reads the walk as of an instant', () => {
@@ -228,5 +247,33 @@ describe('newCoinHoldings', () => {
   it('skips coins the account already holds', () => {
     const btc = { ...newCoinHoldings(account, importAll(statement), statement, ['BTC'], NOW)[0] }
     expect(newCoinHoldings({ ...account, holdings: [btc] }, importAll(statement), statement, ['BTC'], NOW)).toEqual([])
+  })
+})
+
+describe('closedCoinHoldings', () => {
+  const account: Account = { id: 'revolut', name: 'Revolut Crypto', type: 'crypto', createdAt: NOW, lastUpdated: NOW, holdings: [] }
+  const log = importAll(statement)
+  const closed = closedCoinHoldings(account, log, statement, ['BTC', 'DOT', 'SOL'], NOW)
+
+  it('keeps a coin sold out during the statement as a closed holding, on the day of its last sale', () => {
+    const sale = log.find((t) => t.type === 'sell' && t.ticker === 'DOT')!
+    expect(closed.map((h) => [h.ticker, h.name, h.exchange, h.category, h.quantity, h.closedAt])).toEqual([
+      ['DOT', 'Polkadot', 'CC', 'crypto', 19.8, sale.date.slice(0, 10)],
+    ])
+    // 19.8 DOT for 100 PLN (99 + 1 fee).
+    expect(closed[0].purchasePrice).toBeCloseTo(100 / 19.8, 8)
+  })
+
+  it('reads its result from the walk, so it agrees with realized profit', () => {
+    const result = closedPositionResult(closed[0], log)!
+    expect(result.result.proceedsPLN + result.result.costPLN).toBeGreaterThan(0)
+    const dotOnly = log.filter((t) => t.ticker === 'DOT' || t.relatedTicker === 'DOT')
+    expect(result.result.profitPLN).toBeCloseTo(getRealizedPnL(dotOnly), 8)
+  })
+
+  it('skips coins still held, coins with an open holding and coins already closed that day', () => {
+    expect(closedCoinHoldings({ ...account, closedHoldings: closed }, log, statement, ['DOT'], NOW)).toEqual([])
+    const open = { ...closed[0], closedAt: undefined }
+    expect(closedCoinHoldings({ ...account, holdings: [open] }, log, statement, ['DOT'], NOW)).toEqual([])
   })
 })

@@ -1,17 +1,11 @@
 /**
  * Shared pdf.js plumbing for the PDF import parsers.
  *
- * Two extraction modes:
- *
- *   extractPDFText()    — plain reading-order text. Groups items into lines by Y
- *                         and joins with spaces, for parsers
- *                         which only ever regex over the resulting string.
- *
- *   extractPDFLayout()  — rotation-aware, position-preserving cells plus the
- *                         page's raster images. Used by the XTB confirmation
- *                         parser, which has to assign cells to table columns by
- *                         position (its table has a column whose value is drawn
- *                         as an image, so reading order alone loses a field).
+ * extractPDFLayout() — rotation-aware, position-preserving cells plus the
+ * page's raster images. The XTB confirmation parser assigns cells to table
+ * columns by position (its table has a column whose value is drawn as an
+ * image, so reading order alone loses a field); format detection and the
+ * Revolut statement parser join each line's cells into text.
  *
  * pdf.js is loaded on demand. It is a large dependency reachable only through
  * the import flows, so a static import would put it in the initial bundle for
@@ -44,55 +38,6 @@ type RawTextItem = any
 /** pdf.js text items are `TextItem | TextMarkedContent`; keep only the former. */
 function textItems(items: RawTextItem[]): RawTextItem[] {
   return items.filter((item) => typeof item.str === 'string' && item.str.trim())
-}
-
-// ─────────────────────────────────────────
-// Plain reading-order text
-// ─────────────────────────────────────────
-
-/**
- * Extract a PDF's text as newline-separated lines, in reading order.
- *
- * Items are grouped into lines by Y coordinate (within ±3pt), lines sorted
- * top-to-bottom (Y descending in PDF coords) and items within a line
- * left-to-right.
- */
-export async function extractPDFText(file: File): Promise<string> {
-  const pdfjsLib = await getPdfjs()
-  const buffer = await file.arrayBuffer()
-  const doc = await pdfjsLib.getDocument({ data: buffer }).promise
-  const pageParts: string[] = []
-
-  try {
-    for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-      const page = await doc.getPage(pageNum)
-      const textContent = await page.getTextContent()
-      const items = textItems(textContent.items as RawTextItem[])
-
-      const lines: { y: number; items: RawTextItem[] }[] = []
-      for (const item of items) {
-        const y: number = item.transform[5]
-        const existing = lines.find((l) => Math.abs(l.y - y) < 3)
-        if (existing) {
-          existing.items.push(item)
-        } else {
-          lines.push({ y, items: [item] })
-        }
-      }
-
-      lines.sort((a, b) => b.y - a.y)
-      for (const line of lines) {
-        line.items.sort((a, b) => a.transform[4] - b.transform[4])
-      }
-
-      pageParts.push(lines.map((l) => l.items.map((i) => i.str).join(' ')).join('\n'))
-    }
-  } finally {
-    // Releases the worker-side document and the buffer behind it.
-    await doc.destroy()
-  }
-
-  return pageParts.join('\n')
 }
 
 // ─────────────────────────────────────────

@@ -23,6 +23,8 @@ const COINGECKO_IDS: Record<string, string> = {
   BNB:   'binancecoin',
   XRP:   'ripple',
   ADA:   'cardano',
+  GRT:   'the-graph',
+  OXT:   'orchid-protocol',
   DOGE:  'dogecoin',
   DOT:   'polkadot',
   MATIC: 'matic-network',

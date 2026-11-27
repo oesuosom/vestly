@@ -173,12 +173,57 @@ export function walkClosingSales(transactions: Transaction[], tradeFees: TradeFe
   return closes
 }
 
+/** The last round of a position that ended with nothing held: see {@link lastClosedCycle}. */
+export type ClosedCycle = {
+  /** Units that came in since the position last opened. */
+  quantity: number
+  /** What they cost: buys with their fees, receives at their recorded cost. */
+  costPLN: number
+  /** The first inflow of the round. */
+  openedBy: Transaction
+  /** The sale or send that left nothing held. */
+  closedBy: Transaction
+}
+
+/**
+ * The same walk again, for a position that is closed at the end: the units
+ * and cost of its last round (from the first buy or receive after it last
+ * stood empty, to the sale or send that emptied it). Null when something is
+ * still held, or nothing ever came in. Takes the same input as
+ * {@link walkPosition}.
+ */
+export function lastClosedCycle(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): ClosedCycle | null {
+  let quantity = 0
+  let costPLN = 0
+  let openedBy: Transaction | null = null
+  let last: ClosedCycle | null = null
+  const position = walk(
+    transactions,
+    tradeFees,
+    undefined,
+    (t) => {
+      if (openedBy && quantity > 0) last = { quantity, costPLN, openedBy, closedBy: t }
+      quantity = 0
+      costPLN = 0
+      openedBy = null
+    },
+    (t, units, cost) => {
+      openedBy ??= t
+      quantity += units
+      costPLN += cost
+    },
+  )
+  return position.quantity === 0 ? last : null
+}
+
 function walk(
   transactions: Transaction[],
   tradeFees: TradeFees,
   onSale?: (id: string, result: SaleResult) => void,
   /** Called after an outflow that leaves nothing held. */
   onEmptied?: (t: Transaction) => void,
+  /** Called for each inflow, with its units and their cost. */
+  onInflow?: (t: Transaction, units: number, costPLN: number) => void,
 ): Position {
   let quantity = 0
   let costPLN = 0
@@ -189,8 +234,10 @@ function walk(
     const delta = quantityDelta(t)
     const feePLN = tradeFees.get(t.id) ?? 0
     if (delta > 0) {
+      const cost = Math.abs(t.amountPLN) + (t.type === 'buy' ? feePLN : 0)
       quantity += delta
-      costPLN += Math.abs(t.amountPLN) + (t.type === 'buy' ? feePLN : 0)
+      costPLN += cost
+      onInflow?.(t, delta, cost)
     } else if (delta < 0) {
       const leaving = -delta
       const removed = Math.min(leaving, quantity)

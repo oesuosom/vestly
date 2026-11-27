@@ -19,7 +19,9 @@ import {
   adjustmentTransactions,
   buildStatementTransactions,
   checkStatementHoldings,
+  closedCoinHoldings,
   newCoinHoldings,
+  storedQuantity,
   planStatementRows,
   type PlannedRow,
   type StatementHoldingsCheck,
@@ -115,10 +117,20 @@ export function RevolutStatementFlow({
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Only coins still held after the import need a price: the statement's
+  // closing amount, or what its rows leave when it has none.
   const noPriceSource = useMemo(() => {
     if (!statement) return []
     const coins = new Set([...rows.map((r) => r.symbol), ...Object.keys(statement.closing)])
-    return [...coins].filter((c) => !getCoinGeckoId(c)).sort()
+    const held = (c: string) => {
+      const closing = statement.closing[c]
+      if (closing) return closing.quantity > 0
+      const net = statement.rows
+        .filter((r) => r.symbol === c)
+        .reduce((q, r) => q + (r.type === 'buy' || r.type === 'receive' ? 1 : -1) * storedQuantity(r), 0)
+      return net > 1e-8
+    }
+    return [...coins].filter((c) => held(c) && !getCoinGeckoId(c)).sort()
   }, [rows, statement])
 
   const staking = statement ? Object.values(statement.staking).reduce((a, b) => a + b, 0) : 0
@@ -130,10 +142,21 @@ export function RevolutStatementFlow({
     const account = accountsNow.find((a) => a.id === accountId)
     const coins = [...new Set([...rows.map((r) => r.symbol), ...Object.keys(statement.closing)])]
     const created = account ? newCoinHoldings(account, log, statement, coins) : []
+    // Coins sold or sent out completely become closed holdings, like any closed position.
+    const closed = account ? closedCoinHoldings(account, log, statement, coins) : []
     let nextAccounts = accountsNow
-    if (account && created.length > 0) {
+    if (account && created.length + closed.length > 0) {
       const now = new Date().toISOString()
-      nextAccounts = accountsNow.map((a) => (a.id === accountId ? { ...a, holdings: [...a.holdings, ...created], lastUpdated: now } : a))
+      nextAccounts = accountsNow.map((a) =>
+        a.id !== accountId
+          ? a
+          : {
+              ...a,
+              holdings: [...a.holdings, ...created],
+              ...(closed.length > 0 && { closedHoldings: [...(a.closedHoldings ?? []), ...closed] }),
+              lastUpdated: now,
+            },
+      )
       replaceAccounts(nextAccounts)
     }
     const nextAccount = nextAccounts.find((a) => a.id === accountId)
@@ -147,7 +170,10 @@ export function RevolutStatementFlow({
       matching: matchingAfter,
       adjustments,
       staking,
-      holdings: created.length > 0 ? [`${plural(created.length, 'holding')} created`] : [],
+      holdings: [
+        ...(created.length > 0 ? [`${plural(created.length, 'holding')} created`] : []),
+        ...(closed.length > 0 ? [`${plural(closed.length, 'sold-out coin')} kept as closed ${closed.length === 1 ? 'position' : 'positions'}`] : []),
+      ],
     })
     if (changes.length > 0) {
       setSyncRows(changes)

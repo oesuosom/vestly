@@ -10,6 +10,9 @@ import { holdingsCheckNote } from '@/features/import/holdingsCheckApply'
 import { RevolutStatementFlow } from '@/features/import/RevolutStatementFlow'
 import type { LayoutPage } from '@/importers/pdfText'
 import type { Holding } from '@/types'
+import { MemoryRouter } from 'react-router-dom'
+import { Activity } from '@/pages/Activity'
+import { getRealizedPnL } from '@/domain/calculations'
 
 // The flow from a (made-up) statement to the done screen. The PDF reader is
 // replaced by the statement's lines; everything after it is real.
@@ -63,7 +66,7 @@ const coinRow = (table: HTMLElement, coin: string) => within(table).getByRole('r
 describe('preview', () => {
   it('shows what will be imported, what is left out and what couldn’t be read', async () => {
     renderFlow()
-    expect(await screen.findByText('8 transactions to import')).toBeTruthy()
+    expect(await screen.findByText('10 transactions to import')).toBeTruthy()
     expect(screen.getByText('1 staking reward left out')).toBeTruthy()
     expect(screen.getByText('1 row couldn’t be read')).toBeTruthy()
     expect(screen.getByText('1 Jan 2025 – 31 Dec 2025')).toBeTruthy()
@@ -97,10 +100,37 @@ describe('preview', () => {
     expect(receive.amountPLN).toBe(1500.5)
   })
 
-  it('warns about coins with no price source', async () => {
-    pages = [[...HEADER, 'Transactions', TX_HEADER, 'ZZZ Buy 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM']]
+  it('warns about coins with no price source, only when they are still held', async () => {
+    pages = [[
+      ...HEADER,
+      'Transactions',
+      TX_HEADER,
+      'ZZZ Buy 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM',
+      'QQQ Buy 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM',
+      'QQQ Sell 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 6, 2025, 3:04:12PM',
+      'OXT Buy 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM',
+      'GRT Buy 10 1.00 PLN 10.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM',
+    ]]
     renderFlow()
-    expect(await screen.findByText(/No price source for ZZZ/)).toBeTruthy()
+    // QQQ was sold out; OXT and GRT have a CoinGecko id now.
+    expect((await screen.findByText(/No price source for/)).textContent).toBe('No price source for ZZZ: its value stays at Revolut’s price until you change it.')
+  })
+
+  it('counts only unread Transactions rows as rows that couldn’t be read', async () => {
+    pages = [[
+      ...HEADER,
+      'Account summary',
+      'LINK Chainlink 5.00000000 LINK',
+      'Portfolio breakdown',
+      'LINK Chainlink 5.00000000 60.00 PLN 300.00 PLN 100%',
+      'Transactions',
+      TX_HEADER,
+      'LINK Buy 5 60.00 PLN 300.00 PLN 0.00 PLN Jan 5, 2025, 3:04:12PM',
+    ]]
+    renderFlow()
+    expect(await screen.findByText('1 transaction to import')).toBeTruthy()
+    expect(screen.queryByText(/couldn’t be read/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'View warnings' })).toBeNull()
   })
 })
 
@@ -110,9 +140,9 @@ describe('holdings check and done', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 
     expect(screen.getByText(/Revolut’s statement shows what you held on 31 Dec 2025\./).textContent)
-      .toContain('1 coin matches it. These 4 don’t:')
+      .toContain('2 coins match it. These 4 don’t:')
     const xrp = screen.getByRole('rowheader', { name: 'XRP' }).closest('table')!
-    expect(within(xrp).getByText('A row couldn’t be read · Fees estimated from the statement')).toBeTruthy()
+    expect(within(xrp).getByText('A row couldn’t be read · Coins in 99 vs Revolut’s 100 · Coins out 25,5 vs Revolut’s 25 · Fees estimated from the statement')).toBeTruthy()
     expect(within(xrp).getAllByRole('cell').map((c) => c.textContent).slice(1, 3)).toEqual(['73,5', '75'])
     const box = (label: RegExp) => screen.getByRole('checkbox', { name: label }) as HTMLInputElement
     expect(box(/Adjust: add 1,5 XRP at 0 PLN/).checked).toBe(true)
@@ -137,25 +167,25 @@ describe('holdings check and done', () => {
     expect([h.BTC.quantity, h.ETH.quantity, h.XRP.quantity, h.ADA.quantity]).toEqual([0.02, 0.02, 75, 10])
     expect(Object.values(h).every((x) => x.exchange === 'CC' && x.category === 'crypto')).toBe(true)
 
-    expect(screen.getByText('Imported 8 transactions into Revolut Crypto')).toBeTruthy()
-    expect(screen.getByText(/4 of 5 coins match Revolut’s statement of 31 Dec 2025, with 3 adjustments; the others were left as they are\. 1 staking reward was left out\./)).toBeTruthy()
+    expect(screen.getByText('Imported 10 transactions into Revolut Crypto')).toBeTruthy()
+    expect(screen.getByText(/5 of 6 coins match Revolut’s statement of 31 Dec 2025, with 3 adjustments; the others were left as they are\. 1 staking reward was left out\. 4 holdings created, 1 sold-out coin kept as closed position\./)).toBeTruthy()
   })
 
   it('says so on the done screen when everything matches, and a re-import adds nothing', async () => {
     const first = renderFlow()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     fireEvent.click(screen.getByRole('button', { name: 'Apply 4 changes' }))
-    expect(screen.getByText(/All 5 coins match Revolut’s statement of 31 Dec 2025, with 4 adjustments\./)).toBeTruthy()
+    expect(screen.getByText(/All 6 coins match Revolut’s statement of 31 Dec 2025, with 4 adjustments\./)).toBeTruthy()
     const count = portfolio.transactions.length
     first.unmount()
 
     renderFlow()
     expect(await screen.findByText('0 transactions to import')).toBeTruthy()
-    expect(screen.getByText('8 already imported')).toBeTruthy()
+    expect(screen.getByText('10 already imported')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
     // Nothing differs any more, so the check is skipped.
     expect(screen.getByText('No new transactions for Revolut Crypto')).toBeTruthy()
-    expect(screen.getByText(/All 5 coins match/)).toBeTruthy()
+    expect(screen.getByText(/All 6 coins match/)).toBeTruthy()
     expect(portfolio.transactions).toHaveLength(count)
   })
 
@@ -165,6 +195,35 @@ describe('holdings check and done', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     expect(portfolio.transactions.some((t) => t.externalId.startsWith('revolut-stmt-adjust-'))).toBe(false)
     expect(holdings().XRP.quantity).toBe(73.5)
-    expect(screen.getByText(/1 of 5 coins match/)).toBeTruthy()
+    expect(screen.getByText(/2 of 6 coins match/)).toBeTruthy()
+  })
+})
+
+describe('coins sold out during the statement', () => {
+  it('are kept as closed holdings, so Activity shows their icon, and realized profit is unchanged', async () => {
+    const view = renderFlow()
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 4 changes' }))
+    const before = getRealizedPnL(portfolio.transactions)
+
+    const account = portfolio.accounts[0]
+    expect(account.holdings.some((h) => h.ticker === 'DOT')).toBe(false)
+    const dot = account.closedHoldings!.find((h) => h.ticker === 'DOT')!
+    const sale = portfolio.transactions.find((t) => t.type === 'sell' && t.ticker === 'DOT')!
+    expect(dot).toMatchObject({ name: 'Polkadot', category: 'crypto', exchange: 'CC', closedAt: sale.date.slice(0, 10) })
+    expect(getRealizedPnL(portfolio.transactions)).toBe(before)
+    view.unmount()
+
+    render(
+      <PortfolioProvider>
+        <SettingsProvider>
+          <MemoryRouter initialEntries={['/activity']}><Activity /></MemoryRouter>
+        </SettingsProvider>
+      </PortfolioProvider>,
+    )
+    const dotRows = (await screen.findAllByText('Polkadot')).map((el) => el.closest('tr')!)
+    expect(dotRows.length).toBeGreaterThan(0)
+    // The icon sits next to the name only when Activity finds the coin's holding.
+    expect(dotRows.every((row) => row.querySelector('td:nth-child(3) span.relative'))).toBe(true)
   })
 })
