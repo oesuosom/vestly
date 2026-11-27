@@ -85,7 +85,7 @@ describe('planHoldingSync — XTB', () => {
   })
 })
 
-describe('planHoldingSync — Revolut BTC', () => {
+describe('planHoldingSync — Revolut crypto', () => {
   const btc = (quantity: number) =>
     holding({ id: 'btc', name: 'Bitcoin', ticker: 'BTC', category: 'crypto', quantity, purchasePrice: 100000 })
   const rev = (fields: Partial<Transaction> & Pick<Transaction, 'type' | 'date' | 'amountPLN'>) =>
@@ -99,9 +99,9 @@ describe('planHoldingSync — Revolut BTC', () => {
   })
 
   it('selling everything closes the holding with the proceeds after the fee', () => {
-    // Ids as the BTC parser builds them, which is how the fee is paired with its sale.
-    const sale = rev({ type: 'sell', date: '2026-03-01T00:00:00.000Z', amountPLN: 300000, quantity: 2, externalId: 'revolut-btc-sell-2026-03-01-2-300000' })
-    const fee = rev({ type: 'fee', date: '2026-03-01T00:00:00.000Z', amountPLN: -600, ticker: undefined, externalId: 'revolut-btc-sell-fee-2026-03-01-2' })
+    // Ids as the statement import builds them, which is how the fee is paired with its sale.
+    const sale = rev({ type: 'sell', date: '2026-03-01T00:00:00.000Z', amountPLN: 300000, quantity: 2, externalId: 'revolut-stmt-BTC-sell-2026-03-01T00:00:00.000Z-2-1' })
+    const fee = rev({ type: 'fee', date: '2026-03-01T00:00:00.000Z', amountPLN: -600, ticker: undefined, externalId: 'revolut-stmt-BTC-sell-2026-03-01T00:00:00.000Z-2-1-fee' })
     const rows = planHoldingSync(account([btc(2)], 'crypto'), [buy, sale, fee], [sale, fee])
     expect(rows).toMatchObject([{ kind: 'close', date: '2026-03-01', proceedsPLN: 299400 }])
   })

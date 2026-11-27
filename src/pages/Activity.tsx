@@ -23,6 +23,7 @@ import { useFocusTrap } from '@/hooks/useFocusTrap'
 import type { Account, Holding, Transaction, TransactionType } from '@/types'
 import { staticLookupInstrument } from '@/domain/instrumentLookup'
 import { holdingsCheckNote } from '@/features/import/holdingsCheckApply'
+import { isAdjustmentRow } from '@/importers/revolutStatementImport'
 import { Tooltip } from '@/components/ui/Tooltip'
 import { upsertSyntheticCashHolding } from '@/domain/holdings'
 import {
@@ -56,6 +57,9 @@ const TYPE_META: Record<TransactionType, TypeMeta> = {
   receive:         { label: 'Receive',  variant: 'positive'  },
 }
 
+
+/** A holdings-check adjustment (a 0 PLN receive or send), whatever its type. */
+const ADJUSTMENT_META: TypeMeta = { label: 'Adjustment', variant: 'neutral' }
 
 // ─────────────────────────────────────────
 // Formatting helpers
@@ -707,7 +711,8 @@ export function Activity() {
               </tr>
             ) : (
               filteredRows.map(t => {
-                const meta = TYPE_META[t.type]
+                // The Revolut statement's 0 PLN rows that bring a coin in line read as what they are.
+                const meta = isAdjustmentRow(t) ? ADJUSTMENT_META : TYPE_META[t.type]
                 const instrument = t.instrument ?? t.relatedInstrument
                 const note = holdingsCheckNote(t)
                 const ticker = t.ticker ?? t.relatedTicker

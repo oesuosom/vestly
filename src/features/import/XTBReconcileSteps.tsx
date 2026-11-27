@@ -26,6 +26,8 @@ import type {
   UnresolvedRow,
 } from '@/importers/xtbPostProcessing'
 import type { AssetCategory } from '@/types'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 // ─────────────────────────────────────────
 // Types
@@ -150,8 +152,8 @@ export function UnmatchedStep({
   }))
 
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5 flex flex-col gap-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5 flex flex-col gap-5">
         <p className="text-sm text-foregroundMuted tracking-[-0.35px]">
           The following instruments have buy transactions but no matching holding. Select which ones
           to create as holdings. Quantity and cost will be calculated from the transaction history.
@@ -305,7 +307,7 @@ export function UnmatchedStep({
         <p className="text-sm text-accent tracking-[-0.35px]">
           Current price is set to the calculated average cost — update it manually after creation.
         </p>
-      </div>
+      </ImportScrollBody>
 
       {/* Footer */}
       <div className="border-t border-borderLight p-5 flex items-center justify-between">
@@ -372,8 +374,8 @@ export function CostBasisStep({
   onSkip: () => void
 }) {
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5 flex flex-col gap-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5 flex flex-col gap-5">
         <p className="text-sm text-foregroundMuted tracking-[-0.35px]">
           Transaction data is available to calculate weighted-average cost bases for{' '}
           {diffRows.length} holding{diffRows.length !== 1 ? 's' : ''}. This will update their purchase prices.
@@ -433,7 +435,7 @@ export function CostBasisStep({
           Prices are per-unit, in PLN: the average cost of the units you still hold in this
           account, after any sales. Holdings without matching transactions are not affected.
         </p>
-      </div>
+      </ImportScrollBody>
 
       {/* Footer */}
       <div className="border-t border-borderLight p-5 flex items-center justify-between">

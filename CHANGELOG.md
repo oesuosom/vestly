@@ -7,8 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Import Revolut's Crypto Account Statement** — one PDF from Revolut now imports the buys,
+  sells, sends and receives of every coin for the period you chose, with each trade's fee as its
+  own row and each transaction at its real time. Whether Revolut took a fee out of the amount or
+  added it on top is worked out per coin from the statement's own totals, so coins and costs come
+  out right either way, and rounding differences from the statement's fees are absorbed into its
+  own rows: a coin you sold out closes on the day of its last sale, with that sale's result. The
+  preview counts the transactions per coin, lets you change what received coins cost you
+  (Revolut's value on the day is filled in), and lists any row it couldn't read. Staking rewards
+  are left out for now. Afterwards, each coin is compared with what the statement says you held
+  on its last day; where there is a real gap (coins held before the period, staking rewards, a
+  row that couldn't be read), a 0 PLN adjustment, ticked and shown in Activity as "Adjustment",
+  brings it in line without changing what you paid. New coins become crypto holdings, and coins
+  sold out during the period are kept as closed positions. Importing the same or an overlapping
+  period again adds nothing. Prices for The Graph (GRT) and Orchid (OXT) now come from CoinGecko.
+
+### Changed
+
+- **Import dialogs scroll instead of growing past the screen** — every import step is now at
+  most 576 px tall (less on short screens). The title and the buttons stay in place and only
+  the middle scrolls, with a soft fade where there is more to see.
+
 ### Removed
 
+- **The per-transaction Revolut PDF import** — one statement per buy or sell and one transfer
+  confirmation per send or receive, for BTC and ETH only. Use the Crypto Account Statement
+  instead. Transactions it imported still show; their fees are no longer added to the trade's
+  cost.
 - **The time zone setting in Settings → General** — it was saved but nothing used it. Vestly
   always uses your device's time zone for dates. Settings and backups that still contain it load
   and restore as before.

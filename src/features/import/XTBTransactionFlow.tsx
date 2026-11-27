@@ -26,6 +26,8 @@ import { canConvertOpenPrice, nbpRates, withStatementCurrencies } from './holdin
 import type { DevSeed } from './devSeed'
 import type { HoldingSyncRow } from '@/domain/holdingSync'
 import type { Transaction } from '@/types'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 // ─────────────────────────────────────────
 // Types
@@ -271,8 +273,8 @@ function PreviewStep({
   }, [transactions])
 
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5 flex flex-col gap-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5 flex flex-col gap-5">
         {/* Stats */}
         <div className="flex flex-col gap-[7px]">
           <div className="flex items-center gap-2">
@@ -396,7 +398,7 @@ function PreviewStep({
             No new transactions found — all rows were already imported.
           </p>
         )}
-      </div>
+      </ImportScrollBody>
 
       {/* Footer */}
       <div className="border-t border-borderLight p-5 flex items-center justify-between">

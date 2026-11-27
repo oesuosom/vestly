@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { CircleCheck } from '@/generated/icons'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 /**
  * Message plus optional second line, used by the spinner and done cards.
@@ -62,10 +64,10 @@ export function ImportSpinnerCard({ message, detail }: { message: string; detail
 /** Parsing failed — the only way on is back. */
 export function ImportErrorCard({ message, onBack }: { message: string; onBack: () => void }) {
   return (
-    <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-      <div className="p-5">
+    <div className={IMPORT_CARD}>
+      <ImportScrollBody className="p-5">
         <InlineAlert variant="negative">{message}</InlineAlert>
-      </div>
+      </ImportScrollBody>
       <div className="border-t border-borderLight p-5 flex items-center">
         <Button variant="secondary" onClick={onBack} className="w-20">Back</Button>
       </div>

@@ -4,7 +4,11 @@
  * Wizard steps:
  * 1. upload  — full-modal drop zone, auto-detects format, tags each file
  * 2. account — select (or confirm) the target account, with a holding-type preview
- * 3. flow    — delegates to CSVImportFlow / EMaklerImportFlow / XTBTransactionFlow
+ * 3. flow    — delegates to CSVImportFlow / EMaklerImportFlow / XTBTransactionFlow /
+ *              XTBConfirmationFlow / RevolutStatementFlow
+ *
+ * The dialog is capped at 576 px (less on short screens): each step's middle
+ * scrolls (`ImportScrollBody`) while the header and footer stay put.
  */
 import { useCallback, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 import { Modal } from '@/components/ui/Modal'
@@ -27,11 +31,12 @@ import { EMaklerImportFlow } from './EMaklerImportFlow'
 import { XTBTransactionFlow } from './XTBTransactionFlow'
 import { XTBConfirmationFlow } from './XTBConfirmationFlow'
 import { FORMAT_SPECS, type BadgeVariant } from './importFormats'
-import { RevolutCryptoFlow } from './RevolutCryptoFlow'
-import { RevolutBtcFlow } from './RevolutBtcFlow'
+import { RevolutStatementFlow } from './RevolutStatementFlow'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { AccountType } from '@/types'
 import { Cross, Clipboard, FolderOpenedBold } from '@/generated/icons'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 // ─────────────────────────────────────────
 // Props
@@ -268,18 +273,19 @@ export function UnifiedImportModal({
       onDragLeave={step === 'upload' ? () => setDragOver(false) : undefined}
       onDrop={step === 'upload' ? handleDrop : undefined}
       dragActive={step === 'upload' && dragOver}
+      capHeight
     >
       {/* ── Step 1: Upload ─────────────────────────────── */}
       {/* The white surface only appears once files are present — the empty state
           sits directly on the modal background (per Figma). */}
       {step === 'upload' && (
         <div
-          className={`rounded-lg overflow-hidden flex flex-col ${
+          className={`rounded-lg overflow-hidden flex flex-col min-h-0 ${
             uploadedFiles.length > 0 || isEMakler ? 'bg-surface shadow-xs' : ''
           }`}
         >
           {(uploadedFiles.length > 0 || isEMakler) && (
-            <div className="p-5 flex flex-col gap-5">
+            <ImportScrollBody className="p-5 flex flex-col gap-5">
               {uploadedFiles.length > 0 && (
                 <div className="flex flex-col gap-2">
                   {uploadedFiles.map((uf, i) => (
@@ -307,7 +313,7 @@ export function UnifiedImportModal({
                   Tip: add both the portfolio and order-history CSV files for the best result.
                 </InlineAlert>
               )}
-            </div>
+            </ImportScrollBody>
           )}
 
           <div className="border-t border-borderLight p-5 flex items-center justify-between">
@@ -329,8 +335,8 @@ export function UnifiedImportModal({
 
       {/* ── Step 2: Account ────────────────────────────── */}
       {step === 'account' && (
-        <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-          <div className="p-5 flex flex-col gap-5">
+        <div className={IMPORT_CARD}>
+          <ImportScrollBody className="p-5 flex flex-col gap-5">
             {accounts.length > 0 ? (
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium text-foregroundMuted tracking-[-0.35px]">
@@ -353,7 +359,7 @@ export function UnifiedImportModal({
                 No accounts exist yet. Create an account first on the Accounts page.
               </InlineAlert>
             )}
-          </div>
+          </ImportScrollBody>
 
           <div className="border-t border-borderLight p-5 flex items-center justify-between">
             <Button variant="secondary" type="button" onClick={() => setStep('upload')} className="w-20">
@@ -504,37 +510,14 @@ export function UnifiedImportModal({
       )
     }
 
-    // Revolut BTC: triggered when any Transfer Confirmation PDFs are uploaded.
-    // Collects both revolut_btc_transfer and revolut_crypto files — statement PDFs
-    // (revolut_crypto) can be either ETH or BTC, so we pass them all to the BTC parser
-    // which classifies them by content. The ETH branch below only fires when no BTC
-    // transfer PDFs are present.
-    if (type === 'revolut_btc_transfer') {
-      const btcFiles = uploadedFiles
-        .filter((uf) => uf.format.type === 'revolut_btc_transfer' || uf.format.type === 'revolut_crypto')
-        .map((uf) => uf.file)
-      if (btcFiles.length === 0) return null
+    // Revolut's Crypto Account Statement: one PDF holds every coin.
+    if (type === 'revolut_statement') {
+      const file = uploadedFiles.find((uf) => uf.format.type === 'revolut_statement')?.file
+      if (!file) return null
       return (
-        <RevolutBtcFlow
+        <RevolutStatementFlow
           accountId={selectedAccount.id}
-          files={btcFiles}
-          onComplete={handleFlowComplete}
-          onBack={handleFlowBack}
-          onDoneChange={setFlowDone}
-        />
-      )
-    }
-
-    // Revolut ETH: statement PDFs only (no Transfer Confirmation PDFs in the upload)
-    if (type === 'revolut_crypto') {
-      const revolutFiles = uploadedFiles
-        .filter((uf) => uf.format.type === 'revolut_crypto')
-        .map((uf) => uf.file)
-      if (revolutFiles.length === 0) return null
-      return (
-        <RevolutCryptoFlow
-          accountId={selectedAccount.id}
-          files={revolutFiles}
+          file={file}
           onComplete={handleFlowComplete}
           onBack={handleFlowBack}
           onDoneChange={setFlowDone}

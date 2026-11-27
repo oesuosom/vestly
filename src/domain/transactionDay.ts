@@ -5,7 +5,8 @@ import type { Transaction } from '@/types'
  * stored under, `date.slice(0, 10)`, never converted to the viewer's zone.
  *
  * XTB rows carry real UTC times, so this is their UTC day: the day XTB's own
- * file shows. Revolut, manual and Close position rows are stored at
+ * file shows. Revolut statement rows carry real UTC times too (converted
+ * from the statement's local times). Manual and Close position rows are stored at
  * `T00:00:00.000Z` (or date-only), so it is the day that was entered. Cash,
  * positions, the chart and tax years all count a row on this day, so every
  * screen shows it too. A row at 23:30 UTC stays on its day in Warsaw, where

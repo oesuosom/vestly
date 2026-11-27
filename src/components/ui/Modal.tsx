@@ -5,6 +5,7 @@ import { Cross } from '@/generated/icons'
 import { useEnterExit } from '@/hooks/useEnterExit'
 import { useEscapeKey } from '@/hooks/useEscapeKey'
 import { useScrollLock } from '@/hooks/useScrollLock'
+import { CAPPED_PANEL_HEIGHT } from './modalLayout'
 
 type ModalSize = 'sm' | 'md' | 'lg'
 type ModalVariant = 'default' | 'card'
@@ -28,6 +29,12 @@ type ModalProps = {
   onDrop?: DragEventHandler<HTMLDivElement>
   /** When true, highlights the panel to signal an active drag-over. */
   dragActive?: boolean
+  /**
+   * `card` variant only — cap the panel at 576 px (less on short screens, with
+   * a 16 px margin from the viewport's edges). The header stays put and the
+   * content must scroll inside itself (the import steps' `ImportScrollBody`).
+   */
+  capHeight?: boolean
   children: ReactNode
 }
 
@@ -43,7 +50,7 @@ const cardWidthClasses: Record<ModalSize, string> = {
   lg: 'w-[640px]',
 }
 
-function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default', accentColor, preview, hideHeader, onDragOver, onDragLeave, onDrop, dragActive, children }: ModalProps) {
+function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default', accentColor, preview, hideHeader, onDragOver, onDragLeave, onDrop, dragActive, capHeight, children }: ModalProps) {
   const { mounted, open } = useEnterExit(isOpen, 350)
 
   useEscapeKey(open, onClose)
@@ -54,6 +61,8 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
 
   const isCard = variant === 'card'
   const widthClass = isCard ? cardWidthClasses[size] : sizeClasses[size]
+  const capped = isCard && capHeight
+  const heightClass = capped ? `${CAPPED_PANEL_HEIGHT} flex flex-col overflow-hidden` : 'max-h-[90vh] overflow-y-auto overscroll-contain'
 
   return (
     <div
@@ -61,7 +70,7 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
       onClick={onClose}
     >
       <div
-        className={`relative ${isCard ? 'bg-background' : 'bg-surface'} rounded-xl shadow-md border ${dragActive ? 'border-foreground ring-1 ring-foreground' : 'border-border'} ${widthClass} max-h-[90vh] overflow-y-auto overscroll-contain t-dialog-slide transition-colors`}
+        className={`relative ${isCard ? 'bg-background' : 'bg-surface'} rounded-xl shadow-md border ${dragActive ? 'border-foreground ring-1 ring-foreground' : 'border-border'} ${widthClass} ${heightClass} t-dialog-slide transition-colors`}
         data-open={open}
         onClick={(e) => e.stopPropagation()}
         onDragOver={onDragOver}
@@ -80,7 +89,7 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
               />
             )}
             {!hideHeader && (
-              <div className="relative flex items-center gap-2 px-6 pt-5 pb-3">
+              <div className="relative shrink-0 flex items-center gap-2 px-6 pt-5 pb-3">
                 <p className="flex-1 text-sm font-semibold text-foreground [font-feature-settings:'lnum'_1,'tnum'_1]">
                   {title}
                 </p>
@@ -93,11 +102,11 @@ function ModalContent({ isOpen, onClose, title, size = 'sm', variant = 'default'
                 </button>
               </div>
             )}
-            {preview && <div className="relative">{preview}</div>}
+            {preview && <div className="relative shrink-0">{preview}</div>}
             {hideHeader ? (
-              <div className="relative">{children}</div>
+              <div className={`relative ${capped ? 'flex min-h-0 flex-col' : ''}`}>{children}</div>
             ) : (
-              <div className="relative p-1.5">{children}</div>
+              <div className={`relative p-1.5 ${capped ? 'flex min-h-0 flex-col' : ''}`}>{children}</div>
             )}
           </>
         ) : (

@@ -371,10 +371,10 @@ describe('calculateAverageCostBasis', () => {
     const eth = { accountId: 'revolut', source: 'revolut_crypto' as const, instrument: 'Ethereum', ticker: 'ETH' }
     const fee = { accountId: 'revolut', source: 'revolut_crypto' as const, type: 'fee' as const }
     const transactions = [
-      makeTx({ ...eth, id: 't1', externalId: 'revolut-eth-2024-09-10-0.4-2400-24',      date: '2024-09-10T00:00:00.000Z', quantity: 0.4,  amountPLN: -2400 }),
-      makeTx({ ...fee, id: 't2', externalId: 'revolut-eth-fee-2024-09-10-0.4-24',       date: '2024-09-10T00:00:00.000Z', amountPLN: -24 }),
-      makeTx({ ...eth, id: 't3', externalId: 'revolut-eth-2024-12-01-0.28-1850-18.5',   date: '2024-12-01T00:00:00.000Z', quantity: 0.28, amountPLN: -1850 }),
-      makeTx({ ...fee, id: 't4', externalId: 'revolut-eth-fee-2024-12-01-0.28-18.5',    date: '2024-12-01T00:00:00.000Z', amountPLN: -18.5 }),
+      makeTx({ ...eth, id: 't1', externalId: 'revolut-stmt-ETH-buy-2024-09-10T10:00:00.000Z-0.4-1',      date: '2024-09-10T10:00:00.000Z', quantity: 0.4,  amountPLN: -2400 }),
+      makeTx({ ...fee, id: 't2', externalId: 'revolut-stmt-ETH-buy-2024-09-10T10:00:00.000Z-0.4-1-fee',  date: '2024-09-10T10:00:00.000Z', amountPLN: -24 }),
+      makeTx({ ...eth, id: 't3', externalId: 'revolut-stmt-ETH-buy-2024-12-01T10:00:00.000Z-0.28-1',     date: '2024-12-01T10:00:00.000Z', quantity: 0.28, amountPLN: -1850 }),
+      makeTx({ ...fee, id: 't4', externalId: 'revolut-stmt-ETH-buy-2024-12-01T10:00:00.000Z-0.28-1-fee', date: '2024-12-01T10:00:00.000Z', amountPLN: -18.5 }),
     ]
     const result = calculateAverageCostBasis(transactions, 'revolut', 'ETH')
     expect(result.quantity).toBeCloseTo(0.68, 10)
@@ -559,7 +559,7 @@ describe('getIncomeSummary', () => {
 
 // ─── getRealizedPnL ───────────────────────────────────────────────────────────
 
-/** A Revolut-style row: midnight timestamp, generated externalId. */
+/** A Revolut-style row: generated externalId, fee rows without a ticker. */
 function revolutTx(overrides: Partial<Transaction> & { externalId: string }): Transaction {
   return makeTx({
     id: overrides.externalId,
@@ -633,10 +633,10 @@ describe('getRealizedPnL', () => {
     // Sell 0.5 BTC for 150,000 − 1,500 fee → proceeds 148,500.
     // 148,500 − 101,000 = +47,500 (it was +50,000 with the fees left out).
     const transactions = [
-      revolutTx({ externalId: 'revolut-btc-2025-01-10-0.5-100000',      type: 'buy',  date: '2025-01-10T00:00:00.000Z', quantity: 0.5, amountPLN: -100000 }),
-      revolutTx({ externalId: 'revolut-btc-fee-2025-01-10-0.5',         type: 'fee',  date: '2025-01-10T00:00:00.000Z', amountPLN: -1000 }),
-      revolutTx({ externalId: 'revolut-btc-sell-2025-03-10-0.5-150000', type: 'sell', date: '2025-03-10T00:00:00.000Z', quantity: 0.5, amountPLN: 150000 }),
-      revolutTx({ externalId: 'revolut-btc-sell-fee-2025-03-10-0.5',    type: 'fee',  date: '2025-03-10T00:00:00.000Z', amountPLN: -1500 }),
+      revolutTx({ externalId: 'revolut-stmt-BTC-buy-2025-01-10T09:00:00.000Z-0.5-1',      type: 'buy',  date: '2025-01-10T09:00:00.000Z', quantity: 0.5, amountPLN: -100000 }),
+      revolutTx({ externalId: 'revolut-stmt-BTC-buy-2025-01-10T09:00:00.000Z-0.5-1-fee',  type: 'fee',  date: '2025-01-10T09:00:00.000Z', amountPLN: -1000 }),
+      revolutTx({ externalId: 'revolut-stmt-BTC-sell-2025-03-10T09:00:00.000Z-0.5-1',     type: 'sell', date: '2025-03-10T09:00:00.000Z', quantity: 0.5, amountPLN: 150000 }),
+      revolutTx({ externalId: 'revolut-stmt-BTC-sell-2025-03-10T09:00:00.000Z-0.5-1-fee', type: 'fee',  date: '2025-03-10T09:00:00.000Z', amountPLN: -1500 }),
     ]
     expect(getRealizedPnL(transactions)).toBe(47500)
   })

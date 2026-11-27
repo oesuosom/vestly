@@ -45,6 +45,8 @@ import {
 } from './eMaklerPreview'
 import type { DevSeed } from './devSeed'
 import { todayISO } from '@/utils/today'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 export type { EMaklerPreviewRow } from './eMaklerPreview'
 
@@ -401,8 +403,8 @@ export function EMaklerImportFlow({
   // Step: Preview
   if (step === 'preview' && importResult) {
     return (
-      <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-        <div className="p-5 flex flex-col gap-5">
+      <div className={IMPORT_CARD}>
+        <ImportScrollBody className="p-5 flex flex-col gap-5">
           {/* Orders-only banner */}
           {ordersOnlyMode && counts.adds > 0 && (
             <InlineAlert variant="warning">
@@ -601,7 +603,7 @@ export function EMaklerImportFlow({
               blank to import with zero cost basis and update it later.
             </p>
           )}
-        </div>
+        </ImportScrollBody>
 
         <div className="border-t border-borderLight p-5 flex items-center gap-2">
           <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{footerCounter}</p>

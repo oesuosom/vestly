@@ -3,8 +3,8 @@ import type { Transaction } from '@/types'
 import { pairTradeFees } from './tradeFees'
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
-// The externalIds below are written out the way the Revolut parsers build them
-// (revolutBtcParser.ts, revolutCryptoParser.ts). The row's `id` is its externalId
+// The externalIds below are written out the way the Revolut statement import
+// builds them (importers/revolutStatementImport.ts). The row's `id` is its externalId
 // unless given, so expectations can name the trade directly.
 
 function row(
@@ -30,123 +30,98 @@ const entries = (transactions: Transaction[]) => Object.fromEntries(pairTradeFee
 
 // ─── pairTradeFees ─────────────────────────────────────────────────────────────
 
+const BUY = 'revolut-stmt-BTC-buy-2025-01-10T09:00:00.000Z-0.5-1'
+const SELL = 'revolut-stmt-BTC-sell-2025-03-10T09:00:00.000Z-0.5-1'
+
 describe('pairTradeFees', () => {
   it('returns nothing when there are no separately stored fees', () => {
     expect(entries([])).toEqual({})
     expect(entries([row('buy', 'xtb-123', -1000, { source: 'xtb_import' })])).toEqual({})
   })
 
-  it('pairs a BTC buy with its fee — the buy id carries the amount, the fee id does not', () => {
-    const transactions = [
-      row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000),
-      row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000),
-    ]
-    expect(entries(transactions)).toEqual({ 'revolut-btc-2025-01-10-0.5-100000': 1000 })
+  it('pairs a buy with its fee: the fee id is the trade id plus "-fee"', () => {
+    const transactions = [row('buy', BUY, -100000), row('fee', `${BUY}-fee`, -1000)]
+    expect(entries(transactions)).toEqual({ [BUY]: 1000 })
   })
 
-  it('pairs a BTC sale with its own fee, not with a buy fee of the same day and quantity', () => {
+  it('pairs a sale with its own fee, not with a buy fee', () => {
     const transactions = [
-      row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000),
-      row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000),
-      row('sell', 'revolut-btc-sell-2025-01-10-0.5-150000', 150000),
-      row('fee', 'revolut-btc-sell-fee-2025-01-10-0.5', -1500),
+      row('buy', BUY, -100000),
+      row('fee', `${BUY}-fee`, -1000),
+      row('sell', SELL, 150000),
+      row('fee', `${SELL}-fee`, -1500),
     ]
-    expect(entries(transactions)).toEqual({
-      'revolut-btc-2025-01-10-0.5-100000': 1000,
-      'revolut-btc-sell-2025-01-10-0.5-150000': 1500,
-    })
+    expect(entries(transactions)).toEqual({ [BUY]: 1000, [SELL]: 1500 })
   })
 
-  it('pairs an ETH buy with its fee — both ids carry the fee, only the buy id carries the amount', () => {
+  it('keeps two identical rows of one statement apart by their occurrence', () => {
+    const second = BUY.replace(/-1$/, '-2')
     const transactions = [
-      row('buy', 'revolut-eth-2021-01-28-0.00387433-19.49-0.49', -19.49),
-      row('fee', 'revolut-eth-fee-2021-01-28-0.00387433-0.49', -0.49),
+      row('buy', BUY, -100000),
+      row('fee', `${BUY}-fee`, -1000),
+      row('buy', second, -100000),
+      row('fee', `${second}-fee`, -1000),
     ]
-    expect(entries(transactions)).toEqual({ 'revolut-eth-2021-01-28-0.00387433-19.49-0.49': 0.49 })
-  })
-
-  it('keeps two ETH buys of the same day and quantity apart when their fees differ', () => {
-    const transactions = [
-      row('buy', 'revolut-eth-2021-01-28-0.1-500-5', -500),
-      row('fee', 'revolut-eth-fee-2021-01-28-0.1-5', -5),
-      row('buy', 'revolut-eth-2021-01-28-0.1-510-5.1', -510),
-      row('fee', 'revolut-eth-fee-2021-01-28-0.1-5.1', -5.1),
-    ]
-    expect(entries(transactions)).toEqual({
-      'revolut-eth-2021-01-28-0.1-500-5': 5,
-      'revolut-eth-2021-01-28-0.1-510-5.1': 5.1,
-    })
+    expect(entries(transactions)).toEqual({ [BUY]: 1000, [second]: 1000 })
   })
 
   it('reads a quantity that JavaScript prints in exponent form', () => {
     // 0.0000001 prints as "1e-7", which puts an extra hyphen in the id.
-    const transactions = [
-      row('buy', 'revolut-btc-2025-01-10-1e-7-0.05', -0.05),
-      row('fee', 'revolut-btc-fee-2025-01-10-1e-7', -0.01),
-    ]
-    expect(entries(transactions)).toEqual({ 'revolut-btc-2025-01-10-1e-7-0.05': 0.01 })
+    const id = 'revolut-stmt-BTC-buy-2025-01-10T09:00:00.000Z-1e-7-1'
+    expect(entries([row('buy', id, -0.05), row('fee', `${id}-fee`, -0.01)])).toEqual({ [id]: 0.01 })
   })
 
   it('leaves a trade without a fee row out', () => {
-    // Revolut charged no fee, so the parser stored no fee row.
-    expect(entries([row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000)])).toEqual({})
+    // Revolut charged no fee, so the import stored no fee row.
+    expect(entries([row('buy', BUY, -100000)])).toEqual({})
   })
 
   it('leaves out fees that belong to no trade', () => {
     const transactions = [
-      row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000),            // its buy was deleted
-      row('fee', 'xtb-456', -5, { source: 'xtb_import' }),            // not a trade fee at all
-      row('buy', 'revolut-btc-2025-02-10-0.5-100000', -100000, { date: '2025-02-10T00:00:00.000Z' }),
+      row('fee', `${BUY}-fee`, -1000),                          // its buy was deleted
+      row('fee', 'xtb-456', -5, { source: 'xtb_import' }),      // not a trade fee at all
+      row('buy', SELL.replace('sell', 'buy'), -100000),
     ]
     expect(entries(transactions)).toEqual({})
   })
 
-  it('does not treat sends, receives or fee rows as trades', () => {
+  it('does not treat sends, receives, adjustments or fee rows as trades', () => {
     const transactions = [
-      row('send', 'revolut-btc-send-2025-01-10-0.5', 0),
-      row('receive', 'revolut-btc-receive-2025-01-10-0.5', 0),
+      row('send', 'revolut-stmt-BTC-send-2025-01-10T09:00:00.000Z-0.5-1', 0),
+      row('receive', 'revolut-stmt-BTC-receive-2025-01-10T09:00:00.000Z-0.5-1', 0),
+      row('receive', 'revolut-stmt-adjust-BTC-2025-12-31-0.001', 0),
+      row('fee', `${BUY}-fee`, -1000),
+    ]
+    expect(entries(transactions)).toEqual({})
+  })
+
+  it('no longer pairs rows from the retired per-transaction import, and does not fail on them', () => {
+    const transactions = [
+      row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000),
       row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000),
+      row('buy', 'revolut-eth-2021-01-28-0.1-500-5', -500),
+      row('fee', 'revolut-eth-fee-2021-01-28-0.1-5', -5),
     ]
     expect(entries(transactions)).toEqual({})
   })
 
   it('never pairs across accounts', () => {
     const transactions = [
-      row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000, { id: 'buy-a', accountId: 'a' }),
-      row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000, { id: 'fee-b', accountId: 'b' }),
+      row('buy', BUY, -100000, { id: 'buy-a', accountId: 'a' }),
+      row('fee', `${BUY}-fee`, -1000, { id: 'fee-b', accountId: 'b' }),
     ]
     expect(entries(transactions)).toEqual({})
   })
 
-  describe('several trades behind one fee id', () => {
-    // Two BTC buys of the same quantity on the same day have different buy ids
-    // (the amounts differ) but the same fee id.
-    const buys = [
-      row('buy', 'revolut-btc-2025-01-10-0.5-100000', -100000),
-      row('buy', 'revolut-btc-2025-01-10-0.5-101000', -101000),
+  it('shares fee rows stored under one id between the trades that point at it', () => {
+    // Two trades in different accounts never share; within one account two
+    // trades with the same id can only come from hand-edited data. The fees
+    // are then split, and add up to exactly the fee rows.
+    const transactions = [
+      row('buy', BUY, -100000, { id: 'buy-1' }),
+      row('buy', BUY, -100000, { id: 'buy-2' }),
+      row('fee', `${BUY}-fee`, -1000, { id: 'fee-1' }),
     ]
-
-    it('splits the fees evenly when both fee rows were stored', () => {
-      const transactions = [
-        ...buys,
-        row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000, { id: 'fee-1' }),
-        row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1010, { id: 'fee-2' }),
-      ]
-      // (1,000 + 1,010) / 2 = 1,005 each; 2,010 in total, the same as the fee rows.
-      expect(entries(transactions)).toEqual({
-        'revolut-btc-2025-01-10-0.5-100000': 1005,
-        'revolut-btc-2025-01-10-0.5-101000': 1005,
-      })
-    })
-
-    it('shares a single stored fee row rather than counting it once per trade', () => {
-      // Imported in two goes, the second fee row is dropped as a duplicate id.
-      const transactions = [...buys, row('fee', 'revolut-btc-fee-2025-01-10-0.5', -1000)]
-      // 1,000 / 2 = 500 each; 1,000 in total, not 2,000.
-      expect(entries(transactions)).toEqual({
-        'revolut-btc-2025-01-10-0.5-100000': 500,
-        'revolut-btc-2025-01-10-0.5-101000': 500,
-      })
-    })
+    expect(entries(transactions)).toEqual({ 'buy-1': 500, 'buy-2': 500 })
   })
 })

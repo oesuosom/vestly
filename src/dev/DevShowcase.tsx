@@ -41,8 +41,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CSVImportFlow } from '@/features/import/CSVImportFlow'
 import { EMaklerImportFlow } from '@/features/import/EMaklerImportFlow'
 import { XTBTransactionFlow } from '@/features/import/XTBTransactionFlow'
-import { RevolutBtcFlow } from '@/features/import/RevolutBtcFlow'
-import { RevolutCryptoFlow } from '@/features/import/RevolutCryptoFlow'
+import { RevolutStatementFlow } from '@/features/import/RevolutStatementFlow'
+import { CAPPED_PANEL_HEIGHT } from '@/components/ui/modalLayout'
 import { XTBConfirmationFlow } from '@/features/import/XTBConfirmationFlow'
 import {
   csvHeaders,
@@ -51,8 +51,7 @@ import {
   csvSeed,
   eMaklerSeed,
   xtbSeed,
-  btcSeed,
-  ethSeed,
+  revolutStatementSeed,
   xtbConfirmationSeed,
 } from '@/dev/importFixtures'
 
@@ -172,9 +171,10 @@ function CardFlowFrame({
   return (
     <div className="flex flex-col gap-2 mb-8">
       <p className="text-xs font-medium text-accent uppercase tracking-wide">{label}</p>
-      <div className="w-[640px] max-w-full bg-background border border-border rounded-xl shadow-md overflow-hidden">
+      {/* Capped and laid out like the import dialog, so long steps scroll the same way. */}
+      <div className={`w-[640px] max-w-full ${CAPPED_PANEL_HEIGHT} flex flex-col bg-background border border-border rounded-xl shadow-md overflow-hidden`}>
         {header && (
-          <div className="flex items-center gap-2 px-6 pt-5 pb-3">
+          <div className="shrink-0 flex items-center gap-2 px-6 pt-5 pb-3">
             <p className="flex-1 text-sm font-semibold text-foreground [font-feature-settings:'lnum'_1,'tnum'_1]">
               Import
             </p>
@@ -183,7 +183,7 @@ function CardFlowFrame({
             </button>
           </div>
         )}
-        <div className={header ? 'p-1.5' : ''}>{children}</div>
+        <div className={`flex min-h-0 flex-col ${header ? 'p-1.5' : ''}`}>{children}</div>
       </div>
     </div>
   )
@@ -191,6 +191,7 @@ function CardFlowFrame({
 
 const noop = () => {}
 const DEMO_FILE = new File([], 'demo.csv')
+const DEMO_PDF = new File([], 'statement.pdf')
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -1012,31 +1013,15 @@ export function DevShowcase() {
       </Section>
 
       {/* ------------------------------------------------------------------ */}
-      <Section title="Import — Revolut BTC">
-        <CardFlowFrame label="Preview (quantity breakdown)">
-          <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.preview} />
+      <Section title="Import — Revolut crypto statement">
+        <CardFlowFrame label="Preview (scrolls; per-coin counts, received coins’ cost, warnings)">
+          <RevolutStatementFlow accountId="dev" file={DEMO_PDF} timeZone="Europe/Warsaw" onComplete={noop} onBack={noop} devSeed={revolutStatementSeed.preview} />
         </CardFlowFrame>
-        <CardFlowFrame label="Receive cost basis">
-          <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.receiveCost} />
-        </CardFlowFrame>
-        <CardFlowFrame label="Create holding">
-          <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.createHolding} />
+        <CardFlowFrame label="Holdings check">
+          <RevolutStatementFlow accountId="dev" file={DEMO_PDF} onComplete={noop} onBack={noop} devSeed={revolutStatementSeed.holdingsCheck} />
         </CardFlowFrame>
         <CardFlowFrame label="Done" header={false}>
-          <RevolutBtcFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={btcSeed.done} />
-        </CardFlowFrame>
-      </Section>
-
-      {/* ------------------------------------------------------------------ */}
-      <Section title="Import — Revolut ETH">
-        <CardFlowFrame label="Preview">
-          <RevolutCryptoFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={ethSeed.preview} />
-        </CardFlowFrame>
-        <CardFlowFrame label="Create / update holding">
-          <RevolutCryptoFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={ethSeed.createHolding} />
-        </CardFlowFrame>
-        <CardFlowFrame label="Done" header={false}>
-          <RevolutCryptoFlow accountId="dev" files={[]} onComplete={noop} onBack={noop} devSeed={ethSeed.done} />
+          <RevolutStatementFlow accountId="dev" file={DEMO_PDF} onComplete={noop} onBack={noop} devSeed={revolutStatementSeed.done} />
         </CardFlowFrame>
       </Section>
 

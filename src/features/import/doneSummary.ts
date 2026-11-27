@@ -1,6 +1,6 @@
 /**
  * doneSummary — shared copy builders for the "done" screen of transaction
- * import flows (XTB, Revolut BTC, Revolut crypto).
+ * import flows (XTB).
  *
  * Keeps the success messaging consistent across flows:
  *   • a rolled-up lead clause   → "4 transactions imported"

@@ -29,6 +29,8 @@ import { NotInFile, WrongAccountNote } from './NotInFile'
 import { soldChoiceCloses, soldChoiceErrors, type SoldChoices } from './soldChoices'
 import type { DevSeed } from './devSeed'
 import { todayISO } from '@/utils/today'
+import { ImportScrollBody } from './ImportScrollBody'
+import { IMPORT_CARD } from './importLayout'
 
 // ─────────────────────────────────────────
 // Types
@@ -319,8 +321,8 @@ export function CSVImportFlow({
   // ── Mapping Step ────────────────────────
   if (step === 'mapping') {
     return (
-      <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-        <div className="p-5 flex flex-col gap-5">
+      <div className={IMPORT_CARD}>
+        <ImportScrollBody className="p-5 flex flex-col gap-5">
           <Dropdown
             label="Asset Category"
             value={category}
@@ -381,7 +383,7 @@ export function CSVImportFlow({
               )
             })}
           </div>
-        </div>
+        </ImportScrollBody>
 
         <div className="border-t border-borderLight p-5 flex items-center gap-2">
           <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">
@@ -397,8 +399,8 @@ export function CSVImportFlow({
   // ── Preview Step ────────────────────────
   if (step === 'preview') {
     return (
-      <div className="bg-surface rounded-lg shadow-xs overflow-hidden flex flex-col">
-        <div className="p-5 flex flex-col gap-3">
+      <div className={IMPORT_CARD}>
+        <ImportScrollBody className="p-5 flex flex-col gap-3">
           {parseErrors.length > 0 && <ParseErrorAlert errors={parseErrors} />}
 
           {noOverlap && (
@@ -486,7 +488,7 @@ export function CSVImportFlow({
             errors={soldErrors}
             today={today}
           />
-        </div>
+        </ImportScrollBody>
 
         <div className="border-t border-borderLight p-5 flex items-center gap-2">
           <p className="flex-1 min-w-0 truncate text-sm font-medium text-accent tracking-[-0.35px]">{footerCounter}</p>
