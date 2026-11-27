@@ -83,6 +83,11 @@ export type PlannedRow = StatementRow & {
   duplicate: boolean
   /** How the fee was charged, for a buy or sell. */
   feeMethod?: FeeMethod
+  /**
+   * Coins the row moves as stored: `storedQuantity` for its fee method, with
+   * any rounding leftover folded in (see {@link foldRounding}).
+   */
+  storedQuantity: number
 }
 
 /** How a coin's buys or sells were found to be charged. */
@@ -152,13 +157,98 @@ export function assignFeeMethods(statement: Pick<RevolutStatement, 'rows' | 'sum
 export function planStatementRows(statement: RevolutStatement, existingExternalIds: ReadonlySet<string>): PlannedRow[] {
   const seen = new Map<string, number>()
   const { byRow } = assignFeeMethods(statement)
+  const folded = foldRounding(statement, byRow)
   return statement.rows.map((row, i) => {
     const base = statementRowId(row, 0)
     const occurrence = (seen.get(base) ?? 0) + 1
     seen.set(base, occurrence)
     const id = statementRowId(row, occurrence)
-    return { ...row, id, duplicate: existingExternalIds.has(id), ...(byRow[i] && { feeMethod: byRow[i] }) }
+    return {
+      ...row,
+      id,
+      duplicate: existingExternalIds.has(id),
+      ...(byRow[i] && { feeMethod: byRow[i] }),
+      storedQuantity: folded[i],
+    }
   })
+}
+
+const isOutflow = (type: StatementRowType) => type === 'sell' || type === 'send'
+
+/**
+ * How far a coin's rows may be off the statement through rounding alone:
+ * 1e-8 per row, plus a grosz per buy or sell in coins (the statement's fee is
+ * a grosz below the one charged).
+ */
+export function coinTolerance(statement: Pick<RevolutStatement, 'rows'>, symbol: string): number {
+  const rows = statement.rows.filter((r) => r.symbol === symbol)
+  const trades = rows.filter((r) => r.type === 'buy' || r.type === 'sell')
+  return 1e-8 * (rows.length + 1) + trades.reduce((t, r) => t + (r.value > 0 ? (0.01 * r.quantity) / r.value : 0), 0)
+}
+
+/** Why a coin's rows can't be expected to add up to the statement: the real gaps. */
+export function realGaps(statement: RevolutStatement, symbol: string): {
+  unreadable: boolean
+  stakingUnknown: boolean
+  feeUnclear: boolean
+} {
+  const fee = assignFeeMethods(statement).coins[symbol]
+  return {
+    unreadable: statement.warnings.some((w) => w.summary?.split(' · ')[0] === symbol || w.raw.split(' ')[0] === symbol),
+    // Staking rewards counted from the Staking rewards section have no amounts.
+    stakingUnknown: (statement.staking[symbol] ?? 0) > 0 && !(statement.stakingQuantity[symbol] > 0),
+    feeUnclear: fee?.buys?.status === 'guessed' || fee?.sells?.status === 'guessed',
+  }
+}
+
+/**
+ * Each row's stored coins, with rounding leftovers folded into the statement's
+ * own rows, so a coin's rows add up to what Revolut says without an
+ * adjustment. The statement's fee is a grosz below the one charged, so a fee
+ * taken out leaves a little over or under; never more than {@link coinTolerance}.
+ *
+ * Per coin, in date order, starting from Account summary's opening amount:
+ * - a sale or send that leaves only such dust, followed later by a buy or
+ *   receive, sold everything: it takes the dust too, so that round closes on
+ *   its own day;
+ * - what is left at the end, against the closing amount (less staking
+ *   rewards, which aren't imported), goes into the sale or send that emptied
+ *   the coin when it closes at 0, else into its last buy or sell.
+ * Nothing is folded for a coin with a real gap (an unread row, staking
+ * rewards without amounts, a fee method that couldn't be worked out), and
+ * PLN amounts never move.
+ */
+export function foldRounding(statement: RevolutStatement, methods: (FeeMethod | undefined)[]): number[] {
+  const out = statement.rows.map((r, i) => storedQuantity(r, methods[i]))
+  for (const symbol of new Set(statement.rows.map((r) => r.symbol))) {
+    const gaps = realGaps(statement, symbol)
+    if (gaps.unreadable || gaps.stakingUnknown || gaps.feeUnclear) continue
+    const tolerance = coinTolerance(statement, symbol)
+    const order = statement.rows
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.symbol === symbol)
+      .sort((a, b) => (a.r.date < b.r.date ? -1 : a.r.date > b.r.date ? 1 : 0))
+    let held = statement.summary[symbol]?.opening ?? 0
+    order.forEach(({ r, i }, k) => {
+      held = round8(held + (isOutflow(r.type) ? -out[i] : out[i]))
+      const next = order[k + 1]
+      if (isOutflow(r.type) && next && !isOutflow(next.r.type) && held !== 0 && Math.abs(held) <= tolerance) {
+        out[i] = round8(out[i] + held)
+        held = 0
+      }
+    })
+    const closing = statement.closing[symbol]
+    if (!closing) continue
+    const delta = round8(closing.quantity - (held + (statement.stakingQuantity[symbol] ?? 0)))
+    if (delta === 0 || Math.abs(delta) > tolerance) continue
+    const target = closing.quantity === 0
+      ? [...order].reverse().find(({ r }) => isOutflow(r.type))
+      : [...order].reverse().find(({ r }) => r.type === 'buy' || r.type === 'sell')
+    if (!target) continue
+    const folded = round8(out[target.i] + (isOutflow(target.r.type) ? -delta : delta))
+    if (folded > 0) out[target.i] = folded
+  }
+  return out
 }
 
 /** Coins the row moves, per the table above. Buys and sells default to the fee taken out. */
@@ -200,7 +290,7 @@ export function buildStatementTransactions({
   for (const row of rows) {
     if (row.duplicate) continue
     const instrument = statement.names[row.symbol] ?? row.symbol
-    const quantity = storedQuantity(row, row.feeMethod)
+    const quantity = row.storedQuantity
     const amountPLN = storedAmount(row, row.feeMethod, receiveCosts.get(row.id))
     const trade: Transaction = {
       id: uuidv4(),
@@ -270,9 +360,22 @@ export type CoinDifference = {
   revolut: number
   /** Coins the adjustment adds (+) or removes (−). */
   delta: number
-  /** Why they may differ, most likely first ("Fees estimated from the statement"). */
-  reasons: string[]
+  /**
+   * The real gap, in a few words: "Held before the period", "Staking left
+   * out", "Unreadable row", "Fee method unclear", or "Doesn’t match the
+   * statement" when none of those applies.
+   */
+  reason: GapReason
+  /** The other reasons and the coins in/out against the statement, for a tooltip. */
+  detail: string
 }
+
+export type GapReason =
+  | 'Held before the period'
+  | 'Staking left out'
+  | 'Unreadable row'
+  | 'Fee method unclear'
+  | 'Doesn’t match the statement'
 
 /** Coins in and out over the period: what the imported rows add up to, and Account summary's amounts. */
 export type CoinFlows = {
@@ -300,17 +403,16 @@ export type StatementHoldingsCheck = {
  * coin, as stored (`storedQuantity`), against Account summary's amount in and
  * amount out. Undefined without a summary for the coin.
  */
-export function coinFlows(statement: Pick<RevolutStatement, 'rows' | 'summary' | 'stakingQuantity'>, symbol: string): CoinFlows | undefined {
+export function coinFlows(statement: RevolutStatement, symbol: string): CoinFlows | undefined {
   const summary = statement.summary[symbol]
   if (!summary) return undefined
   let inQ = 0
   let outQ = 0
-  const { byRow } = assignFeeMethods(statement)
-  statement.rows.forEach((r, i) => {
-    if (r.symbol !== symbol) return
-    if (r.type === 'buy' || r.type === 'receive') inQ += storedQuantity(r, byRow[i])
-    else outQ += storedQuantity(r, byRow[i])
-  })
+  for (const r of planStatementRows(statement, new Set())) {
+    if (r.symbol !== symbol) continue
+    if (r.type === 'buy' || r.type === 'receive') inQ += r.storedQuantity
+    else outQ += r.storedQuantity
+  }
   return { in: { vestly: round8(inQ), revolut: summary.in }, out: { vestly: round8(outQ), revolut: summary.out } }
 }
 
@@ -321,18 +423,6 @@ export function feeReasons(coin: { buys?: FeeSide; sells?: FeeSide } | undefined
     if (side && side.status === 'guessed') out.push(`Couldn’t tell how fees were charged on ${side.rows} ${noun}${side.rows === 1 ? '' : 's'}`)
   }
   return out
-}
-
-/** "ETH: fee added on top for 18 buys" for each coin with such rows. */
-export function feeMethodLines(statement: RevolutStatement): string[] {
-  const lines: string[] = []
-  for (const [symbol, coin] of Object.entries(assignFeeMethods(statement).coins)) {
-    const parts: string[] = []
-    if (coin.buys?.top) parts.push(`${coin.buys.top} ${coin.buys.top === 1 ? 'buy' : 'buys'}`)
-    if (coin.sells?.top) parts.push(`${coin.sells.top} ${coin.sells.top === 1 ? 'sell' : 'sells'}`)
-    if (parts.length > 0) lines.push(`${symbol}: fee added on top for ${parts.join(' and ')}`)
-  }
-  return lines
 }
 
 /** "Coins in 0,0297 vs Revolut’s 0,03" for each of in and out that differs. */
@@ -378,7 +468,6 @@ export function checkStatementHoldings(
   const asOf = statement.period.to
   const cutoff = statementCutoff(asOf, statement.rows)
   const coins = [...new Set([...Object.keys(statement.closing), ...statement.rows.map((r) => r.symbol)])].sort()
-  const unreadable = new Set(statement.warnings.map((w) => w.summary?.split(' · ')[0]).filter(Boolean))
 
   const matching: string[] = []
   const differences: CoinDifference[] = []
@@ -394,21 +483,34 @@ export function checkStatementHoldings(
     }
     const vestly = quantityAsOf(transactions, accountId, symbol, cutoff)
     const delta = round8(closing.quantity - vestly)
-    if (Math.abs(delta) < CRYPTO_TOLERANCE) {
+    const gaps = realGaps(statement, symbol)
+    const reasons: GapReason[] = []
+    if ((statement.opening[symbol] ?? 0) > 0 && delta > 0) reasons.push('Held before the period')
+    // Left-out staking rewards only explain Revolut holding more.
+    if (statement.staking[symbol] && delta > 0) reasons.push('Staking left out')
+    if (gaps.unreadable) reasons.push('Unreadable row')
+    if (gaps.feeUnclear) reasons.push('Fee method unclear')
+    // Within rounding and nothing else to explain it: it matches. The import
+    // folds such leftovers into the statement's rows, so this is rare.
+    if (Math.abs(delta) < CRYPTO_TOLERANCE || (reasons.length === 0 && Math.abs(delta) <= coinTolerance(statement, symbol))) {
       matching.push(symbol)
       continue
     }
-    const traded = statement.rows.some((r) => r.symbol === symbol && (r.type === 'buy' || r.type === 'sell'))
-    const reasons: string[] = []
-    if ((statement.opening[symbol] ?? 0) > 0 && delta > 0) reasons.push('Held before the statement’s period')
-    // Left-out staking rewards only explain Revolut holding more.
-    if (statement.staking[symbol] && delta > 0) reasons.push('Staking rewards left out')
-    if (unreadable.has(symbol)) reasons.push('A row couldn’t be read')
-    reasons.push(...flowReasons(flow))
-    reasons.push(...feeReasons(assignFeeMethods(statement).coins[symbol]))
-    if (traded) reasons.push('Fees estimated from the statement')
-    if (reasons.length === 0) reasons.push('Not explained by the statement’s rows')
-    differences.push({ symbol, name: statement.names[symbol] ?? symbol, vestly, revolut: closing.quantity, delta, reasons })
+    // "Fee method unclear" is spelled out with its count ("Couldn’t tell how fees were charged on 2 buys").
+    const detail = [
+      ...reasons.slice(1).filter((r) => r !== 'Fee method unclear'),
+      ...feeReasons(assignFeeMethods(statement).coins[symbol]),
+      ...flowReasons(flow),
+    ].join('. ')
+    differences.push({
+      symbol,
+      name: statement.names[symbol] ?? symbol,
+      vestly,
+      revolut: closing.quantity,
+      delta,
+      reason: reasons[0] ?? 'Doesn’t match the statement',
+      detail,
+    })
   }
   return { asOf, matching, differences, unchecked, flows }
 }
@@ -520,11 +622,18 @@ export function closedCoinHoldings(
     const rows = transactions.filter((t) => t.accountId === account.id && positionKey(t) === symbol)
     const cycle = lastClosedCycle(rows, fees)
     if (!cycle || cycle.quantity <= 0) continue
-    const closedAt = transactionDay(cycle.closedBy)
+    // Closed by its last real sale or send, never by an adjustment.
+    const closedBy = isAdjustmentRow(cycle.closedBy)
+      ? rows
+          .filter((t) => (t.type === 'sell' || t.type === 'send') && !isAdjustmentRow(t) && t.date <= cycle.closedBy.date)
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .at(-1) ?? cycle.closedBy
+      : cycle.closedBy
+    const closedAt = transactionDay(closedBy)
     if (closed.has(`${symbol}\n${closedAt}`)) continue
     const quantity = round8(cycle.quantity)
     const purchasePrice = cycle.costPLN / cycle.quantity
-    const sale = cycle.closedBy.type === 'sell' ? cycle.closedBy : null
+    const sale = closedBy.type === 'sell' ? closedBy : null
     out.push({
       id: uuidv4(),
       accountId: account.id,

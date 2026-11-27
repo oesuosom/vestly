@@ -18,7 +18,7 @@ import {
 } from '@/importers/revolutStatementImport'
 import { HEADER, STATEMENT_PAGES, TX_HEADER } from '@/importers/revolutStatement.fixture'
 import { pairTradeFees } from '@/domain/tradeFees'
-import { walkPosition, walkSales } from '@/domain/position'
+import { walkClosingSales, walkPosition, walkSales } from '@/domain/position'
 import { getRealizedPnL } from '@/domain/calculations'
 import { closedPositionResult } from '@/domain/closePosition'
 
@@ -205,16 +205,11 @@ describe('holdings check', () => {
     ])
   })
 
-  it('says why they may differ', () => {
-    const why = Object.fromEntries(check.differences.map((d) => [d.symbol, d.reasons]))
-    expect(why.SOL).toEqual(['Held before the statement’s period', 'Staking rewards left out', 'Coins in 0 vs Revolut’s 0,1'])
+  it('gives one short reason per coin, with the details in a tooltip', () => {
+    const why = Object.fromEntries(check.differences.map((d) => [d.symbol, [d.reason, d.detail]]))
+    expect(why.SOL).toEqual(['Held before the period', 'Staking left out. Coins in 0 vs Revolut’s 0,1'])
     // The unread row is in Revolut's total, so no split of the buy's fee method adds up.
-    expect(why.XRP).toEqual([
-      'A row couldn’t be read',
-      'Coins in 99 vs Revolut’s 102,5',
-      'Couldn’t tell how fees were charged on 1 buy',
-      'Fees estimated from the statement',
-    ])
+    expect(why.XRP).toEqual(['Unreadable row', 'Couldn’t tell how fees were charged on 1 buy. Coins in 99 vs Revolut’s 102,5'])
   })
 
   it('compares the rows’ coins in and out with Account summary’s amount in and out, for every coin', () => {
@@ -231,8 +226,8 @@ describe('holdings check', () => {
     const sol: Transaction = { ...log.find((t) => t.ticker === 'ADA' && t.type === 'receive')!, id: 'sol', externalId: 'sol', ticker: 'SOL', instrument: 'Solana', quantity: 5 }
     const d = checkStatementHoldings(statement, [...log, sol], 'revolut')!.differences.find((x) => x.symbol === 'SOL')!
     expect(d.delta).toBeLessThan(0)
-    expect(d.reasons).not.toContain('Staking rewards left out')
-    expect(d.reasons).toEqual(['Coins in 0 vs Revolut’s 0,1'])
+    expect(d.reason).toBe('Doesn’t match the statement')
+    expect(d.detail).toBe('Coins in 0 vs Revolut’s 0,1')
   })
 
   it('leaves out rows after the end date', () => {
@@ -255,7 +250,7 @@ describe('holdings check', () => {
   })
 
   it('removes coins with a send when the log holds more, without realizing anything', () => {
-    const more = adjustmentTransactions([{ symbol: 'BTC', name: 'Bitcoin', vestly: 0.03, revolut: 0.02, delta: -0.01, reasons: [] }], 'revolut', '2025-12-31', NOW)
+    const more = adjustmentTransactions([{ symbol: 'BTC', name: 'Bitcoin', vestly: 0.03, revolut: 0.02, delta: -0.01, reason: 'Doesn’t match the statement', detail: '' }], 'revolut', '2025-12-31', NOW)
     expect(more[0]).toMatchObject({ type: 'send', quantity: 0.01, amountPLN: 0 })
     expect(getRealizedPnL([...log, ...more])).toBe(getRealizedPnL(log))
   })
@@ -322,5 +317,101 @@ describe('closedCoinHoldings', () => {
     expect(closedCoinHoldings({ ...account, closedHoldings: closed }, log, statement, ['DOT'], NOW)).toEqual([])
     const open = { ...closed[0], closedAt: undefined }
     expect(closedCoinHoldings({ ...account, holdings: [open] }, log, statement, ['DOT'], NOW)).toEqual([])
+  })
+})
+
+describe('rounding leftovers', () => {
+  // Made-up LTC rows. The buy's fee was taken out: the statement says 1.00 PLN, Revolut
+  // charged a grosz more, so 9.899 LTC arrived, not 9.9. The sale sold all of them.
+  const BUY = 'LTC Buy 10 10.00 PLN 100.00 PLN 1.00 PLN Feb 1, 2025, 9:00:00AM'
+  const SELL_ALL = 'LTC Sell 9.899 12.00 PLN 118.79 PLN 1.19 PLN Mar 1, 2025, 9:00:00AM'
+  const account: Account = { id: 'revolut', name: 'Revolut Crypto', type: 'crypto', createdAt: NOW, lastUpdated: NOW, holdings: [] }
+  const statementOf = (summary: string[], rows: string[]) =>
+    parseRevolutStatement([[...HEADER, 'Account summary', ...summary, TX_HEADER, ...rows]])
+
+  it('folds into the sale that empties a coin, which then closes on its own day with its own result', () => {
+    const s = statementOf(['LTC Litecoin 9.899 LTC 9.899 LTC'], [BUY, SELL_ALL])
+    const rows = planStatementRows(s, new Set())
+    expect(rows.map((r) => [r.type, r.feeMethod, r.storedQuantity])).toEqual([['buy', 'out', 9.9], ['sell', 'top', 9.9]])
+    const log = importAll(s)
+
+    const check = checkStatementHoldings(s, log, 'revolut')!
+    expect(check).toMatchObject({ matching: ['LTC'], differences: [] })
+
+    const sale = log.find((t) => t.type === 'sell')!
+    const [closed] = closedCoinHoldings(account, log, s, ['LTC'], NOW)
+    expect(closed.closedAt).toBe(sale.date.slice(0, 10))
+    // Cost: 99 + 1 fee. Proceeds: 118.79 − 1.19 fee, the fee added on top of a "sell all".
+    const result = closedPositionResult(closed, log)!.result
+    expect(result.costPLN).toBeCloseTo(100, 8)
+    expect(result.proceedsPLN).toBeCloseTo(117.6, 8)
+    expect(result.profitPLN).toBeCloseTo(17.6, 8)
+  })
+
+  it('folds into the last buy of a coin still held, so it matches without an adjustment', () => {
+    const s = statementOf(['9.89900000 LTC', 'LTC Litecoin 0 LTC 9.899 LTC'], [BUY])
+    expect(planStatementRows(s, new Set())[0].storedQuantity).toBe(9.899)
+    const log = importAll(s)
+    expect(checkStatementHoldings(s, log, 'revolut')).toMatchObject({ matching: ['LTC'], differences: [] })
+    // Never a PLN amount: the buy still cost 99 + 1.
+    expect(log.find((t) => t.type === 'buy')!.amountPLN).toBe(-99)
+  })
+
+  it('a sale that leaves only dust before a later buy sold everything: two rounds, each on its own days', () => {
+    const s = statementOf(
+      ['4.95000000 LTC', 'LTC Litecoin 9.899 LTC 14.849 LTC'],
+      [BUY, SELL_ALL, 'LTC Buy 5 10.00 PLN 50.00 PLN 0.50 PLN Jun 1, 2025, 9:00:00AM'],
+    )
+    expect(planStatementRows(s, new Set()).map((r) => r.storedQuantity)).toEqual([9.9, 9.9, 4.95])
+    const log = importAll(s)
+    const ltc = log.filter((t) => t.ticker === 'LTC' || t.relatedTicker === 'LTC')
+    const sale = log.find((t) => t.type === 'sell')!
+    // The first round closed with the sale; the second holds 4.95 that cost 49.5 + 0.5.
+    expect(walkClosingSales(ltc, pairTradeFees(log)).get(sale.id)!.profitPLN).toBeCloseTo(17.6, 8)
+    expect(walkPosition(ltc, pairTradeFees(log))).toMatchObject({ quantity: 4.95, costPLN: 50 })
+    expect(checkStatementHoldings(s, log, 'revolut')!.differences).toEqual([])
+  })
+
+  it('leaves a real gap to an adjustment, with its reason', () => {
+    const s = statementOf(
+      ['2.10000000 SOL', 'SOL Solana 0 SOL 2.1 SOL'],
+      [
+        'SOL Buy 2 400.00 PLN 800.00 PLN 12.00 PLN Feb 1, 2025, 9:00:00AM',
+        'SOL Staking reward 0.10000000 400.00 PLN 40.00 PLN 0.00 PLN Jul 1, 2025, 1:00:00AM',
+      ],
+    )
+    // Amount in less the staking rewards: the buy had its fee on top, nothing to fold.
+    expect(planStatementRows(s, new Set()).map((r) => [r.feeMethod, r.storedQuantity])).toEqual([['top', 2]])
+    const check = checkStatementHoldings(s, importAll(s), 'revolut')!
+    expect(check.differences.map((d) => [d.symbol, d.delta, d.reason])).toEqual([['SOL', 0.1, 'Staking left out']])
+  })
+
+  it('a sold-out coin never takes its close date or result from an adjustment', () => {
+    // An unread row blocks folding and leaves the sale's fee method unclear (taken out by default),
+    // so 0.91 LTC is left that Revolut says is gone: an adjustment sends it.
+    const s = statementOf(
+      ['LTC Litecoin 10 LTC 10 LTC'],
+      [
+        'LTC Buy 10 10.00 PLN 100.00 PLN 1.00 PLN Feb 1, 2025, 9:00:00AM',
+        'LTC Sell 9 12.00 PLN 108.00 PLN 1.08 PLN Mar 1, 2025, 9:00:00AM',
+        'LTC Sell 1.O 12.00 PLN 12.00 PLN 0.12 PLN Mar 2, 2025, 9:00:00AM',
+      ],
+    )
+    const log = importAll(s)
+    const check = checkStatementHoldings(s, log, 'revolut')!
+    expect(check.differences.map((d) => [d.delta, d.reason])).toEqual([[-0.91, 'Unreadable row']])
+    const after = [...log, ...adjustmentTransactions(check.differences, 'revolut', check.asOf, NOW)]
+    const sale = after.find((t) => t.type === 'sell')!
+    const [closed] = closedCoinHoldings(account, after, s, ['LTC'], NOW)
+    expect(closed.closedAt).toBe(sale.date.slice(0, 10))
+    // The sale's own result: 9.09 of the 10 LTC (cost 101 for 10) sold for 108 (109.08 − 1.08 fee).
+    const result = closedPositionResult(closed, after)!.result
+    expect(result.proceedsPLN).toBeCloseTo(108, 8)
+    expect(result.costPLN).toBeCloseTo((101 / 10) * 9.09, 8)
+  })
+
+  it('folds nothing for a coin with an unread row', () => {
+    const s = statementOf(['9.89900000 LTC', 'LTC Litecoin 0 LTC 9.899 LTC'], [BUY, 'LTC Buy 1.5O 10.00 PLN 15.00 PLN 0.15 PLN Feb 2, 2025, 9:00:00AM'])
+    expect(planStatementRows(s, new Set())[0].storedQuantity).toBe(9.9)
   })
 })

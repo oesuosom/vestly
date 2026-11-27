@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { coinsMoved, feeClue, solveFeeMethods, type FeeRow } from '@/importers/revolutFeeMethod'
 import { parseRevolutStatement } from '@/importers/revolutStatement'
-import { assignFeeMethods, feeMethodLines, feeReasons } from '@/importers/revolutStatementImport'
+import { assignFeeMethods, feeReasons } from '@/importers/revolutStatementImport'
 import { HEADER, TX_HEADER } from '@/importers/revolutStatement.fixture'
 
 // Made-up rows. Buys of 0.01 coin at 10,000 PLN with a 1 PLN fee: 0.0099 coins with
@@ -101,7 +101,6 @@ describe('assignFeeMethods', () => {
       buys: { rows: 2, top: 2, status: 'matched' },
       sells: { rows: 1, top: 1, status: 'matched' },
     })
-    expect(feeMethodLines(s)).toEqual(['ETH: fee added on top for 2 buys and 1 sell'])
     expect(feeReasons(coins.ETH)).toEqual([])
   })
 

@@ -77,11 +77,8 @@ describe('preview', () => {
     expect(within(coinRow(coins, 'BTC')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['1', '—', '1', '1'])
     expect(within(coinRow(coins, 'ETH')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2', '—', '—', '—'])
 
-    // How Revolut charged the fees, worked out from Account summary's totals.
-    expect(screen.getByText('BTC: fee added on top for 1 buy')).toBeTruthy()
-    expect(screen.getByText('ETH: fee added on top for 1 buy')).toBeTruthy()
-    expect(screen.getByText('XRP: fee added on top for 1 sell')).toBeTruthy()
-    expect(screen.getByText('DOT: fee added on top for 1 buy and 1 sell')).toBeTruthy()
+    // Fee methods are only mentioned when they couldn't be worked out (in the holdings check).
+    expect(screen.queryByText(/fee added on top/)).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'View warnings' }))
     expect(screen.getByText('Page 3, row 4')).toBeTruthy()
@@ -148,7 +145,8 @@ describe('holdings check and done', () => {
     expect(screen.getByText(/Revolut’s statement shows what you held on 31 Dec 2025\./).textContent)
       .toContain('4 coins match it. These 2 don’t:')
     const xrp = screen.getByRole('rowheader', { name: 'XRP' }).closest('table')!
-    expect(within(xrp).getByText('A row couldn’t be read · Coins in 99 vs Revolut’s 102,5 · Couldn’t tell how fees were charged on 1 buy · Fees estimated from the statement')).toBeTruthy()
+    const why = within(xrp).getByText('Unreadable row')
+    expect(why.getAttribute('title')).toBe('Couldn’t tell how fees were charged on 1 buy. Coins in 99 vs Revolut’s 102,5')
     expect(within(xrp).getAllByRole('cell').map((c) => c.textContent).slice(1, 3)).toEqual(['74', '77,5'])
     const box = (label: RegExp) => screen.getByRole('checkbox', { name: label }) as HTMLInputElement
     expect(box(/Adjust: add 3,5 XRP at 0 PLN/).checked).toBe(true)
@@ -224,6 +222,9 @@ describe('coins sold out during the statement', () => {
       </PortfolioProvider>,
     )
     const dotRows = (await screen.findAllByText('Polkadot')).map((el) => el.closest('tr')!)
+    // Adjustments read as "Adjustment", not Send or Receive.
+    const adjusted = screen.getAllByText('Adjustment').map((el) => el.closest('tr')!)
+    expect(adjusted.map((row) => within(row).getByText(/^(XRP|Solana)$/).textContent).sort()).toEqual(['Solana', 'XRP'])
     expect(dotRows.length).toBeGreaterThan(0)
     // The icon sits next to the name only when Activity finds the coin's holding.
     expect(dotRows.every((row) => row.querySelector('td:nth-child(3) span.relative'))).toBe(true)

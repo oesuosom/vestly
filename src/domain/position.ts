@@ -149,16 +149,19 @@ export function walkSales(transactions: Transaction[], tradeFees: TradeFees = NO
 /**
  * The same walk again, reporting each sale that empties the position, keyed by
  * its `id`, with the results of every sale since the position last opened
- * added together (that sale included). A position sold in three parts reads
+ * added together (that sale included). When a send empties it after sales,
+ * the round is reported on its last sale. A position sold in three parts reads
  * as one close: the three proceeds, costs and profits summed.
  */
 export function walkClosingSales(transactions: Transaction[], tradeFees: TradeFees = NO_FEES): Map<string, SaleResult> {
   const closes = new Map<string, SaleResult>()
   let cycle: SaleResult | null = null
+  let lastSaleId: string | null = null
   walk(
     transactions,
     tradeFees,
-    (_id, result) => {
+    (id, result) => {
+      lastSaleId = id
       cycle = {
         proceedsPLN: (cycle?.proceedsPLN ?? 0) + result.proceedsPLN,
         costPLN: (cycle?.costPLN ?? 0) + result.costPLN,
@@ -166,8 +169,12 @@ export function walkClosingSales(transactions: Transaction[], tradeFees: TradeFe
       }
     },
     (t) => {
-      if (cycle && t.type === 'sell') closes.set(t.id, cycle)
+      // A round emptied by a send after its sales (crypto moved out, or a
+      // leftover adjustment) closed with its last sale.
+      const closingSale = t.type === 'sell' ? t.id : lastSaleId
+      if (cycle && closingSale) closes.set(closingSale, cycle)
       cycle = null
+      lastSaleId = null
     },
   )
   return closes
