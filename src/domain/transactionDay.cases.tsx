@@ -128,7 +128,7 @@ export function runTransactionDayCases(c: TransactionDayCase, portfolio: MockPor
         const statement: RevolutStatement = {
           period: { from: '2026-01-01', to: '2026-12-31' },
           rows: [{ page: 1, row: 1, raw: '', symbol: 'BTC', type: 'receive', quantity: 0.5, price: 400000, value: 200000, fee: 0, date: c.date }],
-          staking: {}, closing: {}, opening: {}, summary: {}, names: {}, prices: {}, warnings: [],
+          staking: {}, stakingQuantity: {}, closing: {}, opening: {}, summary: {}, names: {}, prices: {}, warnings: [],
         }
         render(
           <RevolutStatementFlow

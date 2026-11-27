@@ -35,16 +35,28 @@ const row = (fields: Partial<StatementRow>): StatementRow => ({
 })
 
 describe('amounts and quantities', () => {
-  it('buy: pays Value − Fee, with the fee as its own row, and receives fewer coins', () => {
+  it('buy, fee taken out: pays Value − Fee, with the fee as its own row, and receives fewer coins', () => {
     const r = row({ type: 'buy', quantity: 0.025, value: 10000, fee: 100 })
-    expect(storedAmount(r)).toBe(-9900)
-    expect(storedQuantity(r)).toBe(0.02475) // 0.025 × 9,900 / 10,000
+    expect(storedAmount(r, 'out')).toBe(-9900)
+    expect(storedQuantity(r, 'out')).toBe(0.02475) // 0.025 × 9,900 / 10,000
   })
 
-  it('sell: brings in Value + Fee, with the fee as its own row, and sells more coins', () => {
+  it('buy, fee on top: pays Value, with the fee as its own row, and receives Quantity', () => {
+    const r = row({ type: 'buy', quantity: 0.025, value: 10000, fee: 100 })
+    expect(storedAmount(r, 'top')).toBe(-10000)
+    expect(storedQuantity(r, 'top')).toBe(0.025)
+  })
+
+  it('sell, fee taken out: brings in Value + Fee, with the fee as its own row, and sells more coins', () => {
     const r = row({ type: 'sell', quantity: 25, value: 50, fee: 1 })
-    expect(storedAmount(r)).toBe(51)
-    expect(storedQuantity(r)).toBe(25.5) // 25 × 51 / 50
+    expect(storedAmount(r, 'out')).toBe(51)
+    expect(storedQuantity(r, 'out')).toBe(25.5) // 25 × 51 / 50
+  })
+
+  it('sell, fee on top ("sell all"): brings in Value, with the fee as its own row, and sells Quantity', () => {
+    const r = row({ type: 'sell', quantity: 25, value: 50, fee: 1 })
+    expect(storedAmount(r, 'top')).toBe(50)
+    expect(storedQuantity(r, 'top')).toBe(25)
   })
 
   it('send: 0 PLN, the quantity as it is', () => {
@@ -55,7 +67,7 @@ describe('amounts and quantities', () => {
   it('receive: costs the statement’s Value unless another cost is given', () => {
     const r = row({ type: 'receive', quantity: 0.005, value: 2000 })
     expect([storedAmount(r), storedQuantity(r)]).toEqual([2000, 0.005])
-    expect(storedAmount(r, 1500)).toBe(1500)
+    expect(storedAmount(r, 'out', 1500)).toBe(1500)
   })
 })
 
@@ -83,6 +95,16 @@ describe('buildStatementTransactions', () => {
       expect.stringMatching(/^revolut-stmt-ETH-buy-.+-0\.01-2$/),
     ])
     expect(log.filter((t) => t.type === 'fee' && t.relatedTicker === 'ETH')).toHaveLength(2)
+    // Account summary counts 0.0199 ETH in: one buy had the fee on top, the other taken out.
+    expect(ethBuys.map((t) => [t.amountPLN, t.quantity])).toEqual([[-100, 0.01], [-99, 0.0099]])
+  })
+
+  it('stores each buy and sell by the fee method its coin’s totals call for', () => {
+    const rows = planStatementRows(statement, new Set())
+    expect(rows.filter((r) => r.feeMethod).map((r) => `${r.symbol} ${r.type} ${r.feeMethod}`)).toEqual([
+      'BTC buy top', 'ETH buy top', 'ETH buy out', 'XRP buy out', 'XRP sell top', 'DOT buy top', 'DOT sell top',
+    ])
+    expect(rows.filter((r) => r.type === 'send' || r.type === 'receive').every((r) => r.feeMethod === undefined)).toBe(true)
   })
 
   it('adds nothing when the same statement, or an overlapping one, is imported again', () => {
@@ -119,7 +141,31 @@ describe('buildStatementTransactions', () => {
 })
 
 describe('the position walk', () => {
-  it('gives cost = the buy’s Value and proceeds = the sale’s Value', () => {
+  it('fee on top: cost = Value + Fee and proceeds = Value − Fee', () => {
+    const pages = [
+      [
+        ...HEADER,
+        'Account summary',
+        'XRP XRP 25 XRP 100 XRP',
+        TX_HEADER,
+        'XRP Buy 100 2.00 PLN 200.00 PLN 2.00 PLN Feb 3, 2025, 12:15:00PM',
+        'XRP Sell 25 2.40 PLN 60.00 PLN 1.00 PLN Feb 4, 2025, 7:31:58AM',
+      ],
+    ]
+    const s = parseRevolutStatement(pages)
+    expect(planStatementRows(s, new Set()).map((r) => r.feeMethod)).toEqual(['top', 'top'])
+    const log = importAll(s)
+    const fees = pairTradeFees(log)
+    const xrp = log.filter((t) => t.ticker === 'XRP')
+    const sale = [...walkSales(xrp, fees).values()][0]
+    expect(sale.proceedsPLN).toBe(59)
+    const position = walkPosition(xrp, fees)
+    expect(position.quantity).toBe(75)
+    expect(position.costPLN + sale.costPLN).toBeCloseTo(202, 8)
+    expect(getRealizedPnL(log)).toBeCloseTo(59 - (202 / 100) * 25, 8)
+  })
+
+  it('fee taken out: cost = the buy’s Value and proceeds = the sale’s Value', () => {
     const pages = [
       [
         ...HEADER,
@@ -128,7 +174,9 @@ describe('the position walk', () => {
         'XRP Sell 25 2.40 PLN 60.00 PLN 1.00 PLN Feb 4, 2025, 7:31:58AM',
       ],
     ]
+    // No Account summary: each row follows its clue, and these have none, so the fee was taken out.
     const s = parseRevolutStatement(pages)
+    expect(planStatementRows(s, new Set()).map((r) => r.feeMethod)).toEqual(['out', 'out'])
     const log = importAll(s)
     const fees = pairTradeFees(log)
     const xrp = log.filter((t) => t.ticker === 'XRP')
@@ -149,32 +197,33 @@ describe('holdings check', () => {
 
   it('compares each coin as of the statement’s end date', () => {
     expect(check.asOf).toBe('2025-12-31')
-    expect(check.matching).toEqual(['ADA', 'DOT'])
+    // BTC, ETH and DOT match once their fees are read the way their totals call for.
+    expect(check.matching).toEqual(['ADA', 'BTC', 'DOT', 'ETH'])
     expect(check.differences.map((d) => [d.symbol, d.vestly, d.revolut, d.delta])).toEqual([
-      ['BTC', 0.01975, 0.02, 0.00025],
-      ['ETH', 0.0198, 0.02, 0.0002],
       ['SOL', 0, 2.1, 2.1],
-      ['XRP', 73.5, 75, 1.5],
+      ['XRP', 74, 77.5, 3.5],
     ])
   })
 
   it('says why they may differ', () => {
     const why = Object.fromEntries(check.differences.map((d) => [d.symbol, d.reasons]))
-    expect(why.BTC).toEqual(['Coins in 0,02975 vs Revolut’s 0,03', 'Fees estimated from the statement'])
     expect(why.SOL).toEqual(['Held before the statement’s period', 'Staking rewards left out', 'Coins in 0 vs Revolut’s 0,1'])
+    // The unread row is in Revolut's total, so no split of the buy's fee method adds up.
     expect(why.XRP).toEqual([
       'A row couldn’t be read',
-      'Coins in 99 vs Revolut’s 100',
-      'Coins out 25,5 vs Revolut’s 25',
+      'Coins in 99 vs Revolut’s 102,5',
+      'Couldn’t tell how fees were charged on 1 buy',
       'Fees estimated from the statement',
     ])
   })
 
   it('compares the rows’ coins in and out with Account summary’s amount in and out, for every coin', () => {
-    expect(check.flows.BTC).toEqual({ in: { vestly: 0.02975, revolut: 0.03 }, out: { vestly: 0.01, revolut: 0.01 } })
-    expect(check.flows.ADA).toEqual({ in: { vestly: 10, revolut: 10 }, out: { vestly: 0, revolut: 0 } })
-    // DOT matches its closing amount (0) but its flows still show the fee estimate.
-    expect(check.flows.DOT).toEqual({ in: { vestly: 19.8, revolut: 20 }, out: { vestly: round8((20 * 121) / 120), revolut: 20 } })
+    expect(check.flows.BTC).toEqual({ in: { vestly: 0.03, revolut: 0.03 }, out: { vestly: 0.01, revolut: 0.01 } })
+    expect(check.flows.ETH).toEqual({ in: { vestly: 0.0199, revolut: 0.0199 }, out: { vestly: 0, revolut: 0 } })
+    expect(check.flows.DOT).toEqual({ in: { vestly: 20, revolut: 20 }, out: { vestly: 20, revolut: 20 } })
+    expect(check.flows.XRP).toEqual({ in: { vestly: 99, revolut: 102.5 }, out: { vestly: 25, revolut: 25 } })
+    // Read the other way, DOT's fees would show as a difference in and out.
+    expect(round8((20 * 121) / 120)).not.toBe(20)
     expect(coinFlows({ ...statement, summary: {} }, 'BTC')).toBeUndefined()
   })
 
@@ -188,16 +237,14 @@ describe('holdings check', () => {
 
   it('leaves out rows after the end date', () => {
     const later: Transaction = { ...log.find((t) => t.ticker === 'ADA')!, id: 'later', externalId: 'later', date: '2026-02-01T10:00:00.000Z' }
-    expect(checkStatementHoldings(statement, [...log, later], 'revolut')!.matching).toEqual(['ADA', 'DOT'])
+    expect(checkStatementHoldings(statement, [...log, later], 'revolut')!.matching).toEqual(['ADA', 'BTC', 'DOT', 'ETH'])
   })
 
   it('makes one 0 PLN adjustment per coin that brings it to the closing amount', () => {
     const adjustments = adjustmentTransactions(check.differences, 'revolut', check.asOf, NOW)
     expect(adjustments.map((t) => [t.ticker, t.type, t.quantity, t.amountPLN, t.date])).toEqual([
-      ['BTC', 'receive', 0.00025, 0, '2025-12-31T23:59:59.000Z'],
-      ['ETH', 'receive', 0.0002, 0, '2025-12-31T23:59:59.000Z'],
       ['SOL', 'receive', 2.1, 0, '2025-12-31T23:59:59.000Z'],
-      ['XRP', 'receive', 1.5, 0, '2025-12-31T23:59:59.000Z'],
+      ['XRP', 'receive', 3.5, 0, '2025-12-31T23:59:59.000Z'],
     ])
     expect(adjustments.every((t) => t.comment === ADJUSTMENT_NOTE && t.affectsCash === false)).toBe(true)
 
@@ -215,8 +262,8 @@ describe('holdings check', () => {
 
   it('an adjustment doesn’t change what was paid', () => {
     const adjustments = adjustmentTransactions(check.differences, 'revolut', check.asOf, NOW)
-    const btc = (rows: Transaction[]) => walkPosition(rows.filter((t) => t.ticker === 'BTC'), pairTradeFees(rows)).costPLN
-    expect(btc([...log, ...adjustments])).toBeCloseTo(btc(log), 8)
+    const xrp = (rows: Transaction[]) => walkPosition(rows.filter((t) => t.ticker === 'XRP'), pairTradeFees(rows)).costPLN
+    expect(xrp([...log, ...adjustments])).toBeCloseTo(xrp(log), 8)
   })
 
   it('counts coins with no closing amount as unchecked', () => {
@@ -225,7 +272,7 @@ describe('holdings check', () => {
   })
 
   it('reads the walk as of an instant', () => {
-    expect(quantityAsOf(log, 'revolut', 'BTC', '2025-01-31T00:00:00.000Z')).toBe(0.02475)
+    expect(quantityAsOf(log, 'revolut', 'BTC', '2025-01-31T00:00:00.000Z')).toBe(0.025)
   })
 })
 
@@ -236,11 +283,11 @@ describe('newCoinHoldings', () => {
     const log = importAll(statement)
     const holdings = newCoinHoldings(account, log, statement, ['BTC', 'ADA', 'SOL'], NOW)
     expect(holdings.map((h) => [h.ticker, h.name, h.exchange, h.category, h.quantity, h.currentPrice])).toEqual([
-      ['BTC', 'Bitcoin', 'CC', 'crypto', 0.01975, 400000],
+      ['BTC', 'Bitcoin', 'CC', 'crypto', 0.02, 400000],
       ['ADA', 'Cardano', 'CC', 'crypto', 10, 2],
     ])
-    // BTC cost: buy 10,000 (9,900 + 100 fee) + receive 2,000 = 12,000 for 0.02975; 0.01 sent at the average.
-    expect(holdings[0].purchasePrice).toBeCloseTo(12000 / 0.02975, 6)
+    // BTC cost: buy 10,100 (10,000 + 100 fee on top) + receive 2,000 = 12,100 for 0.03; 0.01 sent at the average.
+    expect(holdings[0].purchasePrice).toBeCloseTo(12100 / 0.03, 6)
     expect(holdings[0].purchaseDate).toBe(log.find((t) => t.type === 'buy' && t.ticker === 'BTC')!.date.slice(0, 10))
   })
 
@@ -258,10 +305,10 @@ describe('closedCoinHoldings', () => {
   it('keeps a coin sold out during the statement as a closed holding, on the day of its last sale', () => {
     const sale = log.find((t) => t.type === 'sell' && t.ticker === 'DOT')!
     expect(closed.map((h) => [h.ticker, h.name, h.exchange, h.category, h.quantity, h.closedAt])).toEqual([
-      ['DOT', 'Polkadot', 'CC', 'crypto', 19.8, sale.date.slice(0, 10)],
+      ['DOT', 'Polkadot', 'CC', 'crypto', 20, sale.date.slice(0, 10)],
     ])
-    // 19.8 DOT for 100 PLN (99 + 1 fee).
-    expect(closed[0].purchasePrice).toBeCloseTo(100 / 19.8, 8)
+    // 20 DOT for 101 PLN (100 + 1 fee on top).
+    expect(closed[0].purchasePrice).toBeCloseTo(101 / 20, 8)
   })
 
   it('reads its result from the walk, so it agrees with realized profit', () => {

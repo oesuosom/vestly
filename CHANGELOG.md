@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Import Revolut's Crypto Account Statement** — one PDF from Revolut now imports the buys,
   sells, sends and receives of every coin for the period you chose, with each trade's fee as its
-  own row and each transaction at its real time. The preview counts them per coin, lets you
-  change what received coins cost you (Revolut's value on the day is filled in), and lists any
-  row it couldn't read. Staking rewards are left out for now. Afterwards, each coin is compared
+  own row and each transaction at its real time. Whether Revolut took a fee out of the amount or
+  added it on top is worked out per coin from the statement's own totals, so coins and costs come
+  out right either way. The preview counts them per coin, lets you change what received coins
+  cost you (Revolut's value on the day is filled in), and lists any row it couldn't read. Staking rewards are left out for now. Afterwards, each coin is compared
   with what the statement says you held on its last day; where they differ, a 0 PLN adjustment
   (ticked, shown in Activity) brings it in line without changing what you paid; where the coins
   in or out differ from the statement's totals, the check says so. New coins become crypto

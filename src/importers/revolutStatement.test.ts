@@ -73,14 +73,15 @@ describe('parseRevolutStatement', () => {
 
   it('counts staking rewards per coin and imports none of them', () => {
     expect(statement.staking).toEqual({ SOL: 1 })
+    expect(statement.stakingQuantity).toEqual({ SOL: 0.1 })
     expect(statement.rows.some((r) => r.symbol === 'SOL')).toBe(false)
   })
 
   it('takes the closing amounts from Account summary, and names and prices from both tables', () => {
     expect(statement.closing).toEqual({
       BTC: { quantity: 0.02, source: 'summary' },
-      ETH: { quantity: 0.02, source: 'summary' },
-      XRP: { quantity: 75, source: 'summary' },
+      ETH: { quantity: 0.0199, source: 'summary' },
+      XRP: { quantity: 77.5, source: 'summary' },
       SOL: { quantity: 2.1, source: 'summary' },
       ADA: { quantity: 10, source: 'summary' },
       DOT: { quantity: 0, source: 'summary' },
@@ -88,8 +89,8 @@ describe('parseRevolutStatement', () => {
     expect(statement.opening).toMatchObject({ SOL: 2, BTC: 0 })
     expect(statement.summary).toEqual({
       BTC: { opening: 0, out: 0.01, in: 0.03, closing: 0.02 },
-      ETH: { opening: 0, out: 0, in: 0.02, closing: 0.02 },
-      XRP: { opening: 0, out: 25, in: 100, closing: 75 },
+      ETH: { opening: 0, out: 0, in: 0.0199, closing: 0.0199 },
+      XRP: { opening: 0, out: 25, in: 102.5, closing: 77.5 },
       SOL: { opening: 2, out: 0, in: 0.1, closing: 2.1 },
       ADA: { opening: 0, out: 0, in: 10, closing: 10 },
       DOT: { opening: 0, out: 20, in: 20, closing: 0 },

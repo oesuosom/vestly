@@ -77,6 +77,12 @@ describe('preview', () => {
     expect(within(coinRow(coins, 'BTC')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['1', '—', '1', '1'])
     expect(within(coinRow(coins, 'ETH')).getAllByRole('cell').map((c) => c.textContent)).toEqual(['2', '—', '—', '—'])
 
+    // How Revolut charged the fees, worked out from Account summary's totals.
+    expect(screen.getByText('BTC: fee added on top for 1 buy')).toBeTruthy()
+    expect(screen.getByText('ETH: fee added on top for 1 buy')).toBeTruthy()
+    expect(screen.getByText('XRP: fee added on top for 1 sell')).toBeTruthy()
+    expect(screen.getByText('DOT: fee added on top for 1 buy and 1 sell')).toBeTruthy()
+
     fireEvent.click(screen.getByRole('button', { name: 'View warnings' }))
     expect(screen.getByText('Page 3, row 4')).toBeTruthy()
     expect(screen.getByText('Couldn’t read the quantity, so this row isn’t imported.')).toBeTruthy()
@@ -140,42 +146,38 @@ describe('holdings check and done', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
 
     expect(screen.getByText(/Revolut’s statement shows what you held on 31 Dec 2025\./).textContent)
-      .toContain('2 coins match it. These 4 don’t:')
+      .toContain('4 coins match it. These 2 don’t:')
     const xrp = screen.getByRole('rowheader', { name: 'XRP' }).closest('table')!
-    expect(within(xrp).getByText('A row couldn’t be read · Coins in 99 vs Revolut’s 100 · Coins out 25,5 vs Revolut’s 25 · Fees estimated from the statement')).toBeTruthy()
-    expect(within(xrp).getAllByRole('cell').map((c) => c.textContent).slice(1, 3)).toEqual(['73,5', '75'])
+    expect(within(xrp).getByText('A row couldn’t be read · Coins in 99 vs Revolut’s 102,5 · Couldn’t tell how fees were charged on 1 buy · Fees estimated from the statement')).toBeTruthy()
+    expect(within(xrp).getAllByRole('cell').map((c) => c.textContent).slice(1, 3)).toEqual(['74', '77,5'])
     const box = (label: RegExp) => screen.getByRole('checkbox', { name: label }) as HTMLInputElement
-    expect(box(/Adjust: add 1,5 XRP at 0 PLN/).checked).toBe(true)
+    expect(box(/Adjust: add 3,5 XRP at 0 PLN/).checked).toBe(true)
     expect(box(/Adjust: add 2,1 SOL at 0 PLN/).checked).toBe(true)
     expect(screen.getByText(/An adjustment is a 0 PLN row dated 31 Dec 2025/)).toBeTruthy()
 
     // Leave SOL as it is.
     fireEvent.click(box(/SOL/))
-    fireEvent.click(screen.getByRole('button', { name: 'Apply 3 changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 1 change' }))
 
     const adjustments = portfolio.transactions.filter((t) => t.externalId.startsWith('revolut-stmt-adjust-'))
-    expect(adjustments.map((t) => [t.ticker, t.type, t.quantity, t.amountPLN])).toEqual([
-      ['BTC', 'receive', 0.00025, 0],
-      ['ETH', 'receive', 0.0002, 0],
-      ['XRP', 'receive', 1.5, 0],
-    ])
+    expect(adjustments.map((t) => [t.ticker, t.type, t.quantity, t.amountPLN])).toEqual([['XRP', 'receive', 3.5, 0]])
     expect(adjustments.every((t) => holdingsCheckNote(t) === 'Adjustment to match Revolut statement')).toBe(true)
 
     // New coins became crypto holdings at the statement's closing amounts.
     const h = holdings()
     expect(Object.keys(h).sort()).toEqual(['ADA', 'BTC', 'ETH', 'XRP'])
-    expect([h.BTC.quantity, h.ETH.quantity, h.XRP.quantity, h.ADA.quantity]).toEqual([0.02, 0.02, 75, 10])
+    expect([h.BTC.quantity, h.ETH.quantity, h.XRP.quantity, h.ADA.quantity]).toEqual([0.02, 0.0199, 77.5, 10])
     expect(Object.values(h).every((x) => x.exchange === 'CC' && x.category === 'crypto')).toBe(true)
 
     expect(screen.getByText('Imported 10 transactions into Revolut Crypto')).toBeTruthy()
-    expect(screen.getByText(/5 of 6 coins match Revolut’s statement of 31 Dec 2025, with 3 adjustments; the others were left as they are\. 1 staking reward was left out\. 4 holdings created, 1 sold-out coin kept as closed position\./)).toBeTruthy()
+    expect(screen.getByText(/5 of 6 coins match Revolut’s statement of 31 Dec 2025, with 1 adjustment; the others were left as they are\. 1 staking reward was left out\. 4 holdings created, 1 sold-out coin kept as closed position\./)).toBeTruthy()
   })
 
   it('says so on the done screen when everything matches, and a re-import adds nothing', async () => {
     const first = renderFlow()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Apply 4 changes' }))
-    expect(screen.getByText(/All 6 coins match Revolut’s statement of 31 Dec 2025, with 4 adjustments\./)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 2 changes' }))
+    expect(screen.getByText(/All 6 coins match Revolut’s statement of 31 Dec 2025, with 2 adjustments\./)).toBeTruthy()
     const count = portfolio.transactions.length
     first.unmount()
 
@@ -194,8 +196,8 @@ describe('holdings check and done', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     expect(portfolio.transactions.some((t) => t.externalId.startsWith('revolut-stmt-adjust-'))).toBe(false)
-    expect(holdings().XRP.quantity).toBe(73.5)
-    expect(screen.getByText(/2 of 6 coins match/)).toBeTruthy()
+    expect(holdings().XRP.quantity).toBe(74)
+    expect(screen.getByText(/4 of 6 coins match/)).toBeTruthy()
   })
 })
 
@@ -203,7 +205,7 @@ describe('coins sold out during the statement', () => {
   it('are kept as closed holdings, so Activity shows their icon, and realized profit is unchanged', async () => {
     const view = renderFlow()
     fireEvent.click(await screen.findByRole('button', { name: 'Continue' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Apply 4 changes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 2 changes' }))
     const before = getRealizedPnL(portfolio.transactions)
 
     const account = portfolio.accounts[0]

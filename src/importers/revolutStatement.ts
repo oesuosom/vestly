@@ -87,6 +87,8 @@ export type RevolutStatement = {
   rows: StatementRow[]
   /** Staking rewards, which are counted but not imported, per coin. */
   staking: Record<string, number>
+  /** Coins the Transactions table's staking rows add up to, per coin (none from the Staking rewards section). */
+  stakingQuantity: Record<string, number>
   /**
    * Each coin's amount at the end of the period: Account summary's closing
    * value, else Portfolio breakdown's amount. A coin missing from a breakdown
@@ -349,6 +351,7 @@ export function parseRevolutStatement(pages: string[][]): RevolutStatement {
     period: null,
     rows: [],
     staking: {},
+    stakingQuantity: {},
     closing: {},
     opening: {},
     summary: {},
@@ -457,6 +460,7 @@ export function parseRevolutStatement(pages: string[][]): RevolutStatement {
       else if (parsed.kind === 'staking') {
         stakingInTable++
         result.staking[parsed.symbol] = (result.staking[parsed.symbol] ?? 0) + 1
+        result.stakingQuantity[parsed.symbol] = (result.stakingQuantity[parsed.symbol] ?? 0) + parsed.quantity
       } else result.warnings.push(parsed.warning)
     }
   })
@@ -479,7 +483,7 @@ export function parseRevolutStatement(pages: string[][]): RevolutStatement {
 
 type RowResult =
   | { kind: 'row'; row: StatementRow }
-  | { kind: 'staking'; symbol: string }
+  | { kind: 'staking'; symbol: string; quantity: number }
   | { kind: 'warning'; warning: StatementWarning }
 
 function readTransactionRow(text: string, time: RowTime | null, page: number, row: number): RowResult {
@@ -498,7 +502,7 @@ function readTransactionRow(text: string, time: RowTime | null, page: number, ro
   let i = 1
   while (i < tokens.length && /^[A-Za-z][A-Za-z-]*$/.test(tokens[i])) typeWords.push(tokens[i++])
   const typeText = typeWords.join(' ')
-  if (isStaking(typeText)) return { kind: 'staking', symbol }
+  if (isStaking(typeText)) return { kind: 'staking', symbol, quantity: parseStatementNumber(tokens[i] ?? '') ?? 0 }
 
   const type = TYPE_WORDS[typeText.toLowerCase()]
   const label = typeText || '?'

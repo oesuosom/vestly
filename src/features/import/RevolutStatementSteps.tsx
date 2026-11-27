@@ -11,7 +11,7 @@ import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { ChevronDownSmall, CircleCheck, CircleCross, Skip } from '@/generated/icons'
 import type { RevolutStatement } from '@/importers/revolutStatement'
-import { countByCoin, type PlannedRow, type StatementHoldingsCheck } from '@/importers/revolutStatementImport'
+import { countByCoin, feeMethodLines, type PlannedRow, type StatementHoldingsCheck } from '@/importers/revolutStatementImport'
 import { adjustLabel, parseCost, plural } from './revolutStatementText'
 import { transactionDay } from '@/domain/transactionDay'
 import { formatDate, formatQuantity } from '@/utils/formatters'
@@ -87,6 +87,7 @@ export function RevolutStatementPreview({
   const receives = fresh.filter((r) => r.type === 'receive')
   const invalidCost = receives.some((r) => parseCost(costs[r.id] ?? '') === null)
   const unchecked = [...new Set(rows.map((r) => r.symbol))].filter((s) => !statement.closing[s])
+  const feeLines = feeMethodLines(statement)
 
   return (
     <div className={IMPORT_CARD}>
@@ -155,6 +156,14 @@ export function RevolutStatementPreview({
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {feeLines.length > 0 && (
+          <div className="flex flex-col gap-1">
+            {feeLines.map((line) => (
+              <p key={line} className="text-xs leading-4 text-accent tabular-nums">{line}</p>
+            ))}
           </div>
         )}
 

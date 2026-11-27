@@ -16,18 +16,25 @@
  * Stored so that the position walk gives cost = buy Value and proceeds =
  * sell Value, with the fee as its own row (paired by `pairTradeFees`):
  *
- * | Type    | amountPLN       | fee row | quantity                           |
- * |---------|-----------------|---------|------------------------------------|
- * | buy     | −(Value − Fee)  | −Fee    | Quantity × (Value − Fee) ÷ Value    |
- * | sell    | Value + Fee     | −Fee    | Quantity × (Value + Fee) ÷ Value    |
- * | send    | 0               | —       | Quantity                           |
- * | receive | cost (Value)    | —       | Quantity                           |
+ * Revolut charges a trade's fee in one of two ways, and the row doesn't say
+ * which (see `revolutFeeMethod.ts`, which works it out per coin from Account
+ * summary's totals):
+ *
+ * | Type, fee method   | amountPLN       | fee row | quantity                           | cost / proceeds |
+ * |--------------------|-----------------|---------|------------------------------------|-----------------|
+ * | buy, taken out     | −(Value − Fee)  | −Fee    | Quantity × (Value − Fee) ÷ Value   | Value           |
+ * | buy, on top        | −Value          | −Fee    | Quantity                           | Value + Fee     |
+ * | sell, taken out    | Value + Fee     | −Fee    | Quantity × (Value + Fee) ÷ Value   | Value           |
+ * | sell, on top       | Value           | −Fee    | Quantity                           | Value − Fee     |
+ * | send               | 0               | —       | Quantity                           |                 |
+ * | receive            | cost (Value)    | —       | Quantity                           |                 |
  */
 import { v4 as uuidv4 } from 'uuid'
 import type { Account, Holding, Transaction } from '@/types'
 import { positionKey } from '@/domain/calculations'
 import { holdingPositionKey } from '@/domain/closePosition'
 import { lastClosedCycle, walkPosition } from '@/domain/position'
+import { byClue, coinsMoved, solveFeeMethods, type FeeMethod } from './revolutFeeMethod'
 import { pairTradeFees } from '@/domain/tradeFees'
 import { transactionDay } from '@/domain/transactionDay'
 import { formatQuantity } from '@/utils/formatters'
@@ -74,32 +81,96 @@ export type PlannedRow = StatementRow & {
   id: string
   /** Already in the log (an overlapping statement imported before). */
   duplicate: boolean
+  /** How the fee was charged, for a buy or sell. */
+  feeMethod?: FeeMethod
+}
+
+/** How a coin's buys or sells were found to be charged. */
+export type FeeSide = {
+  rows: number
+  /** Rows with the fee added on top. */
+  top: number
+  /**
+   * `matched`: the split makes the rows add up to Account summary's total.
+   * `guessed`: no split did, or there is no total; each row follows its clue.
+   */
+  status: 'matched' | 'guessed'
+}
+
+export type FeeMethods = {
+  /** Per statement row (same order as `statement.rows`); undefined for sends and receives. */
+  byRow: (FeeMethod | undefined)[]
+  coins: Record<string, { buys?: FeeSide; sells?: FeeSide }>
+}
+
+const feeMethodCache = new WeakMap<RevolutStatement, FeeMethods>()
+
+/**
+ * Which fee method each buy and sell used, per coin: the split whose coins,
+ * with the coin's receives (or sends), add up to Account summary's amount in
+ * (or out). When that fails and the coin had staking rewards, the total less
+ * the rewards is tried too (Revolut may count them as coins in).
+ */
+export function assignFeeMethods(statement: Pick<RevolutStatement, 'rows' | 'summary' | 'stakingQuantity'>): FeeMethods {
+  const cached = feeMethodCache.get(statement as RevolutStatement)
+  if (cached) return cached
+  const byRow: (FeeMethod | undefined)[] = statement.rows.map(() => undefined)
+  const coins: FeeMethods['coins'] = {}
+  for (const symbol of new Set(statement.rows.map((r) => r.symbol))) {
+    const summary = statement.summary[symbol]
+    const staking = statement.stakingQuantity?.[symbol] ?? 0
+    for (const type of ['buy', 'sell'] as const) {
+      const idx = statement.rows.flatMap((r, i) => (r.symbol === symbol && r.type === type ? [i] : []))
+      if (idx.length === 0) continue
+      const rows = idx.map((i) => statement.rows[i])
+      const fixed = statement.rows
+        .filter((r) => r.symbol === symbol && r.type === (type === 'buy' ? 'receive' : 'send'))
+        .reduce((t, r) => t + r.quantity, 0)
+      const totals = summary ? [type === 'buy' ? summary.in : summary.out] : []
+      if (summary && type === 'buy' && staking > 0) totals.push(summary.in - staking)
+      let methods = byClue(rows)
+      let matched = false
+      for (const total of totals) {
+        const solved = solveFeeMethods(type, rows, fixed, total)
+        if (solved.matched) {
+          methods = solved.methods
+          matched = true
+          break
+        }
+      }
+      idx.forEach((i, k) => { byRow[i] = methods[k] })
+      const side: FeeSide = { rows: rows.length, top: methods.filter((m) => m === 'top').length, status: matched ? 'matched' : 'guessed' }
+      coins[symbol] = { ...coins[symbol], [type === 'buy' ? 'buys' : 'sells']: side }
+    }
+  }
+  const result = { byRow, coins }
+  feeMethodCache.set(statement as RevolutStatement, result)
+  return result
 }
 
 /** Give every row its id, in statement order, and mark the ones already imported. */
 export function planStatementRows(statement: RevolutStatement, existingExternalIds: ReadonlySet<string>): PlannedRow[] {
   const seen = new Map<string, number>()
-  return statement.rows.map((row) => {
+  const { byRow } = assignFeeMethods(statement)
+  return statement.rows.map((row, i) => {
     const base = statementRowId(row, 0)
     const occurrence = (seen.get(base) ?? 0) + 1
     seen.set(base, occurrence)
     const id = statementRowId(row, occurrence)
-    return { ...row, id, duplicate: existingExternalIds.has(id) }
+    return { ...row, id, duplicate: existingExternalIds.has(id), ...(byRow[i] && { feeMethod: byRow[i] }) }
   })
 }
 
-/** Coins received, per buy/sell/fee rule above. */
-export function storedQuantity(row: Pick<StatementRow, 'type' | 'quantity' | 'value' | 'fee'>): number {
-  if (row.value <= 0) return row.quantity
-  if (row.type === 'buy') return round8((row.quantity * (row.value - row.fee)) / row.value)
-  if (row.type === 'sell') return round8((row.quantity * (row.value + row.fee)) / row.value)
+/** Coins the row moves, per the table above. Buys and sells default to the fee taken out. */
+export function storedQuantity(row: Pick<StatementRow, 'type' | 'quantity' | 'value' | 'fee'>, method: FeeMethod = 'out'): number {
+  if (row.type === 'buy' || row.type === 'sell') return coinsMoved(row.type, row, method)
   return row.quantity
 }
 
-export function storedAmount(row: Pick<StatementRow, 'type' | 'value' | 'fee'>, receiveCost?: number): number {
+export function storedAmount(row: Pick<StatementRow, 'type' | 'value' | 'fee'>, method: FeeMethod = 'out', receiveCost?: number): number {
   switch (row.type) {
-    case 'buy': return -round2(row.value - row.fee)
-    case 'sell': return round2(row.value + row.fee)
+    case 'buy': return method === 'top' ? -round2(row.value) : -round2(row.value - row.fee)
+    case 'sell': return method === 'top' ? round2(row.value) : round2(row.value + row.fee)
     case 'send': return 0
     case 'receive': return round2(receiveCost ?? row.value)
   }
@@ -129,8 +200,8 @@ export function buildStatementTransactions({
   for (const row of rows) {
     if (row.duplicate) continue
     const instrument = statement.names[row.symbol] ?? row.symbol
-    const quantity = storedQuantity(row)
-    const amountPLN = storedAmount(row, receiveCosts.get(row.id))
+    const quantity = storedQuantity(row, row.feeMethod)
+    const amountPLN = storedAmount(row, row.feeMethod, receiveCosts.get(row.id))
     const trade: Transaction = {
       id: uuidv4(),
       accountId,
@@ -229,17 +300,39 @@ export type StatementHoldingsCheck = {
  * coin, as stored (`storedQuantity`), against Account summary's amount in and
  * amount out. Undefined without a summary for the coin.
  */
-export function coinFlows(statement: Pick<RevolutStatement, 'rows' | 'summary'>, symbol: string): CoinFlows | undefined {
+export function coinFlows(statement: Pick<RevolutStatement, 'rows' | 'summary' | 'stakingQuantity'>, symbol: string): CoinFlows | undefined {
   const summary = statement.summary[symbol]
   if (!summary) return undefined
   let inQ = 0
   let outQ = 0
-  for (const r of statement.rows) {
-    if (r.symbol !== symbol) continue
-    if (r.type === 'buy' || r.type === 'receive') inQ += storedQuantity(r)
-    else outQ += storedQuantity(r)
-  }
+  const { byRow } = assignFeeMethods(statement)
+  statement.rows.forEach((r, i) => {
+    if (r.symbol !== symbol) return
+    if (r.type === 'buy' || r.type === 'receive') inQ += storedQuantity(r, byRow[i])
+    else outQ += storedQuantity(r, byRow[i])
+  })
   return { in: { vestly: round8(inQ), revolut: summary.in }, out: { vestly: round8(outQ), revolut: summary.out } }
+}
+
+/** "Couldn’t tell how fees were charged on 2 buys" for a side that didn't add up. */
+export function feeReasons(coin: { buys?: FeeSide; sells?: FeeSide } | undefined): string[] {
+  const out: string[] = []
+  for (const [side, noun] of [[coin?.buys, 'buy'], [coin?.sells, 'sell']] as const) {
+    if (side && side.status === 'guessed') out.push(`Couldn’t tell how fees were charged on ${side.rows} ${noun}${side.rows === 1 ? '' : 's'}`)
+  }
+  return out
+}
+
+/** "ETH: fee added on top for 18 buys" for each coin with such rows. */
+export function feeMethodLines(statement: RevolutStatement): string[] {
+  const lines: string[] = []
+  for (const [symbol, coin] of Object.entries(assignFeeMethods(statement).coins)) {
+    const parts: string[] = []
+    if (coin.buys?.top) parts.push(`${coin.buys.top} ${coin.buys.top === 1 ? 'buy' : 'buys'}`)
+    if (coin.sells?.top) parts.push(`${coin.sells.top} ${coin.sells.top === 1 ? 'sell' : 'sells'}`)
+    if (parts.length > 0) lines.push(`${symbol}: fee added on top for ${parts.join(' and ')}`)
+  }
+  return lines
 }
 
 /** "Coins in 0,0297 vs Revolut’s 0,03" for each of in and out that differs. */
@@ -312,6 +405,7 @@ export function checkStatementHoldings(
     if (statement.staking[symbol] && delta > 0) reasons.push('Staking rewards left out')
     if (unreadable.has(symbol)) reasons.push('A row couldn’t be read')
     reasons.push(...flowReasons(flow))
+    reasons.push(...feeReasons(assignFeeMethods(statement).coins[symbol]))
     if (traded) reasons.push('Fees estimated from the statement')
     if (reasons.length === 0) reasons.push('Not explained by the statement’s rows')
     differences.push({ symbol, name: statement.names[symbol] ?? symbol, vestly, revolut: closing.quantity, delta, reasons })

@@ -188,16 +188,23 @@ A sale already recorded with Close position takes the file's fee rows charged on
 
 **Times are local** (the owner checked them against the app). Each is converted to a real UTC instant with the browser's time zone and stored as such; rows count on their UTC day (`transactionDay`, #78), like XTB.
 
-**What the columns mean.** Quantity is Value ÷ Price, Value being the PLN paid (buy) or received (sell). The fee is taken in coins, so a buy brings fewer coins than Quantity and a sell removes more. Price is rounded to 2 decimals and the statement's fee is a grosz below the app's, so quantities are close, not exact; the holdings check closes the gap.
+**What the columns mean.** Quantity is Value ÷ Price. Price is rounded to 2 decimals, so amounts come from Value and Fee, never Price × Quantity. Revolut charges a trade's fee in one of two ways, and the row doesn't say which:
 
-| Type | `amountPLN` | fee row | `quantity` |
-|---|---|---|---|
-| `buy` | −(Value − Fee) | −Fee | Quantity × (Value − Fee) ÷ Value |
-| `sell` | Value + Fee | −Fee | Quantity × (Value + Fee) ÷ Value |
-| `send` | 0 | — | Quantity |
-| `receive` | its cost: the statement's Value, editable in the preview | — | Quantity |
+- **Fee taken out** (a trade entered as a PLN amount, "buy for 20 zł"): a buy pays Value and receives (Value − Fee) ÷ Value × Quantity coins; a sell receives Value and removes (Value + Fee) ÷ Value × Quantity.
+- **Fee on top** (a trade entered as a coin amount, "buy 0.02 ETH", "sell all"): a buy pays Value + Fee and receives exactly Quantity; a sell removes exactly Quantity and receives Value − Fee.
 
-So the position walk gives cost = buy Value and proceeds = sell Value. Fee rows carry the coin in `relatedInstrument`/`relatedTicker` (Activity shows it) and pair with their trade through the id. Sends and receives have `affectsCash: false`. Rows are `source: 'revolut_crypto'`.
+| Type, fee method | `amountPLN` | fee row | `quantity` | cost / proceeds in the walk |
+|---|---|---|---|---|
+| `buy`, taken out | −(Value − Fee) | −Fee | Quantity × (Value − Fee) ÷ Value | cost = Value |
+| `buy`, on top | −Value | −Fee | Quantity | cost = Value + Fee |
+| `sell`, taken out | Value + Fee | −Fee | Quantity × (Value + Fee) ÷ Value | proceeds = Value |
+| `sell`, on top | Value | −Fee | Quantity | proceeds = Value − Fee |
+| `send` | 0 | — | Quantity | |
+| `receive` | its cost: the statement's Value, editable in the preview | — | Quantity | |
+
+**How the import picks** ([`revolutFeeMethod.ts`](../src/importers/revolutFeeMethod.ts), `assignFeeMethods` in `revolutStatementImport.ts`). Fees depend on Revolut's plan, volume and date (percentage tiers, a PLN minimum, fair-usage fees), so no rate is assumed; only each row's own Fee is used. Per coin, the buys' methods are chosen so that their coins plus the receives add up to Account summary's amount in, and the sells' so that they plus the sends add up to its amount out. The tolerance is 1e-8 per row plus a grosz per row in coins (the statement's fee is a grosz below the one charged, which moves a fee-taken-out row's coins). Rows whose two candidates differ by the same amount are interchangeable, so they are grouped and only how many of each group had the fee on top is searched (a bounded depth-first search). When several splits fit, the round-number clue decides: a whole-PLN Value suggests the fee was taken out, a Quantity with at most 4 decimals that it was on top; with no clue, taken out. When the amount in doesn't fit and the coin had staking rewards in the Transactions table, the amount in less those rewards is tried too. When nothing fits, or Account summary has no amounts for the coin, each row follows its clue (taken out when it has none), the holdings check's adjustment closes the gap and its Why says "Couldn't tell how fees were charged on N buys". The preview lists, per coin, the rows found with the fee on top ("ETH: fee added on top for 18 buys"). Which method a row used doesn't change its id.
+
+Fee rows carry the coin in `relatedInstrument`/`relatedTicker` (Activity shows it) and pair with their trade through the id. Sends and receives have `affectsCash: false`. Rows are `source: 'revolut_crypto'`.
 
 **Ids.** `revolut-stmt-{coin}-{type}-{utcISO}-{quantity}-{n}`, the fee row's is the trade's plus `-fee` (`pairTradeFees` in [`tradeFees.ts`](../src/domain/tradeFees.ts)). There are no transaction ids in the statement; coin, type, time to the second and quantity are practically unique, and `{n}` (1, 2, …) counts identical rows within one statement so both import. Re-importing an overlapping period gives the same ids, so it adds nothing.
 

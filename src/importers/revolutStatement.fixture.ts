@@ -2,9 +2,13 @@
  * A made-up Revolut Crypto Account Statement, as the lines the PDF reader
  * yields per page. Round numbers only; nothing here comes from a real file.
  *
- * Coins: BTC (bought, sold, sent, received), ETH (bought), XRP (bought, sold,
- * one unreadable row), SOL (held before the period, staked), ADA (received;
- * matches the statement), DOT (bought and sold out during the period).
+ * Coins, and how Revolut charged their fees (see revolutFeeMethod.ts):
+ * - BTC: bought with the fee on top, sent, received; matches the statement.
+ * - ETH: two identical buys, one with the fee on top and one taken out.
+ * - XRP: a buy and a sell, plus a row the import can't read but Account summary
+ *   counts, so no split of fee methods adds up: it needs an adjustment.
+ * - SOL: held before the period, staked; needs an adjustment.
+ * - ADA: received; matches. DOT: bought and sold out, fees on top.
  *
  * Account summary has the three-line shape of the real file: opening and
  * closing above a coin's name line (either left out when 0), amount out and in
@@ -22,11 +26,11 @@ export const STATEMENT_PAGES: string[][] = [
     '0.02000000 BTC',
     'BTC Bitcoin 0.01000000 BTC 0.03000000 BTC',
     '0.00 PLN 4,000.00 PLN 12,000.00 PLN 8,000.00 PLN',
-    '0.02000000 ETH',
-    'ETH Ethereum 0 ETH 0.02000000 ETH',
+    '0.01990000 ETH',
+    'ETH Ethereum 0 ETH 0.01990000 ETH',
     '0.00 PLN 0.00 PLN 200.00 PLN 200.00 PLN',
-    '75.000000 XRP',
-    'XRP XRP 25.000000 XRP 100.000000 XRP',
+    '77.500000 XRP',
+    'XRP XRP 25.000000 XRP 102.500000 XRP',
     '0.00 PLN 50.00 PLN 200.00 PLN 150.00 PLN',
     '2.00000000 SOL 2.10000000 SOL',
     'SOL Solana 0 SOL 0.10000000 SOL',
@@ -39,8 +43,8 @@ export const STATEMENT_PAGES: string[][] = [
     'Portfolio breakdown',
     'Symbol Asset Amount Price Value % of portfolio',
     'BTC Bitcoin 0.02000000 400,000.00 PLN 8,000.00 PLN 86%',
-    'ETH Ethereum 0.02000000 10,000.00 PLN 200.00 PLN 2%',
-    'XRP XRP 75.00000000 2.00 PLN 150.00 PLN 2%',
+    'ETH Ethereum 0.01990000 10,000.00 PLN 199.00 PLN 2%',
+    'XRP XRP 77.50000000 2.00 PLN 155.00 PLN 2%',
     'SOL Solana 2.10000000 400.00 PLN 840.00 PLN 10%',
     'ADA Cardano 10.00000000 2.00 PLN 20.00 PLN 0%',
     'Page 1 of 3',

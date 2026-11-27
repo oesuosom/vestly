@@ -125,9 +125,9 @@ export function RevolutStatementFlow({
     const held = (c: string) => {
       const closing = statement.closing[c]
       if (closing) return closing.quantity > 0
-      const net = statement.rows
+      const net = rows
         .filter((r) => r.symbol === c)
-        .reduce((q, r) => q + (r.type === 'buy' || r.type === 'receive' ? 1 : -1) * storedQuantity(r), 0)
+        .reduce((q, r) => q + (r.type === 'buy' || r.type === 'receive' ? 1 : -1) * storedQuantity(r, r.feeMethod), 0)
       return net > 1e-8
     }
     return [...coins].filter((c) => held(c) && !getCoinGeckoId(c)).sort()
